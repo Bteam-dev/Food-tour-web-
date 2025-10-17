@@ -1,0 +1,91 @@
+package com.example.FoodTourApp.config.InitConfig;
+
+import com.example.FoodTourApp.entity.Role;
+import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.repository.RoleRepository;
+import com.example.FoodTourApp.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+
+@Component
+public class DataInitializer implements CommandLineRunner {
+
+    private static final Logger logger = LoggerFactory.getLogger(DataInitializer.class);
+    private final RoleRepository roleRepository;
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    public DataInitializer(RoleRepository roleRepository, UserRepository userRepository, PasswordEncoder passwordEncoder) {
+        this.roleRepository = roleRepository;
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        logger.info("Initializing roles and admin user...");
+
+        // Initialize roles
+        if (roleRepository.count() == 0) {
+            logger.info("No roles found, creating roles...");
+
+            Role adminRole = new Role();
+            adminRole.setRoleName(Role.RoleName.admin);
+            adminRole.setDescription("Administrator role");
+            adminRole.setCreatedAt(LocalDateTime.now());
+            roleRepository.save(adminRole);
+            logger.info("Created role: admin");
+
+            Role userRole = new Role();
+            userRole.setRoleName(Role.RoleName.user);
+            userRole.setDescription("User role");
+            userRole.setCreatedAt(LocalDateTime.now());
+            roleRepository.save(userRole);
+            logger.info("Created role: user");
+
+            Role sellerRole = new Role();
+            sellerRole.setRoleName(Role.RoleName.seller);
+            sellerRole.setDescription("Seller role");
+            sellerRole.setCreatedAt(LocalDateTime.now());
+            roleRepository.save(sellerRole);
+            logger.info("Created role: seller");
+
+            Role resellerRole = new Role();
+            resellerRole.setRoleName(Role.RoleName.reseller);
+            resellerRole.setDescription("Reseller role");
+            resellerRole.setCreatedAt(LocalDateTime.now());
+            roleRepository.save(resellerRole);
+            logger.info("Created role: reseller");
+        } else {
+            logger.info("Roles already exist, skipping role creation.");
+        }
+
+        // Initialize admin user
+        if (userRepository.findByEmail("admin@foodtourapp.com").isEmpty()) {
+            logger.info("No admin user found, creating admin user...");
+            User admin = new User();
+            admin.setUsername("admin");
+            admin.setEmail("admin@foodtourapp.com");
+            admin.setPasswordHash(passwordEncoder.encode("Admin123!"));
+            admin.setFullName("Admin User");
+            admin.setPhone("1234567890");
+            Role adminRole = roleRepository.findByRoleName(Role.RoleName.admin)
+                    .orElseThrow(() -> new IllegalStateException("Admin role not found"));
+            admin.setRole(adminRole);
+            admin.setIsActive(true);
+            admin.setEmailVerified(true);
+            admin.setCreatedAt(LocalDateTime.now());
+            admin.setUpdatedAt(LocalDateTime.now());
+            userRepository.save(admin);
+            logger.info("Created admin user with email: admin@foodtourapp.com");
+        } else {
+            logger.info("Admin user already exists, skipping admin user creation.");
+        }
+    }
+}
