@@ -2,6 +2,7 @@ package com.example.FoodTourApp.controller.UserController;
 
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalRequest;
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
+import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.SellerApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,8 +34,17 @@ public class UserSellerApprovalController {
     @PostMapping("/submit")
     public ResponseEntity<?> submitApproval(@Valid @RequestBody SellerApprovalRequest request,
                                             Authentication authentication) {
-        String userEmail = authentication.getName();
+        User user = (User) authentication.getPrincipal();
+        String userEmail = user.getEmail();
         logger.info("User {} is submitting seller approval request, authorities: {}", userEmail, authentication.getAuthorities());
+
+        if (userEmail == null || userEmail.trim().isEmpty()) {
+            logger.error("Invalid user email from authentication");
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Invalid user authentication");
+            return ResponseEntity.badRequest().body(error);
+        }
 
         try {
             // Kiểm tra nếu user đã là seller rồi
@@ -64,6 +74,12 @@ public class UserSellerApprovalController {
             error.put("success", false);
             error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
+        } catch (jakarta.persistence.EntityNotFoundException e) {
+            logger.error("User not found for email {}: {}", userEmail, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "User not found");
+            return ResponseEntity.badRequest().body(error);
         } catch (Exception e) {
             logger.error("Unexpected error during seller approval submission for user {}: {}", userEmail, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
@@ -80,8 +96,17 @@ public class UserSellerApprovalController {
             @RequestParam(defaultValue = "submittedAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
-        String userEmail = authentication.getName();
+        User user = (User) authentication.getPrincipal();
+        String userEmail = user.getEmail();
         logger.info("User {} is fetching their approval requests (page: {}, size: {})", userEmail, page, size);
+
+        if (userEmail == null || userEmail.trim().isEmpty()) {
+            logger.error("Invalid user email from authentication");
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Invalid user authentication");
+            return ResponseEntity.badRequest().body(error);
+        }
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
@@ -107,8 +132,17 @@ public class UserSellerApprovalController {
 
     @GetMapping("/{id}")
     public ResponseEntity<?> getApprovalById(@PathVariable Integer id, Authentication authentication) {
-        String userEmail = authentication.getName();
+        User user = (User) authentication.getPrincipal();
+        String userEmail = user.getEmail();
         logger.info("User {} is fetching approval request with id {}", userEmail, id);
+
+        if (userEmail == null || userEmail.trim().isEmpty()) {
+            logger.error("Invalid user email from authentication");
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Invalid user authentication");
+            return ResponseEntity.badRequest().body(error);
+        }
 
         try {
             SellerApprovalResponse response = sellerApprovalService.getApprovalById(id);
