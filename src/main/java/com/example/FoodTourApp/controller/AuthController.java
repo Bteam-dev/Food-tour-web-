@@ -6,7 +6,9 @@ import com.example.FoodTourApp.DTO.AuthDTO.Response.JwtToken;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.service.AuthService;
+import com.example.FoodTourApp.service.TokenBlacklistService;
 import com.example.FoodTourApp.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -25,6 +27,9 @@ import org.springframework.web.bind.annotation.*;
 import javax.validation.Valid;
 import org.slf4j.Logger;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,18 +44,22 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final UserService userService;
+    private final TokenBlacklistService tokenBlacklistService;
 
     public AuthController(AuthService authService,
                          AuthenticationManager authenticationManager,
-                         JwtUtils jwtUtils, UserService userService) {
+                         JwtUtils jwtUtils,
+                         UserService userService,
+                         TokenBlacklistService tokenBlacklistService) {
         this.authService = authService;
         this.authenticationManager = authenticationManager;
         this.jwtUtils = jwtUtils;
         this.userService = userService;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest, HttpServletResponse response) {
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
         try {
             // Xác thực email và password
             Authentication authentication = authenticationManager.authenticate(
@@ -83,16 +92,16 @@ public class AuthController {
             UserResponse userResponse = userService.getUserByEmail(userDetails.getUsername());
             Integer userId = userResponse.getId();
 
-            // Truyền userId, email và roles cho hàm tạo cookie JWT
-            ResponseCookie jwtCookie = jwtUtils.generateTokenCookie(userId, userDetails.getUsername(), roles);
-            response.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
+            // Tạo JWT token (không dùng cookie nữa, trả về trong response body)
+            String accessToken = jwtUtils.generateAccessToken(userId, userDetails.getUsername(), roles);
 
             // Tạo response đầy đủ thông tin
             Map<String, Object> responseBody = new HashMap<>();
             responseBody.put("success", true);
             responseBody.put("message", "Login successful");
             responseBody.put("user", userResponse);
-            responseBody.put("token", jwtCookie.getValue());
+            responseBody.put("accessToken", accessToken);
+            responseBody.put("tokenType", "Bearer");
 
             logger.info("Login successful for email: {}", loginRequest.getEmail());
             return ResponseEntity.ok(responseBody);
@@ -108,7 +117,7 @@ public class AuthController {
 
     // API xác thực 2FA
     @PostMapping("/verify-2fa")
-    public ResponseEntity<?> verify2FA(@RequestBody Map<String, String> request, HttpServletResponse response) {
+    public ResponseEntity<?> verify2FA(@RequestBody Map<String, String> request) {
         try {
             String email = request.get("email");
             String code = request.get("code");
@@ -141,15 +150,15 @@ public class AuthController {
             Integer userId = userResponse.getId();
 
             // Tạo JWT token
-            ResponseCookie jwtCookie = jwtUtils.generateTokenCookie(userId, email, roles);
-            response.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
+            String accessToken = jwtUtils.generateAccessToken(userId, email, roles);
 
             // Tạo response đầy đủ thông tin
             Map<String, Object> responseBody = new HashMap<>();
             responseBody.put("success", true);
             responseBody.put("message", "2FA verification successful");
             responseBody.put("user", userResponse);
-            responseBody.put("token", jwtCookie.getValue());
+            responseBody.put("accessToken", accessToken);
+            responseBody.put("tokenType", "Bearer");
 
             logger.info("2FA verification successful for email: {}", email);
             return ResponseEntity.ok(responseBody);
@@ -203,16 +212,48 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logoutUser(HttpServletResponse response) {
-        ResponseCookie cleanCookie = jwtUtils.getCleanJwtCookie();
-        response.addHeader(HttpHeaders.SET_COOKIE, cleanCookie.toString());
+    public ResponseEntity<?> logoutUser(HttpServletRequest request) {
+        try {
+            // Lấy token từ Authorization Header
+            String token = jwtUtils.getJwtFromHeader(request);
 
-        Map<String, Object> responseBody = new HashMap<>();
-        responseBody.put("success", true);
-        responseBody.put("message", "Logout successful");
+            if (token == null) {
+                // Fallback: thử lấy từ cookie nếu không có trong header
+                token = jwtUtils.getJwtFromCookies(request);
+            }
 
-        logger.info("User logged out successfully");
-        return ResponseEntity.ok(responseBody);
+            if (token != null && jwtUtils.validateToken(token)) {
+                // Lấy thông tin từ token
+                String email = jwtUtils.getUsernameFromToken(token);
+                Date expirationDate = jwtUtils.getExpirationDateFromToken(token);
+                LocalDateTime expiresAt = expirationDate.toInstant()
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDateTime();
+
+                // Thêm token vào blacklist
+                tokenBlacklistService.blacklistToken(token, email, expiresAt);
+
+                logger.info("User logged out successfully, token blacklisted for email: {}", email);
+
+                Map<String, Object> responseBody = new HashMap<>();
+                responseBody.put("success", true);
+                responseBody.put("message", "Logout successful. Token has been invalidated.");
+
+                return ResponseEntity.ok(responseBody);
+            } else {
+                Map<String, Object> responseBody = new HashMap<>();
+                responseBody.put("success", false);
+                responseBody.put("message", "No valid token found");
+
+                return ResponseEntity.badRequest().body(responseBody);
+            }
+        } catch (Exception e) {
+            logger.error("Logout failed. Error: {}", e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", "Logout failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
     }
 
     @PostMapping("/forgot-password")
@@ -294,4 +335,3 @@ public class AuthController {
         }
     }
 }
-

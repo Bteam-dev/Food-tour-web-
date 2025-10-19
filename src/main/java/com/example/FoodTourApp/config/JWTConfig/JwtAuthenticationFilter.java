@@ -1,5 +1,6 @@
 package com.example.FoodTourApp.config.JWTConfig;
 
+import com.example.FoodTourApp.service.TokenBlacklistService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,11 +23,13 @@ import java.util.stream.Collectors;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
+    private final TokenBlacklistService tokenBlacklistService;
 
     private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
-    public JwtAuthenticationFilter(JwtUtils jwtUtils) {
+    public JwtAuthenticationFilter(JwtUtils jwtUtils, TokenBlacklistService tokenBlacklistService) {
         this.jwtUtils = jwtUtils;
+        this.tokenBlacklistService = tokenBlacklistService;
     }
 
     @Override
@@ -35,38 +38,49 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         logger.info("JwtAuthenticationFilter doFilterInternal called for {}", request.getRequestURI());
 
         String token = null;
-        String header = request.getHeader("Authorization");
 
-        // Try to get token from Authorization header first
-        if (header != null && header.startsWith("Bearer ")) {
-            token = header.substring(7);
-        } else {
-            // If not in header, try to get from cookie
+        // Ưu tiên lấy token từ Authorization Header (nghiêm ngặt hơn)
+        token = jwtUtils.getJwtFromHeader(request);
+
+        // Fallback: Nếu không có trong header, thử lấy từ cookie (để tương thích với code cũ)
+        if (token == null) {
             token = jwtUtils.getJwtFromCookies(request);
         }
 
-        if (token != null && jwtUtils.validateToken(token)) {
-            String email = jwtUtils.getUsernameFromToken(token);
-            List<String> roles = jwtUtils.getRolesFromToken(token);
+        if (token != null) {
+            // Kiểm tra token có bị blacklist không (đã logout)
+            if (tokenBlacklistService.isTokenBlacklisted(token)) {
+                logger.warn("Token is blacklisted (user logged out), rejecting request to {}", request.getRequestURI());
+                chain.doFilter(request, response);
+                return;
+            }
 
-            if (email != null && roles != null && !roles.isEmpty()) {
-                // Convert roles to authorities
-                List<SimpleGrantedAuthority> authorities = roles.stream()
-                        .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
-                        .collect(Collectors.toList());
+            // Kiểm tra token có hợp lệ không
+            if (jwtUtils.validateToken(token)) {
+                String email = jwtUtils.getUsernameFromToken(token);
+                List<String> roles = jwtUtils.getRolesFromToken(token);
 
-                logger.info("Setting authentication for email: {}, roles: {}, authorities: {}",
-                           email, roles, authorities);
+                if (email != null && roles != null && !roles.isEmpty()) {
+                    // Convert roles to authorities
+                    List<SimpleGrantedAuthority> authorities = roles.stream()
+                            .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
+                            .collect(Collectors.toList());
 
-                UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                        email, null, authorities);
-                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(auth);
+                    logger.info("Setting authentication for email: {}, roles: {}, authorities: {}",
+                               email, roles, authorities);
+
+                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                            email, null, authorities);
+                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                } else {
+                    logger.warn("Email or roles are null/empty in token for request to {}", request.getRequestURI());
+                }
             } else {
-                logger.warn("Email or roles are null/empty in token for request to {}", request.getRequestURI());
+                logger.info("Invalid JWT token for request to {}", request.getRequestURI());
             }
         } else {
-            logger.info("No valid JWT token found in request to {}", request.getRequestURI());
+            logger.info("No JWT token found in request to {}", request.getRequestURI());
         }
 
         chain.doFilter(request, response);

@@ -18,8 +18,11 @@ public class JwtUtils {
     private final long REFRESH_TOKEN_EXPIRATION = 1000L * 60 * 60 * 24 * 7; // 7 days
     private final String JWT_COOKIE_NAME = "jwt";
 
-    public ResponseCookie generateTokenCookie(Integer userId, String username, List<String> roles) {
-        String token = Jwts.builder()
+    /**
+     * Tạo Access Token với userId, username và roles (truyền qua Header)
+     */
+    public String generateAccessToken(Integer userId, String username, List<String> roles) {
+        return Jwts.builder()
                 .subject(username)
                 .claim("userId", userId)
                 .claim("roles", roles)
@@ -27,7 +30,37 @@ public class JwtUtils {
                 .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION))
                 .signWith(key)
                 .compact();
+    }
 
+    /**
+     * Tạo Refresh Token
+     */
+    public String generateRefreshToken(String email) {
+        return Jwts.builder()
+                .subject(email)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION))
+                .signWith(key)
+                .compact();
+    }
+
+    /**
+     * Lấy JWT từ Authorization Header
+     */
+    public String getJwtFromHeader(jakarta.servlet.http.HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+
+    /**
+     * Deprecated: Dùng generateAccessToken thay thế
+     */
+    @Deprecated
+    public ResponseCookie generateTokenCookie(Integer userId, String username, List<String> roles) {
+        String token = generateAccessToken(userId, username, roles);
         return ResponseCookie.from(JWT_COOKIE_NAME, token)
                 .path("/")
                 .maxAge(24 * 60 * 60) // 24 hours
@@ -37,6 +70,7 @@ public class JwtUtils {
                 .build();
     }
 
+    @Deprecated
     public ResponseCookie getCleanJwtCookie() {
         return ResponseCookie.from(JWT_COOKIE_NAME, "")
                 .path("/")
@@ -75,6 +109,18 @@ public class JwtUtils {
         return claims.get("roles", List.class);
     }
 
+    /**
+     * Lấy thời gian hết hạn của token
+     */
+    public Date getExpirationDateFromToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        return claims.getExpiration();
+    }
+
     public boolean validateToken(String token) {
         try {
             Jwts.parser()
@@ -87,6 +133,7 @@ public class JwtUtils {
         }
     }
 
+    @Deprecated
     public String getJwtFromCookies(jakarta.servlet.http.HttpServletRequest request) {
         jakarta.servlet.http.Cookie[] cookies = request.getCookies();
         if (cookies != null) {
@@ -105,15 +152,6 @@ public class JwtUtils {
                 .claim("role", role)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION))
-                .signWith(key)
-                .compact();
-    }
-
-    public String generateRefreshToken(String email) {
-        return Jwts.builder()
-                .subject(email)
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION))
                 .signWith(key)
                 .compact();
     }
