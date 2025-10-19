@@ -5,6 +5,10 @@ import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
 import com.example.FoodTourApp.service.SellerApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -12,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -28,17 +31,26 @@ public class AdminSellerApprovalController {
     }
 
     @GetMapping("/pending")
-    public ResponseEntity<?> getAllPendingApprovals(Authentication authentication) {
+    public ResponseEntity<?> getAllPendingApprovals(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "submittedAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir,
+            Authentication authentication) {
         String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching all pending approval requests", adminEmail);
+        logger.info("Admin {} is fetching all pending approval requests (page: {}, size: {})", adminEmail, page, size);
 
         try {
-            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals();
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals(pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", approvals);
-            result.put("total", approvals.size());
+            result.put("data", approvals.getContent());
+            result.put("currentPage", approvals.getNumber());
+            result.put("totalItems", approvals.getTotalElements());
+            result.put("totalPages", approvals.getTotalPages());
 
             return ResponseEntity.ok(result);
         } catch (Exception e) {
@@ -121,17 +133,26 @@ public class AdminSellerApprovalController {
     }
 
     @GetMapping("/all")
-    public ResponseEntity<?> getAllApprovals(Authentication authentication) {
+    public ResponseEntity<?> getAllApprovals(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "submittedAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir,
+            Authentication authentication) {
         String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching all approval requests", adminEmail);
+        logger.info("Admin {} is fetching all approval requests (page: {}, size: {})", adminEmail, page, size);
 
         try {
-            // Có thể mở rộng service để lấy tất cả đơn (pending, approved, rejected)
-            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals();
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals(pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", approvals);
+            result.put("data", approvals.getContent());
+            result.put("currentPage", approvals.getNumber());
+            result.put("totalItems", approvals.getTotalElements());
+            result.put("totalPages", approvals.getTotalPages());
             result.put("message", "Currently showing pending approvals only. Can be extended to show all.");
 
             return ResponseEntity.ok(result);
@@ -145,18 +166,27 @@ public class AdminSellerApprovalController {
     }
 
     @GetMapping("/filter")
-    public ResponseEntity<?> getApprovalsByStatus(@RequestParam(defaultValue = "ALL") String status,
-                                                  Authentication authentication) {
+    public ResponseEntity<?> getApprovalsByStatus(
+            @RequestParam(defaultValue = "ALL") String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "submittedAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir,
+            Authentication authentication) {
         String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching approval requests with status: {}", adminEmail, status);
+        logger.info("Admin {} is fetching approval requests with status: {} (page: {}, size: {})", adminEmail, status, page, size);
 
         try {
-            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllApprovalsByStatus(status);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllApprovalsByStatus(status, pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", approvals);
-            result.put("total", approvals.size());
+            result.put("data", approvals.getContent());
+            result.put("currentPage", approvals.getNumber());
+            result.put("totalItems", approvals.getTotalElements());
+            result.put("totalPages", approvals.getTotalPages());
             result.put("filter", status);
 
             return ResponseEntity.ok(result);

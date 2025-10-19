@@ -5,6 +5,10 @@ import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
 import com.example.FoodTourApp.service.SellerApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -12,7 +16,6 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -71,16 +74,26 @@ public class UserSellerApprovalController {
     }
 
     @GetMapping("/my-approvals")
-    public ResponseEntity<?> getMyApprovals(Authentication authentication) {
+    public ResponseEntity<?> getMyApprovals(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "submittedAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir,
+            Authentication authentication) {
         String userEmail = authentication.getName();
-        logger.info("User {} is fetching their approval requests", userEmail);
+        logger.info("User {} is fetching their approval requests (page: {}, size: {})", userEmail, page, size);
 
         try {
-            List<SellerApprovalResponse> approvals = sellerApprovalService.getMyApprovals(userEmail);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getMyApprovals(userEmail, pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", approvals);
+            result.put("data", approvals.getContent());
+            result.put("currentPage", approvals.getNumber());
+            result.put("totalItems", approvals.getTotalElements());
+            result.put("totalPages", approvals.getTotalPages());
 
             return ResponseEntity.ok(result);
         } catch (Exception e) {

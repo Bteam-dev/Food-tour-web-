@@ -11,12 +11,12 @@ import com.example.FoodTourApp.repository.SellerApprovalRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.SellerApprovalService;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class SellerApprovalServiceImpl implements SellerApprovalService {
@@ -102,42 +102,36 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
     }
 
     @Override
-    public List<SellerApprovalResponse> getAllPendingApprovals() {
-        List<SellerApproval> approvals = sellerApprovalRepository.findByStatus(SellerApproval.ApprovalStatus.PENDING);
-        return approvals.stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+    public Page<SellerApprovalResponse> getAllPendingApprovals(Pageable pageable) {
+        Page<SellerApproval> approvals = sellerApprovalRepository.findByStatus(SellerApproval.ApprovalStatus.PENDING, pageable);
+        return approvals.map(this::mapToResponse);
     }
 
     @Override
-    public List<SellerApprovalResponse> getAllApprovalsByStatus(String status) {
-        List<SellerApproval> approvals;
+    public Page<SellerApprovalResponse> getAllApprovalsByStatus(String status, Pageable pageable) {
+        Page<SellerApproval> approvals;
 
         if ("ALL".equalsIgnoreCase(status)) {
-            approvals = sellerApprovalRepository.findAll();
+            approvals = sellerApprovalRepository.findAll(pageable);
         } else {
             try {
                 SellerApproval.ApprovalStatus approvalStatus = SellerApproval.ApprovalStatus.valueOf(status.toUpperCase());
-                approvals = sellerApprovalRepository.findByStatus(approvalStatus);
+                approvals = sellerApprovalRepository.findByStatus(approvalStatus, pageable);
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("Invalid status. Must be PENDING, APPROVED, REJECTED, or ALL");
             }
         }
 
-        return approvals.stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        return approvals.map(this::mapToResponse);
     }
 
     @Override
-    public List<SellerApprovalResponse> getMyApprovals(String userEmail) {
+    public Page<SellerApprovalResponse> getMyApprovals(String userEmail, Pageable pageable) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
-        List<SellerApproval> approvals = sellerApprovalRepository.findByUserId(user.getId());
-        return approvals.stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        Page<SellerApproval> approvals = sellerApprovalRepository.findByUserId(user.getId(), pageable);
+        return approvals.map(this::mapToResponse);
     }
 
     @Override

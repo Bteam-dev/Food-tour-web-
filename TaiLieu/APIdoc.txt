@@ -1,5 +1,9 @@
 # Food Tour Platform APIs
-
+Frontend phải:
+Lưu token sau khi login: localStorage.setItem('token', response.accessToken)
+Gửi kèm mỗi request: headers: { Authorization: 'Bearer ' + token }
+Xóa token khi logout: localStorage.removeItem('token')
+<hr></hr>
 ## 🌐 PUBLIC APIs (Không cần đăng nhập)
 
 ### Authentication & Registration
