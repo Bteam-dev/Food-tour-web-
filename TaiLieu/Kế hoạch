@@ -78,7 +78,7 @@ Hướng làm: Tìm kiếm name/description trong products/shops, trả kết qu
 
 GET /api/public/map/shops
 
-Công nghệ: Express, Sequelize (Shop, Address), Google Maps API.
+Công nghệ: Express, Sequelize (Shop, Address), GoongMap API.
 Hướng làm: Query shops với tọa độ, filter radius từ query lat/long.
 
 
@@ -1389,7 +1389,7 @@ Hướng làm: Verify, cập nhật order.
 
 POST /api/maps/geocoding
 
-Công nghệ: Express, Google Maps.
+Công nghệ: Express, Goong Map.
 Hướng làm: Geocode địa chỉ (duplicate public, nhưng shared).
 
 
@@ -1429,7 +1429,7 @@ Công nghệ chính (tóm tắt từ README.md)
 
 Backend: Node.js 18+, Express (API server), Socket.IO (realtime), JWT (auth), Multer (upload), Node-cron (tasks), Bull Queue (jobs).
 Database: MySQL 8.0+ (chính), Sequelize (ORM), Redis (cache/session), Elasticsearch (search).
-Third-party: Google Maps API (geocoding), VNPay/MoMo (payment), Nodemailer (email), Twilio (SMS), Firebase/Expo (push).
+Third-party: GoongMap API (geocoding), VNPay/MoMo (payment), Nodemailer (email), Twilio (SMS), Firebase/Expo (push).
 Infrastructure: Docker (container), AWS/GCP (cloud), CloudFlare (CDN), PM2 (process), Nginx (load balancer).
 Rate Limiting: 100 req/15p per IP (config/rateLimit.js).
 File Upload: Multer, limit 10MB, chỉ jpg/png/gif/webp (config/multer.js).
@@ -1438,6 +1438,6 @@ File Upload: Multer, limit 10MB, chỉ jpg/png/gif/webp (config/multer.js).
 Lưu ý triển khai
 
 Ưu tiên: Bắt đầu với Authentication (Phase 1) để có JWT và role-based access. Tiếp theo là Public APIs (Phase 2) để test dữ liệu cơ bản. User APIs (Phase 3) cho tính năng mua sắm, sau đó Seller (Phase 4) và Reseller (Phase 5). Admin APIs (Phase 6) làm sau cùng vì cần toàn bộ dữ liệu. Shared/Additional APIs (Phase 7) tích hợp cuối cho realtime và third-party.
-Môi trường: Cần setup MySQL, Redis, .env (DB, JWT, payment keys, Google Maps, v.v.) trước khi chạy.
+Môi trường: Cần setup MySQL, Redis, .env (DB, JWT, payment keys, GoongMap, v.v.) trước khi chạy.
 Realtime: WebSocket APIs (chat, notifications, orders) cần Socket.IO server riêng, chạy song song Express.
 Market Update (2025): Theo báo cáo thị trường VN, food delivery tăng trưởng mạnh, GrabFood/ShopeeFood dẫn đầu. Roadmap Q4 2024 có thể đã hoàn thành AI/blockchain, nhưng cần kiểm tra source code thực tế.

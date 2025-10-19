@@ -12,4 +12,5 @@ public interface AuthService {
     void verifyEmail(VerifyEmailRequest request);
     AuthResponse refreshToken(RefreshTokenRequest request);
     void validateResetToken(String token);
+    void logout(String token);
 }

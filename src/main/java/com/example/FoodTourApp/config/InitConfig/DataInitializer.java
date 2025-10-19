@@ -36,28 +36,28 @@ public class DataInitializer implements CommandLineRunner {
             logger.info("No roles found, creating roles...");
 
             Role adminRole = new Role();
-            adminRole.setRoleName(Role.RoleName.admin);
+            adminRole.setRoleName(Role.RoleName.ADMIN);
             adminRole.setDescription("Administrator role");
             adminRole.setCreatedAt(LocalDateTime.now());
             roleRepository.save(adminRole);
             logger.info("Created role: admin");
 
             Role userRole = new Role();
-            userRole.setRoleName(Role.RoleName.user);
+            userRole.setRoleName(Role.RoleName.USER);
             userRole.setDescription("User role");
             userRole.setCreatedAt(LocalDateTime.now());
             roleRepository.save(userRole);
             logger.info("Created role: user");
 
             Role sellerRole = new Role();
-            sellerRole.setRoleName(Role.RoleName.seller);
+            sellerRole.setRoleName(Role.RoleName.SELLER);
             sellerRole.setDescription("Seller role");
             sellerRole.setCreatedAt(LocalDateTime.now());
             roleRepository.save(sellerRole);
             logger.info("Created role: seller");
 
             Role resellerRole = new Role();
-            resellerRole.setRoleName(Role.RoleName.reseller);
+            resellerRole.setRoleName(Role.RoleName.RESELLER);
             resellerRole.setDescription("Reseller role");
             resellerRole.setCreatedAt(LocalDateTime.now());
             roleRepository.save(resellerRole);
@@ -75,7 +75,7 @@ public class DataInitializer implements CommandLineRunner {
             admin.setPasswordHash(passwordEncoder.encode("Admin123!"));
             admin.setFullName("Admin User");
             admin.setPhone("1234567890");
-            Role adminRole = roleRepository.findByRoleName(Role.RoleName.admin)
+            Role adminRole = roleRepository.findByRoleName(Role.RoleName.ADMIN)
                     .orElseThrow(() -> new IllegalStateException("Admin role not found"));
             admin.setRole(adminRole);
             admin.setIsActive(true);

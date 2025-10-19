@@ -4,7 +4,7 @@ package com.example.FoodTourApp.service.impl;
 import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
-import com.example.FoodTourApp.config.JWTConfig.JwtUtil;
+import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.RoleRepository;
@@ -13,26 +13,28 @@ import com.example.FoodTourApp.service.AuthService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.persistence.EntityNotFoundException;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 
 @Service
 public class AuthServiceImpl implements AuthService {
 
+    private static final Logger logger = LoggerFactory.getLogger(AuthServiceImpl.class);
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtUtil jwtUtil;
+    private final JwtUtils jwtUtil;
     private final JavaMailSender mailSender;
 
     public AuthServiceImpl(UserRepository userRepository, RoleRepository roleRepository,
-                           PasswordEncoder passwordEncoder, JwtUtil jwtUtil, JavaMailSender mailSender) {
+                           PasswordEncoder passwordEncoder, JwtUtils jwtUtil, JavaMailSender mailSender) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -60,7 +62,7 @@ public class AuthServiceImpl implements AuthService {
         user.setPhone(request.getPhone());
         user.setDateOfBirth(request.getDateOfBirth());
         user.setGender(request.getGender() != null ? User.Gender.valueOf(request.getGender()) : null);
-        Role userRole = roleRepository.findByRoleName(Role.RoleName.user)
+        Role userRole = roleRepository.findByRoleName(Role.RoleName.USER)
                 .orElseThrow(() -> new EntityNotFoundException("Role user not found"));
         user.setRole(userRole);
         user.setCreatedAt(LocalDateTime.now());
@@ -199,6 +201,14 @@ public class AuthServiceImpl implements AuthService {
         response.setAccessToken(accessToken);
         response.setRefreshToken(refreshToken);
         return response;
+    }
+
+    @Override
+    @Transactional
+    public void logout(String token) {
+        // Logout đơn giản - không cần blacklist token
+        // Client sẽ xóa token ở phía frontend
+        logger.info("User logged out successfully");
     }
 
     private void sendVerificationEmail(String email, String verifyLink) throws MessagingException {

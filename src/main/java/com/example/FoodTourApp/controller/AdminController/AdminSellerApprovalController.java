@@ -1,0 +1,177 @@
+package com.example.FoodTourApp.controller.AdminController;
+
+import com.example.FoodTourApp.DTO.SellerApprovalDTO.ReviewApprovalRequest;
+import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
+import com.example.FoodTourApp.service.SellerApprovalService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import javax.validation.Valid;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/admin/seller-approval")
+@PreAuthorize("hasRole('ADMIN')")
+public class AdminSellerApprovalController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AdminSellerApprovalController.class);
+    private final SellerApprovalService sellerApprovalService;
+
+    public AdminSellerApprovalController(SellerApprovalService sellerApprovalService) {
+        this.sellerApprovalService = sellerApprovalService;
+    }
+
+    @GetMapping("/pending")
+    public ResponseEntity<?> getAllPendingApprovals(Authentication authentication) {
+        String adminEmail = authentication.getName();
+        logger.info("Admin {} is fetching all pending approval requests", adminEmail);
+
+        try {
+            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals();
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", approvals);
+            result.put("total", approvals.size());
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching pending approvals: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch pending approval requests");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @PostMapping("/review/{id}")
+    public ResponseEntity<?> reviewApproval(@PathVariable Integer id,
+                                            @Valid @RequestBody ReviewApprovalRequest request,
+                                            Authentication authentication) {
+        String adminEmail = authentication.getName();
+        logger.info("Admin {} is reviewing approval request {}", adminEmail, id);
+
+        // Set the approvalId from path variable to ensure consistency
+        request.setApprovalId(id);
+
+        try {
+            // Kiểm tra admin có quyền admin không
+            boolean isAdmin = authentication.getAuthorities().stream()
+                    .anyMatch(auth -> auth.getAuthority().equals("ROLE_ADMIN"));
+
+            if (!isAdmin) {
+                logger.error("User {} attempted to review approval without admin role", adminEmail);
+                Map<String, Object> error = new HashMap<>();
+                error.put("success", false);
+                error.put("message", "Only admins can review approval requests");
+                return ResponseEntity.status(403).body(error);
+            }
+
+            SellerApprovalResponse response = sellerApprovalService.reviewApproval(adminEmail, request);
+            logger.info("Admin {} successfully reviewed approval request {} with status {}",
+                       adminEmail, request.getApprovalId(), request.getStatus());
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Approval request reviewed successfully");
+            result.put("data", response);
+
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            logger.error("Failed to review approval {}: {}", request.getApprovalId(), e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            logger.error("Unexpected error during approval review: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "An unexpected error occurred");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getApprovalById(@PathVariable Integer id, Authentication authentication) {
+        String adminEmail = authentication.getName();
+        logger.info("Admin {} is fetching approval request with id {}", adminEmail, id);
+
+        try {
+            SellerApprovalResponse response = sellerApprovalService.getApprovalById(id);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", response);
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching approval {}: {}", id, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    @GetMapping("/all")
+    public ResponseEntity<?> getAllApprovals(Authentication authentication) {
+        String adminEmail = authentication.getName();
+        logger.info("Admin {} is fetching all approval requests", adminEmail);
+
+        try {
+            // Có thể mở rộng service để lấy tất cả đơn (pending, approved, rejected)
+            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals();
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", approvals);
+            result.put("message", "Currently showing pending approvals only. Can be extended to show all.");
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching all approvals: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch approval requests");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @GetMapping("/filter")
+    public ResponseEntity<?> getApprovalsByStatus(@RequestParam(defaultValue = "ALL") String status,
+                                                  Authentication authentication) {
+        String adminEmail = authentication.getName();
+        logger.info("Admin {} is fetching approval requests with status: {}", adminEmail, status);
+
+        try {
+            List<SellerApprovalResponse> approvals = sellerApprovalService.getAllApprovalsByStatus(status);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", approvals);
+            result.put("total", approvals.size());
+            result.put("filter", status);
+
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid status filter '{}' requested by admin {}: {}", status, adminEmail, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            logger.error("Error fetching approvals with status {}: {}", status, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch approval requests");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+}

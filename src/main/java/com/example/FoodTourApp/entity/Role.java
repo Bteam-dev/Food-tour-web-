@@ -23,6 +23,6 @@ public class Role {
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public enum RoleName {
-        admin, user, seller, reseller
+        ADMIN, USER, SELLER, RESELLER
     }
 }
