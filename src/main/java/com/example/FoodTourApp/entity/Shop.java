@@ -40,10 +40,10 @@ public class Shop {
     @Column(name = "email", length = 100)
     private String email;
 
-    @Column(name = "business_license", length = 100)
+    @Column(name = "business_license", length = 100, nullable = false)
     private String businessLicense;
 
-    @Column(name = "tax_code", length = 50)
+    @Column(name = "tax_code", length = 50, nullable = false)
     private String taxCode;
 
     @JdbcTypeCode(SqlTypes.JSON)

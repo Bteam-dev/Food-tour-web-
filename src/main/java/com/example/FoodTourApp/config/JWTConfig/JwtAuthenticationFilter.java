@@ -1,5 +1,7 @@
 package com.example.FoodTourApp.config.JWTConfig;
 
+import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.TokenBlacklistService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -24,12 +26,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
     private final TokenBlacklistService tokenBlacklistService;
+    private final UserRepository userRepository;
 
     private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
-    public JwtAuthenticationFilter(JwtUtils jwtUtils, TokenBlacklistService tokenBlacklistService) {
+    public JwtAuthenticationFilter(JwtUtils jwtUtils, TokenBlacklistService tokenBlacklistService, UserRepository userRepository) {
         this.jwtUtils = jwtUtils;
         this.tokenBlacklistService = tokenBlacklistService;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -61,18 +65,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 List<String> roles = jwtUtils.getRolesFromToken(token);
 
                 if (email != null && roles != null && !roles.isEmpty()) {
-                    // Convert roles to authorities
-                    List<SimpleGrantedAuthority> authorities = roles.stream()
-                            .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
-                            .collect(Collectors.toList());
+                    // Load the actual User object from database
+                    User user = userRepository.findByEmail(email).orElse(null);
 
-                    logger.info("Setting authentication for email: {}, roles: {}, authorities: {}",
-                               email, roles, authorities);
+                    if (user != null) {
+                        // Convert roles to authorities
+                        List<SimpleGrantedAuthority> authorities = roles.stream()
+                                .map(role -> new SimpleGrantedAuthority(role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase()))
+                                .collect(Collectors.toList());
 
-                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                            email, null, authorities);
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+                        logger.info("Setting authentication for email: {}, roles: {}, authorities: {}",
+                                   email, roles, authorities);
+
+                        // Set the User object as principal instead of email String
+                        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                                user, null, authorities);
+                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    } else {
+                        logger.warn("User not found for email: {}", email);
+                    }
                 } else {
                     logger.warn("Email or roles are null/empty in token for request to {}", request.getRequestURI());
                 }
