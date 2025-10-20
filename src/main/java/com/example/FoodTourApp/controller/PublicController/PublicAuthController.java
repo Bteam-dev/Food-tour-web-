@@ -1,19 +1,15 @@
-package com.example.FoodTourApp.controller;
+package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
-import com.example.FoodTourApp.DTO.AuthDTO.Response.JwtToken;
-import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.service.AuthService;
 import com.example.FoodTourApp.service.TokenBlacklistService;
 import com.example.FoodTourApp.service.UserService;
+import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -35,18 +31,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Public Auth Controller - Các endpoint authentication không cần đăng nhập trước
+ */
 @RestController
 @RequestMapping("/api/auth")
-public class AuthController {
+public class PublicAuthController {
 
-    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+    private static final Logger logger = LoggerFactory.getLogger(PublicAuthController.class);
     private final AuthService authService;
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final UserService userService;
     private final TokenBlacklistService tokenBlacklistService;
 
-    public AuthController(AuthService authService,
+    public PublicAuthController(AuthService authService,
                          AuthenticationManager authenticationManager,
                          JwtUtils jwtUtils,
                          UserService userService,
@@ -335,3 +334,4 @@ public class AuthController {
         }
     }
 }
+

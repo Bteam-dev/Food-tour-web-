@@ -2,6 +2,7 @@ package com.example.FoodTourApp.service.impl;
 
 import com.example.FoodTourApp.DTO.ShopDTO.*;
 import com.example.FoodTourApp.entity.Address;
+import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.AddressRepository;
@@ -73,11 +74,24 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     @Transactional
-    public ShopResponseDTO updateShop(Integer shopId, UpdateShopRequestDTO request, User seller) {
-        log.info("Updating shop: {} by seller: {}", shopId, seller.getId());
+    public ShopResponseDTO updateShop(Integer shopId, UpdateShopRequestDTO request, User user) {
+        log.info("Updating shop: {} by user: {}", shopId, user.getId());
 
-        Shop shop = shopRepository.findBySellerAndId(seller, shopId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền chỉnh sửa"));
+        Shop shop;
+
+        // Kiểm tra nếu là Admin thì có quyền sửa tất cả shop
+        boolean isAdmin = user.getRole().getRoleName().equals(Role.RoleName.ADMIN);
+
+        if (isAdmin) {
+            // Admin có thể sửa bất kỳ shop nào
+            shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+            log.info("Admin updating shop: {}", shopId);
+        } else {
+            // Seller chỉ có thể sửa shop của mình
+            shop = shopRepository.findBySellerAndId(user, shopId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền chỉnh sửa"));
+        }
 
         // Cập nhật thông tin shop
         if (request.getShopName() != null) {
@@ -157,11 +171,24 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     @Transactional
-    public void deleteShop(Integer shopId, User seller) {
-        log.info("Deleting shop: {} by seller: {}", shopId, seller.getId());
+    public void deleteShop(Integer shopId, User user) {
+        log.info("Deleting shop: {} by user: {}", shopId, user.getId());
 
-        Shop shop = shopRepository.findBySellerAndId(seller, shopId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền xóa"));
+        Shop shop;
+
+        // Kiểm tra nếu là Admin thì có quyền xóa tất cả shop
+        boolean isAdmin = user.getRole().getRoleName().equals(Role.RoleName.ADMIN);
+
+        if (isAdmin) {
+            // Admin có thể xóa bất kỳ shop nào
+            shop = shopRepository.findById(shopId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+            log.info("Admin deleting shop: {}", shopId);
+        } else {
+            // Seller chỉ có thể xóa shop của mình
+            shop = shopRepository.findBySellerAndId(user, shopId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền xóa"));
+        }
 
         shop.setIsActive(false);
         shop.setUpdatedAt(LocalDateTime.now());

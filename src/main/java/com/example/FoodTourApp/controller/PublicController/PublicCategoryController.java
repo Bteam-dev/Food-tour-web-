@@ -1,74 +1,24 @@
-package com.example.FoodTourApp.controller;
+package com.example.FoodTourApp.controller.PublicController;
 
-import com.example.FoodTourApp.DTO.CategoryDTO.CreateCategoryRequestDTO;
 import com.example.FoodTourApp.DTO.CategoryDTO.CategoryResponseDTO;
-import com.example.FoodTourApp.DTO.CategoryDTO.UpdateCategoryRequestDTO;
 import com.example.FoodTourApp.service.CategoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import javax.validation.Valid;
 import java.util.List;
 
 /**
- * Controller cho quản lý Category
- * Chỉ Admin mới có quyền tạo/sửa/xóa
+ * Public Category Controller - Các endpoint xem category (không cần authentication)
  */
 @RestController
 @RequestMapping("/api/categories")
 @RequiredArgsConstructor
 @Slf4j
-public class CategoryController {
+public class PublicCategoryController {
 
     private final CategoryService categoryService;
-
-    /**
-     * Tạo danh mục mới (chỉ Admin)
-     * POST /api/categories
-     */
-    @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<CategoryResponseDTO> createCategory(
-            @Valid @RequestBody CreateCategoryRequestDTO request) {
-
-        log.info("Creating category: {}", request.getName());
-
-        CategoryResponseDTO response = categoryService.createCategory(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
-
-    /**
-     * Cập nhật danh mục (chỉ Admin)
-     * PUT /api/categories/{categoryId}
-     */
-    @PutMapping("/{categoryId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<CategoryResponseDTO> updateCategory(
-            @PathVariable Integer categoryId,
-            @Valid @RequestBody UpdateCategoryRequestDTO request) {
-
-        log.info("Updating category: {}", categoryId);
-
-        CategoryResponseDTO response = categoryService.updateCategory(categoryId, request);
-        return ResponseEntity.ok(response);
-    }
-
-    /**
-     * Xóa danh mục (chỉ Admin) - soft delete
-     * DELETE /api/categories/{categoryId}
-     */
-    @DeleteMapping("/{categoryId}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> deleteCategory(@PathVariable Integer categoryId) {
-        log.info("Deleting category: {}", categoryId);
-
-        categoryService.deleteCategory(categoryId);
-        return ResponseEntity.noContent().build();
-    }
 
     /**
      * Lấy chi tiết danh mục (public)
@@ -79,19 +29,6 @@ public class CategoryController {
         log.info("Getting category: {}", categoryId);
 
         CategoryResponseDTO response = categoryService.getCategoryById(categoryId);
-        return ResponseEntity.ok(response);
-    }
-
-    /**
-     * Lấy tất cả danh mục (kể cả inactive) - chỉ Admin
-     * GET /api/categories/all
-     */
-    @GetMapping("/all")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<List<CategoryResponseDTO>> getAllCategories() {
-        log.info("Getting all categories (admin)");
-
-        List<CategoryResponseDTO> response = categoryService.getAllCategories();
         return ResponseEntity.ok(response);
     }
 

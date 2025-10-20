@@ -36,32 +36,18 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints - không cần authentication
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/addresses/**").permitAll()
+                        .requestMatchers("/api/categories/**").permitAll()
+                        .requestMatchers("/api/shops/**").permitAll()
+                        .requestMatchers("/api/products/**").permitAll()
 
-                        // Category public endpoints
-                        .requestMatchers("/api/categories", "/api/categories/tree",
-                                "/api/categories/parents", "/api/categories/parent/**",
-                                "/api/categories/{id}").permitAll()
-
-                        // Shop public endpoints - xem thông tin shop
-                        .requestMatchers("/api/shops", "/api/shops/{id}").permitAll()
-
-                        // Address public endpoints - HERE API autocomplete/lookup
-                        .requestMatchers("/api/addresses/autocomplete",
-                                "/api/addresses/lookup", "/api/addresses/geocode").permitAll()
-
-                        // Product public endpoints (sẽ tạo sau)
-                        .requestMatchers("/api/products", "/api/products/{id}",
-                                "/api/products/category/**", "/api/products/search").permitAll()
-
-                        // Admin only endpoints
-                        .requestMatchers("/api/categories/all").hasRole("ADMIN")
+                        // Admin endpoints - ADMIN có thể truy cập tất cả
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
-                        // Seller only endpoints - quản lý shop và product
-                        .requestMatchers("/api/shops/my-shops").hasRole("SELLER")
-                        .requestMatchers("/api/products/my-products").hasRole("SELLER")
+                        // Seller endpoints - SELLER và ADMIN đều có thể truy cập
+                        .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
 
-                        // User endpoints
+                        // User endpoints - authenticated users (ADMIN cũng được)
                         .requestMatchers("/api/user/**").hasAnyRole("USER", "SELLER", "ADMIN")
 
                         // Các request còn lại cần authentication

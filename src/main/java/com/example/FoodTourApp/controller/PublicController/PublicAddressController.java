@@ -1,4 +1,4 @@
-package com.example.FoodTourApp.controller;
+package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.AddressDTO.AddressDetailDTO;
 import com.example.FoodTourApp.DTO.AddressDTO.AddressSuggestionDTO;
@@ -10,11 +10,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * Public Address Controller - Các endpoint địa chỉ public
+ */
 @RestController
 @RequestMapping("/api/addresses")
 @RequiredArgsConstructor
 @Slf4j
-public class AddressController {
+public class PublicAddressController {
 
     private final HereApiService hereApiService;
 
@@ -71,3 +74,4 @@ public class AddressController {
         return ResponseEntity.ok(detail);
     }
 }
+
