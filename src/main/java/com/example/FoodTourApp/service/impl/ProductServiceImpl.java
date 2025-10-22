@@ -11,6 +11,7 @@ import com.example.FoodTourApp.repository.CategoryRepository;
 import com.example.FoodTourApp.repository.ProductRepository;
 import com.example.FoodTourApp.repository.ProductVariantRepository;
 import com.example.FoodTourApp.repository.ShopRepository;
+import com.example.FoodTourApp.repository.VariantTypeRepository;
 import com.example.FoodTourApp.service.ProductService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductVariantRepository variantRepository;
     private final ShopRepository shopRepository;
     private final CategoryRepository categoryRepository;
+    private final VariantTypeRepository variantTypeRepository;
 
     @Override
     @Transactional
@@ -53,14 +55,28 @@ public class ProductServiceImpl implements ProductService {
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
         product.setDiscountPrice(request.getDiscountPrice());
-        product.setImageUrls(request.getImageUrls() != null ? String.join(",", request.getImageUrls()) : null);
+
+        // Fix: Xử lý imageUrls - chỉ set khi có giá trị
+        if (request.getImageUrls() != null && !request.getImageUrls().isEmpty()) {
+            product.setImageUrls(String.join(",", request.getImageUrls()));
+        } else {
+            product.setImageUrls(null);
+        }
+
         product.setIngredients(request.getIngredients());
         product.setNutritionInfo(request.getNutritionInfo());
         product.setPreparationTime(request.getPreparationTime());
         product.setStockQuantity(request.getStockQuantity());
         product.setMinOrderQuantity(request.getMinOrderQuantity());
         product.setMaxOrderQuantity(request.getMaxOrderQuantity());
-        product.setTags(request.getTags() != null ? String.join(",", request.getTags()) : null);
+
+        // Fix: Xử lý tags - chỉ set khi có giá trị
+        if (request.getTags() != null && !request.getTags().isEmpty()) {
+            product.setTags(String.join(",", request.getTags()));
+        } else {
+            product.setTags(null);
+        }
+
         product.setCreatedAt(LocalDateTime.now());
         product.setUpdatedAt(LocalDateTime.now());
 
@@ -68,9 +84,12 @@ public class ProductServiceImpl implements ProductService {
 
         if (request.getVariants() != null && !request.getVariants().isEmpty()) {
             for (CreateVariantRequestDTO varReq : request.getVariants()) {
+                VariantType variantType = variantTypeRepository.findById(varReq.getVariantTypeId())
+                        .orElseThrow(() -> new RuntimeException("Variant type not found"));
+
                 ProductVariant variant = new ProductVariant();
                 variant.setProduct(product);
-                variant.setVariantName(varReq.getVariantName());
+                variant.setVariantType(variantType);
                 variant.setVariantValue(varReq.getVariantValue());
                 variant.setPriceAdjustment(varReq.getPriceAdjustment());
                 variantRepository.save(variant);
@@ -99,7 +118,16 @@ public class ProductServiceImpl implements ProductService {
         if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (request.getPrice() != null) product.setPrice(request.getPrice());
         if (request.getDiscountPrice() != null) product.setDiscountPrice(request.getDiscountPrice());
-        if (request.getImageUrls() != null) product.setImageUrls(String.join(",", request.getImageUrls()));
+
+        // Fix: Xử lý imageUrls - chỉ set khi có giá trị
+        if (request.getImageUrls() != null) {
+            if (!request.getImageUrls().isEmpty()) {
+                product.setImageUrls(String.join(",", request.getImageUrls()));
+            } else {
+                product.setImageUrls(null);
+            }
+        }
+
         if (request.getIngredients() != null) product.setIngredients(request.getIngredients());
         if (request.getNutritionInfo() != null) product.setNutritionInfo(request.getNutritionInfo());
         if (request.getPreparationTime() != null) product.setPreparationTime(request.getPreparationTime());
@@ -107,7 +135,16 @@ public class ProductServiceImpl implements ProductService {
         if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
         if (request.getMinOrderQuantity() != null) product.setMinOrderQuantity(request.getMinOrderQuantity());
         if (request.getMaxOrderQuantity() != null) product.setMaxOrderQuantity(request.getMaxOrderQuantity());
-        if (request.getTags() != null) product.setTags(String.join(",", request.getTags()));
+
+        // Fix: Xử lý tags - chỉ set khi có giá trị
+        if (request.getTags() != null) {
+            if (!request.getTags().isEmpty()) {
+                product.setTags(String.join(",", request.getTags()));
+            } else {
+                product.setTags(null);
+            }
+        }
+
         if (request.getCategoryId() != null) {
             Category category = categoryRepository.findById(request.getCategoryId())
                     .orElseThrow(() -> new RuntimeException("Category not found"));
@@ -201,9 +238,12 @@ public class ProductServiceImpl implements ProductService {
             }
         }
 
+        VariantType variantType = variantTypeRepository.findById(request.getVariantTypeId())
+                .orElseThrow(() -> new RuntimeException("Variant type not found"));
+
         ProductVariant variant = new ProductVariant();
         variant.setProduct(product);
-        variant.setVariantName(request.getVariantName());
+        variant.setVariantType(variantType);
         variant.setVariantValue(request.getVariantValue());
         variant.setPriceAdjustment(request.getPriceAdjustment());
 
@@ -227,7 +267,11 @@ public class ProductServiceImpl implements ProductService {
             }
         }
 
-        if (request.getVariantName() != null) variant.setVariantName(request.getVariantName());
+        if (request.getVariantTypeId() != null) {
+            VariantType variantType = variantTypeRepository.findById(request.getVariantTypeId())
+                    .orElseThrow(() -> new RuntimeException("Variant type not found"));
+            variant.setVariantType(variantType);
+        }
         if (request.getVariantValue() != null) variant.setVariantValue(request.getVariantValue());
         if (request.getPriceAdjustment() != null) variant.setPriceAdjustment(request.getPriceAdjustment());
         if (request.getIsActive() != null) variant.setIsActive(request.getIsActive());
@@ -277,7 +321,14 @@ public class ProductServiceImpl implements ProductService {
         dto.setDescription(product.getDescription());
         dto.setPrice(product.getPrice());
         dto.setDiscountPrice(product.getDiscountPrice());
-        dto.setImageUrls(product.getImageUrls() != null ? List.of(product.getImageUrls().split(",")) : null);
+
+        // Fix: Xử lý imageUrls khi convert về List
+        if (product.getImageUrls() != null && !product.getImageUrls().isEmpty()) {
+            dto.setImageUrls(List.of(product.getImageUrls().split(",")));
+        } else {
+            dto.setImageUrls(null);
+        }
+
         dto.setIngredients(product.getIngredients());
         dto.setNutritionInfo(product.getNutritionInfo());
         dto.setPreparationTime(product.getPreparationTime());
@@ -287,7 +338,14 @@ public class ProductServiceImpl implements ProductService {
         dto.setMaxOrderQuantity(product.getMaxOrderQuantity());
         dto.setRating(product.getRating());
         dto.setTotalReviews(product.getTotalReviews());
-        dto.setTags(product.getTags() != null ? List.of(product.getTags().split(",")) : null);
+
+        // Fix: Xử lý tags khi convert về List
+        if (product.getTags() != null && !product.getTags().isEmpty()) {
+            dto.setTags(List.of(product.getTags().split(",")));
+        } else {
+            dto.setTags(null);
+        }
+
         dto.setCreatedAt(product.getCreatedAt());
         dto.setUpdatedAt(product.getUpdatedAt());
 
@@ -300,10 +358,12 @@ public class ProductServiceImpl implements ProductService {
     private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
         VariantResponseDTO dto = new VariantResponseDTO();
         dto.setId(variant.getId());
-        dto.setVariantName(variant.getVariantName());
+        dto.setVariantTypeId(variant.getVariantType().getId());
+        dto.setVariantTypeName(variant.getVariantType().getName());
         dto.setVariantValue(variant.getVariantValue());
         dto.setPriceAdjustment(variant.getPriceAdjustment());
         dto.setIsActive(variant.getIsActive());
         return dto;
     }
 }
+

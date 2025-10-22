@@ -49,7 +49,7 @@ public class UserSellerApprovalController {
         try {
             // Kiểm tra nếu user đã là seller rồi
             boolean isSeller = authentication.getAuthorities().stream()
-                    .anyMatch(auth -> auth.getAuthority().equals("ROLE_SELLER"));
+                    .anyMatch(auth -> auth.getAuthority().equals("SELLER"));
 
             if (isSeller) {
                 logger.error("User {} is already a seller", userEmail);

@@ -2,8 +2,6 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 
 @Entity
@@ -34,15 +32,13 @@ public class Product {
     @Column(name = "discount_price")
     private Double discountPrice;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "image_urls")
-    private String imageUrls; // JSON: ["url1", "url2", "url3"]
+    @Column(name = "image_urls", columnDefinition = "TEXT")
+    private String imageUrls; // Lưu dạng: "url1,url2,url3"
 
     @Column(name = "ingredients", columnDefinition = "TEXT")
     private String ingredients;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "nutrition_info")
+    @Column(name = "nutrition_info", columnDefinition = "TEXT")
     private String nutritionInfo;
 
     @Column(name = "preparation_time")
@@ -66,9 +62,8 @@ public class Product {
     @Column(name = "total_reviews")
     private Integer totalReviews = 0;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "tags")
-    private String tags; // JSON: ["spicy", "vegetarian", "bestseller"]
+    @Column(name = "tags", columnDefinition = "TEXT")
+    private String tags; // Lưu dạng: "spicy,vegetarian,bestseller"
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

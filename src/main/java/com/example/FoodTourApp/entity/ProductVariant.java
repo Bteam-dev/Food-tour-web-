@@ -15,11 +15,12 @@ public class ProductVariant {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
-    @Column(name = "variant_name", nullable = false, length = 100)
-    private String variantName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "variant_type_id", nullable = false)
+    private VariantType variantType; // Liên kết với VariantType (Topping, Size, ...)
 
     @Column(name = "variant_value", nullable = false, length = 100)
-    private String variantValue;
+    private String variantValue; // Giá trị cụ thể: "Phô mai", "Lớn", ...
 
     @Column(name = "price_adjustment", nullable = false)
     private Double priceAdjustment = 0.0;

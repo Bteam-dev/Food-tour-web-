@@ -7,11 +7,11 @@ import javax.validation.constraints.NotNull;
 
 @Data
 public class CreateVariantRequestDTO {
-    @NotBlank(message = "Variant name is required")
-    private String variantName;
+    @NotNull(message = "Variant type ID is required")
+    private Integer variantTypeId; // ID của loại biến thể (Topping, Size, ...)
 
     @NotBlank(message = "Variant value is required")
-    private String variantValue;
+    private String variantValue; // Giá trị cụ thể: "Phô mai", "Lớn", ...
 
     @NotNull(message = "Price adjustment is required")
     private Double priceAdjustment = 0.0;

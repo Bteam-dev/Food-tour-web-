@@ -40,15 +40,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/categories/**").permitAll()
                         .requestMatchers("/api/shops/**").permitAll()
                         .requestMatchers("/api/products/**").permitAll()
-
-                        // Admin endpoints - ADMIN có thể truy cập tất cả
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
-
-                        // Seller endpoints - SELLER và ADMIN đều có thể truy cập
+                        .requestMatchers("/api/variant-types/**").permitAll()
                         .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
-
-                        // User endpoints - authenticated users (ADMIN cũng được)
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/user/**").hasAnyRole("USER", "SELLER", "ADMIN")
+
 
                         // Các request còn lại cần authentication
                         .anyRequest().authenticated()

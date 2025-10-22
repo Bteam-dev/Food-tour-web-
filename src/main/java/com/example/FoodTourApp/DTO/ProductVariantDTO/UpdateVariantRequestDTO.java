@@ -4,8 +4,8 @@ import lombok.Data;
 
 @Data
 public class UpdateVariantRequestDTO {
-    private String variantName;
-    private String variantValue;
+    private Integer variantTypeId; // ID của loại biến thể
+    private String variantValue; // Giá trị cụ thể
     private Double priceAdjustment;
     private Boolean isActive;
 }

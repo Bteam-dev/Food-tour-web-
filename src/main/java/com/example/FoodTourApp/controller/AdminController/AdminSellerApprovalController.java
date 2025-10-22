@@ -75,7 +75,7 @@ public class AdminSellerApprovalController {
         try {
             // Kiểm tra admin có quyền admin không
             boolean isAdmin = authentication.getAuthorities().stream()
-                    .anyMatch(auth -> auth.getAuthority().equals("ROLE_ADMIN"));
+                    .anyMatch(auth -> auth.getAuthority().equals("ADMIN"));
 
             if (!isAdmin) {
                 logger.error("User {} attempted to review approval without admin role", adminEmail);

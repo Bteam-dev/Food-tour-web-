@@ -235,7 +235,7 @@ public class SellerProductController {
 
     // Endpoint mới để admin lấy tất cả sản phẩm (kể cả inactive)
     @GetMapping("/all")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> getAllProducts(@AuthenticationPrincipal User user) {
         logger.info("Admin {} is fetching all products", user.getEmail());
 
