@@ -10,14 +10,16 @@ import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ShopRepository;
+import com.example.FoodTourApp.service.FileStorageService;
 import com.example.FoodTourApp.service.ProductService;
-import org.apache.tomcat.util.net.openssl.ciphers.Authentication;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.util.HashMap;
@@ -33,18 +35,68 @@ public class SellerProductController {
     private static final Logger logger = LoggerFactory.getLogger(SellerProductController.class);
     private final ProductService productService;
     private final ShopRepository shopRepository;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
-    public SellerProductController(ProductService productService, ShopRepository shopRepository) {
+    public SellerProductController(ProductService productService, ShopRepository shopRepository,
+                                   FileStorageService fileStorageService, ObjectMapper objectMapper) {
         this.productService = productService;
         this.shopRepository = shopRepository;
+        this.fileStorageService = fileStorageService;
+        this.objectMapper = objectMapper;
     }
 
+    /**
+     * Tạo sản phẩm mới (có thể upload nhiều ảnh đồ ăn từ máy)
+     * POST /api/seller/products
+     *
+     * Cách sử dụng giống như đăng bài trên Facebook:
+     * - Nếu KHÔNG có ảnh: gửi application/json với data thông thường
+     * - Nếu CÓ ảnh: gửi multipart/form-data với data + nhiều file ảnh
+     *
+     * Form data (khi có ảnh):
+     * - data: JSON string (CreateProductRequestDTO)
+     * - images: multiple files (có thể chọn nhiều ảnh cùng lúc, jpg/jpeg/png, max 5MB each)
+     */
     @PostMapping
-    public ResponseEntity<?> createProduct(@Valid @RequestBody CreateProductRequestDTO request,
-                                           @AuthenticationPrincipal User user) {
-        logger.info("User {} is creating a product for shopId: {}", user.getEmail(), request.getShopId());
+    public ResponseEntity<?> createProduct(
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "images", required = false) MultipartFile[] images,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is creating a product", user.getEmail());
+        logger.info("Received dataJson: {}", dataJson);
+        logger.info("Received images count: {}", images != null ? images.length : 0);
+
+        if (images != null) {
+            for (int i = 0; i < images.length; i++) {
+                logger.info("Image[{}]: name={}, size={}, contentType={}",
+                    i, images[i].getOriginalFilename(), images[i].getSize(), images[i].getContentType());
+            }
+        }
 
         try {
+            // Parse request từ JSON string
+            if (dataJson == null || dataJson.isEmpty()) {
+                throw new RuntimeException("Thiếu dữ liệu sản phẩm");
+            }
+
+            CreateProductRequestDTO request = objectMapper.readValue(dataJson, CreateProductRequestDTO.class);
+
+            logger.info("Parsed request: name={}, shopId={}, categoryId={}",
+                request.getName(), request.getShopId(), request.getCategoryId());
+
+            // Upload nhiều ảnh nếu có (giống như chọn nhiều ảnh khi đăng bài Facebook)
+            if (images != null && images.length > 0) {
+                logger.info("Starting to upload {} images...", images.length);
+                List<String> imageUrls = fileStorageService.storeFiles(images, "products/" + user.getId());
+                request.setImageUrls(imageUrls);
+                logger.info("Uploaded {} images successfully. URLs: {}", imageUrls.size(), imageUrls);
+            } else {
+                logger.warn("No images received in request!");
+            }
+
+            // Lưu product vào database (đã có list URL ảnh nếu user đã upload)
             ProductResponseDTO response = productService.createProduct(request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -52,6 +104,7 @@ public class SellerProductController {
             result.put("message", "Product created successfully");
             result.put("data", response);
             return ResponseEntity.ok(result);
+
         } catch (Exception e) {
             logger.error("Error creating product for user {}: {}", user.getEmail(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
@@ -61,13 +114,39 @@ public class SellerProductController {
         }
     }
 
+    /**
+     * Cập nhật sản phẩm (có thể upload nhiều ảnh mới từ máy)
+     * PUT /api/seller/products/{id}
+     *
+     * Cách sử dụng giống như chỉnh sửa bài đăng trên Facebook:
+     * - Nếu KHÔNG đổi ảnh: gửi application/json với data thông thường
+     * - Nếu CÓ đổi ảnh: gửi multipart/form-data với data + file ảnh mới
+     */
     @PutMapping("/{id}")
-    public ResponseEntity<?> updateProduct(@PathVariable Integer id,
-                                           @Valid @RequestBody UpdateProductRequestDTO request,
-                                           @AuthenticationPrincipal User user) {
+    public ResponseEntity<?> updateProduct(
+            @PathVariable Integer id,
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "images", required = false) MultipartFile[] images,
+            @AuthenticationPrincipal User user) {
+
         logger.info("User {} is updating product {}", user.getEmail(), id);
 
         try {
+            // Parse request từ JSON string
+            if (dataJson == null || dataJson.isEmpty()) {
+                throw new RuntimeException("Thiếu dữ liệu cập nhật");
+            }
+
+            UpdateProductRequestDTO request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
+
+            // Upload nhiều ảnh mới nếu có (sẽ thay thế ảnh cũ)
+            if (images != null && images.length > 0) {
+                List<String> imageUrls = fileStorageService.storeFiles(images, "products/" + user.getId());
+                request.setImageUrls(imageUrls);
+                logger.info("Uploaded {} images for product {}", imageUrls.size(), id);
+            }
+
+            // Lưu cập nhật vào database
             ProductResponseDTO response = productService.updateProduct(id, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -75,6 +154,7 @@ public class SellerProductController {
             result.put("message", "Product updated successfully");
             result.put("data", response);
             return ResponseEntity.ok(result);
+
         } catch (Exception e) {
             logger.error("Error updating product {} for user {}: {}", id, user.getEmail(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
@@ -255,3 +335,4 @@ public class SellerProductController {
         }
     }
 }
+

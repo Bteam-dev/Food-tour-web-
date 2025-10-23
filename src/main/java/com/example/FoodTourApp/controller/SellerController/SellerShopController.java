@@ -4,8 +4,9 @@ import com.example.FoodTourApp.DTO.ShopDTO.CreateShopRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.UpdateShopRequestDTO;
 import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.service.FileStorageService;
 import com.example.FoodTourApp.service.ShopService;
-import javax.validation.Valid;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -28,59 +30,111 @@ import java.util.List;
 public class SellerShopController {
 
     private final ShopService shopService;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     /**
-     * Tạo cửa hàng mới (bao gồm địa chỉ)
+     * Tạo cửa hàng mới (có thể upload ảnh logo và banner từ máy)
      * POST /api/seller/shops
      *
-     * Flow:
-     * 1. Frontend gọi HERE API autocomplete để user chọn địa chỉ
-     * 2. Frontend gọi HERE API lookup để lấy đầy đủ thông tin địa chỉ
-     * 3. Frontend gửi request tạo shop kèm thông tin địa chỉ đã có
+     * Cách sử dụng giống như đăng bài trên Facebook:
+     * - Nếu KHÔNG có ảnh: gửi application/json với data thông thường
+     * - Nếu CÓ ảnh: gửi multipart/form-data với data (JSON string) + file logo/banner
      *
-     * Body mẫu:
-     * {
-     *   "shopName": "Quán Ăn Ngon",
-     *   "description": "Món ăn địa phương",
-     *   "phone": "0905123456",
-     *   "email": "quan@example.com",
-     *   "address": {
-     *     "addressLine": "123 Nguyễn Văn Linh",
-     *     "ward": "Hòa Xuân",
-     *     "district": "Cẩm Lệ",
-     *     "city": "Đà Nẵng",
-     *     "country": "Vietnam",
-     *     "postalCode": "550000",
-     *     "latitude": 16.0544,
-     *     "longitude": 108.2022
-     *   }
-     * }
+     * Form data (khi có ảnh):
+     * - data: JSON string (CreateShopRequestDTO)
+     * - logo: file (optional, jpg/jpeg/png, max 5MB)
+     * - banner: file (optional, jpg/jpeg/png, max 5MB)
      */
     @PostMapping
     public ResponseEntity<ShopResponseDTO> createShop(
-            @Valid @RequestBody CreateShopRequestDTO request,
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @RequestParam(value = "banner", required = false) MultipartFile banner,
             @AuthenticationPrincipal User seller) {
 
-        log.info("Creating shop: {} by seller: {}", request.getShopName(), seller.getId());
+        log.info("Creating shop by seller: {}", seller.getId());
 
-        ShopResponseDTO response = shopService.createShop(request, seller);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        try {
+            // Parse request từ JSON string
+            if (dataJson == null || dataJson.isEmpty()) {
+                throw new RuntimeException("Thiếu dữ liệu shop");
+            }
+
+            CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
+
+            // Upload logo nếu có (giống như chọn ảnh đại diện trên Facebook)
+            if (logo != null && !logo.isEmpty()) {
+                String logoUrl = fileStorageService.storeFile(logo, "shops/" + seller.getId());
+                request.setLogoUrl(logoUrl);
+                log.info("Logo uploaded: {}", logoUrl);
+            }
+
+            // Upload banner nếu có (giống như chọn ảnh bìa trên Facebook)
+            if (banner != null && !banner.isEmpty()) {
+                String bannerUrl = fileStorageService.storeFile(banner, "shops/" + seller.getId());
+                request.setBannerUrl(bannerUrl);
+                log.info("Banner uploaded: {}", bannerUrl);
+            }
+
+            // Lưu shop vào database (đã có URL ảnh nếu user đã upload)
+            ShopResponseDTO response = shopService.createShop(request, seller);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+
+        } catch (Exception e) {
+            log.error("Error creating shop: {}", e.getMessage(), e);
+            throw new RuntimeException("Không thể tạo cửa hàng: " + e.getMessage());
+        }
     }
 
     /**
-     * Cập nhật thông tin cửa hàng
+     * Cập nhật thông tin cửa hàng (có thể upload ảnh logo và banner mới từ máy)
      * PUT /api/seller/shops/{shopId}
+     *
+     * Cách sử dụng giống như đổi ảnh đại diện trên Facebook:
+     * - Nếu KHÔNG đổi ảnh: gửi application/json với data thông thường
+     * - Nếu CÓ đổi ảnh: gửi multipart/form-data với data + file logo/banner mới
      */
     @PutMapping("/{shopId}")
     public ResponseEntity<ShopResponseDTO> updateShop(
             @PathVariable Integer shopId,
-            @Valid @RequestBody UpdateShopRequestDTO request,
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @RequestParam(value = "banner", required = false) MultipartFile banner,
             @AuthenticationPrincipal User seller) {
 
         log.info("Updating shop: {} by seller: {}", shopId, seller.getId());
 
-        ShopResponseDTO response = shopService.updateShop(shopId, request, seller);
-        return ResponseEntity.ok(response);
+        try {
+            // Parse request từ JSON string
+            if (dataJson == null || dataJson.isEmpty()) {
+                throw new RuntimeException("Thiếu dữ liệu cập nhật");
+            }
+
+            UpdateShopRequestDTO request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
+
+            // Upload logo mới nếu có
+            if (logo != null && !logo.isEmpty()) {
+                String logoUrl = fileStorageService.storeFile(logo, "shops/" + seller.getId());
+                request.setLogoUrl(logoUrl);
+                log.info("Logo uploaded: {}", logoUrl);
+            }
+
+            // Upload banner mới nếu có
+            if (banner != null && !banner.isEmpty()) {
+                String bannerUrl = fileStorageService.storeFile(banner, "shops/" + seller.getId());
+                request.setBannerUrl(bannerUrl);
+                log.info("Banner uploaded: {}", bannerUrl);
+            }
+
+            // Lưu cập nhật vào database
+            ShopResponseDTO response = shopService.updateShop(shopId, request, seller);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Error updating shop: {}", e.getMessage(), e);
+            throw new RuntimeException("Không thể cập nhật cửa hàng: " + e.getMessage());
+        }
     }
 
     /**

@@ -41,6 +41,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/shops/**").permitAll()
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers("/api/variant-types/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll() // Allow public access to uploaded files
                         .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/user/**").hasAnyRole("USER", "SELLER", "ADMIN")

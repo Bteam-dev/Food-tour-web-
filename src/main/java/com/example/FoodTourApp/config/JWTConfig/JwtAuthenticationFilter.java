@@ -89,7 +89,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         // Convert roles to authorities
                         List<SimpleGrantedAuthority> authorities = roles.stream()
                                 .map(role -> {
-                                    String authority = role.toUpperCase();
+                                    String authority = "ROLE_" + role.toUpperCase();
                                     logger.info("Mapping role '{}' to authority '{}'", role, authority);
                                     return new SimpleGrantedAuthority(authority);
                                 })
