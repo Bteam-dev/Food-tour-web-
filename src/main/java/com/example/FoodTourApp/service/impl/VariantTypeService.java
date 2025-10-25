@@ -1,4 +1,4 @@
-package com.example.FoodTourApp.service;
+package com.example.FoodTourApp.service.impl;
 
 import com.example.FoodTourApp.DTO.VariantTypeDTO.VariantTypeRequestDTO;
 import com.example.FoodTourApp.DTO.VariantTypeDTO.VariantTypeResponseDTO;

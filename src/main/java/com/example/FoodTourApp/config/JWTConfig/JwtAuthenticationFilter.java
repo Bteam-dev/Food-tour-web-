@@ -2,7 +2,7 @@ package com.example.FoodTourApp.config.JWTConfig;
 
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.UserRepository;
-import com.example.FoodTourApp.service.TokenBlacklistService;
+import com.example.FoodTourApp.service.impl.TokenBlacklistService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

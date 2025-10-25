@@ -162,6 +162,32 @@ public class OrderServiceImpl implements OrderService {
         return orders.stream().map(this::mapToOrderResponseDTO).collect(Collectors.toList());
     }
 
+    @Override
+    @Transactional
+    public void deleteOrder(Integer orderId, User user) {
+        log.info("Deleting order: {} for user: {}", orderId, user.getId());
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!order.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("You do not have permission to delete this order");
+        }
+
+        if (order.getOrderStatus() != Order.OrderStatus.pending) {
+            throw new RuntimeException("Only orders with 'pending' status can be deleted");
+        }
+
+        order.setOrderStatus(Order.OrderStatus.cancelled);
+        order.setCancelledAt(LocalDateTime.now());
+        order.setCancelledBy(user);
+        order.setCancelledReason("Cancelled by user");
+        order.setUpdatedAt(LocalDateTime.now());
+
+        orderRepository.save(order);
+        log.info("Order deleted (soft delete) successfully: {}", orderId);
+    }
+
     private OrderResponseDTO mapToOrderResponseDTO(Order order) {
         OrderResponseDTO dto = new OrderResponseDTO();
         dto.setId(order.getId());

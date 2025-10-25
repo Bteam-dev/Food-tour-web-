@@ -1,7 +1,7 @@
 package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.VariantTypeDTO.VariantTypeResponseDTO;
-import com.example.FoodTourApp.service.VariantTypeService;
+import com.example.FoodTourApp.service.impl.VariantTypeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

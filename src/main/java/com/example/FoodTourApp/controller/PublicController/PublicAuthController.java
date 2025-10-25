@@ -4,7 +4,7 @@ import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.service.AuthService;
-import com.example.FoodTourApp.service.TokenBlacklistService;
+import com.example.FoodTourApp.service.impl.TokenBlacklistService;
 import com.example.FoodTourApp.service.UserService;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import jakarta.servlet.http.HttpServletRequest;

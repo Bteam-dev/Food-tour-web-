@@ -10,7 +10,7 @@ import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ShopRepository;
-import com.example.FoodTourApp.service.FileStorageService;
+import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.example.FoodTourApp.service.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -25,7 +25,6 @@ import javax.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/seller/products")
@@ -185,44 +184,6 @@ public class SellerProductController {
         }
     }
 
-    @GetMapping("/my-shop")
-    public ResponseEntity<?> getMyShopProducts(@PathVariable(required = false) Integer shopId,
-                                               @AuthenticationPrincipal User user) {
-        logger.info("User {} is fetching products for shopId: {}", user.getEmail(), shopId);
-
-        try {
-            List<Shop> shops;
-            if (shopId != null) {
-                Shop shop = shopRepository.findById(shopId)
-                        .orElseThrow(() -> new RuntimeException("Shop not found"));
-                if (!shop.getSeller().getId().equals(user.getId()) && !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                    throw new RuntimeException("You do not have permission to access this shop");
-                }
-                shops = List.of(shop);
-            } else {
-                shops = shopRepository.findBySeller(user);
-                if (shops.isEmpty() && !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                    throw new RuntimeException("No shop found for seller");
-                }
-            }
-
-            List<ProductResponseDTO> products = shops.stream()
-                    .flatMap(shop -> productService.getProductsByShop(shop).stream())
-                    .collect(Collectors.toList());
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", products);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching shop products for user {}: {}", user.getEmail(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
-        }
-    }
-
     @PostMapping("/{productId}/variants")
     public ResponseEntity<?> addVariant(@PathVariable Integer productId,
                                         @Valid @RequestBody CreateVariantRequestDTO request,
@@ -230,12 +191,23 @@ public class SellerProductController {
         logger.info("User {} is adding variant to product {}", user.getEmail(), productId);
 
         try {
-            VariantResponseDTO response = productService.addVariant(productId, request, user);
+            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép thêm variant
+            ProductResponseDTO product = productService.getProductById(productId);
+            Shop shop = shopRepository.findById(product.getShopId())
+                    .orElseThrow(() -> new RuntimeException("Shop not found"));
+
+            if (!shop.getSeller().getId().equals(user.getId()) &&
+                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
+                throw new RuntimeException("You do not have permission to add variant to this product");
+            }
+
+            // Thêm variant mới
+            VariantResponseDTO variantResponse = productService.addVariant(productId, request, user);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Variant added successfully");
-            result.put("data", response);
+            result.put("data", variantResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error adding variant to product {} for user {}: {}", productId, user.getEmail(), e.getMessage(), e);
@@ -246,22 +218,34 @@ public class SellerProductController {
         }
     }
 
-    @PutMapping("/variants/{variantId}")
-    public ResponseEntity<?> updateVariant(@PathVariable Integer variantId,
+    @PutMapping("/{productId}/variants/{variantId}")
+    public ResponseEntity<?> updateVariant(@PathVariable Integer productId,
+                                           @PathVariable Integer variantId,
                                            @Valid @RequestBody UpdateVariantRequestDTO request,
                                            @AuthenticationPrincipal User user) {
-        logger.info("User {} is updating variant {}", user.getEmail(), variantId);
+        logger.info("User {} is updating variant {} for product {}", user.getEmail(), variantId, productId);
 
         try {
-            VariantResponseDTO response = productService.updateVariant(variantId, request, user);
+            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép sửa variant
+            ProductResponseDTO product = productService.getProductById(productId);
+            Shop shop = shopRepository.findById(product.getShopId())
+                    .orElseThrow(() -> new RuntimeException("Shop not found"));
+
+            if (!shop.getSeller().getId().equals(user.getId()) &&
+                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
+                throw new RuntimeException("You do not have permission to update variant of this product");
+            }
+
+            // Cập nhật variant
+            VariantResponseDTO variantResponse = productService.updateVariant(variantId, request, user);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Variant updated successfully");
-            result.put("data", response);
+            result.put("data", variantResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error updating variant {} for user {}: {}", variantId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error updating variant {} for product {}: {}", variantId, productId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -269,12 +253,24 @@ public class SellerProductController {
         }
     }
 
-    @DeleteMapping("/variants/{variantId}")
-    public ResponseEntity<?> deleteVariant(@PathVariable Integer variantId,
+    @DeleteMapping("/{productId}/variants/{variantId}")
+    public ResponseEntity<?> deleteVariant(@PathVariable Integer productId,
+                                           @PathVariable Integer variantId,
                                            @AuthenticationPrincipal User user) {
-        logger.info("User {} is deleting variant {}", user.getEmail(), variantId);
+        logger.info("User {} is deleting variant {} from product {}", user.getEmail(), variantId, productId);
 
         try {
+            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép xóa variant
+            ProductResponseDTO product = productService.getProductById(productId);
+            Shop shop = shopRepository.findById(product.getShopId())
+                    .orElseThrow(() -> new RuntimeException("Shop not found"));
+
+            if (!shop.getSeller().getId().equals(user.getId()) &&
+                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
+                throw new RuntimeException("You do not have permission to delete variant from this product");
+            }
+
+            // Xóa variant
             productService.deleteVariant(variantId, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -282,30 +278,7 @@ public class SellerProductController {
             result.put("message", "Variant deleted successfully");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error deleting variant {} for user {}: {}", variantId, user.getEmail(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
-        }
-    }
-
-    @GetMapping("/my-shops")
-    public ResponseEntity<?> getMyShops(@AuthenticationPrincipal User user) {
-        logger.info("User {} is fetching their shops", user.getEmail());
-
-        try {
-            List<Shop> shops = shopRepository.findBySeller(user);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", shops.stream().map(shop -> new HashMap<String, Object>() {{
-                put("id", shop.getId());
-                put("shopName", shop.getShopName());
-            }}).collect(Collectors.toList()));
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching shops for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error deleting variant {} from product {}: {}", variantId, productId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

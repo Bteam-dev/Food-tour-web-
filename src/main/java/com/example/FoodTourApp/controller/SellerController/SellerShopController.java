@@ -4,7 +4,7 @@ import com.example.FoodTourApp.DTO.ShopDTO.CreateShopRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.UpdateShopRequestDTO;
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.service.FileStorageService;
+import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.example.FoodTourApp.service.ShopService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

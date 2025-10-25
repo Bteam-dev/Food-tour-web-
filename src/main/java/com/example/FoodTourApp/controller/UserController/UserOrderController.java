@@ -60,4 +60,22 @@ public class UserOrderController {
             return ResponseEntity.badRequest().body(error);
         }
     }
+
+    @DeleteMapping("/{orderId}")
+    public ResponseEntity<?> deleteOrder(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
+        logger.info("User {} is deleting order: {}", user.getEmail(), orderId);
+        try {
+            orderService.deleteOrder(orderId, user);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Order deleted successfully");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error deleting order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
 }

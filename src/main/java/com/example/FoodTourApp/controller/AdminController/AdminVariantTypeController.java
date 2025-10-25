@@ -2,7 +2,7 @@ package com.example.FoodTourApp.controller.AdminController;
 
 import com.example.FoodTourApp.DTO.VariantTypeDTO.VariantTypeRequestDTO;
 import com.example.FoodTourApp.DTO.VariantTypeDTO.VariantTypeResponseDTO;
-import com.example.FoodTourApp.service.VariantTypeService;
+import com.example.FoodTourApp.service.impl.VariantTypeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
