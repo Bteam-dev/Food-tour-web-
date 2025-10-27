@@ -9,6 +9,7 @@ import com.example.FoodTourApp.DTO.ShopDTO.AddressResponseDTO;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.OrderService;
+import com.example.FoodTourApp.service.WalletService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -32,12 +33,14 @@ public class OrderServiceImpl implements OrderService {
     private final AddressRepository addressRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
+    private final WalletService walletService;
     private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
     public OrderResponseDTO createOrder(CreateOrderRequestDTO request, User user) {
-        log.info("Creating order for user: {}, cartItemIds: {}", user.getId(), request.getCartItemIds());
+        log.info("Creating order for user: {}, cartItemIds: {}, paymentMethod: {}",
+                user.getId(), request.getCartItemIds(), request.getPaymentMethod());
 
         // Kiểm tra cartItemIds
         List<CartItem> cartItems = cartItemRepository.findAllById(request.getCartItemIds()).stream()
@@ -147,10 +150,60 @@ public class OrderServiceImpl implements OrderService {
             orderItemRepository.save(orderItem);
         }
 
+        // ===== KHÔNG THANH TOÁN NGAY - CHỈ TẠO ĐƠN HÀNG =====
+        // Đơn hàng sẽ ở trạng thái pending cho đến khi user gọi API thanh toán
+        log.info("Order created with pending payment status. User can pay later.");
+
         // Xóa các CartItem được chọn
         cartItemRepository.deleteAll(cartItems);
 
-        log.info("Order created successfully: orderId: {}", order.getId());
+        log.info("Order created successfully: orderId: {}, paymentStatus: {}",
+                order.getId(), order.getPaymentStatus());
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO payOrder(Integer orderId, User user) {
+        log.info("User {} is paying for order {}", user.getId(), orderId);
+
+        // Lấy đơn hàng
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu
+        if (!order.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Bạn không có quyền thanh toán đơn hàng này");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getPaymentStatus() == Order.PaymentStatus.paid) {
+            throw new RuntimeException("Đơn hàng đã được thanh toán rồi");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Không thể thanh toán đơn hàng đã hủy");
+        }
+
+        // Xử lý thanh toán theo phương thức
+        if (order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
+            try {
+                log.info("Processing wallet payment for order {}", order.getId());
+                walletService.processOrderPayment(order);
+                orderRepository.save(order);
+                log.info("Wallet payment successful for order {}", order.getId());
+            } catch (Exception e) {
+                log.error("Wallet payment failed for order {}: {}", order.getId(), e.getMessage());
+                throw new RuntimeException("Thanh toán thất bại: " + e.getMessage());
+            }
+        } else if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod) {
+            // COD không cần thanh toán ngay, chỉ cập nhật trạng thái
+            log.info("Order {} is COD, no immediate payment required", order.getId());
+            throw new RuntimeException("Đơn hàng COD sẽ thanh toán khi nhận hàng");
+        } else {
+            throw new RuntimeException("Phương thức thanh toán không được hỗ trợ");
+        }
+
         return mapToOrderResponseDTO(order);
     }
 
@@ -160,6 +213,20 @@ public class OrderServiceImpl implements OrderService {
 
         List<Order> orders = orderRepository.findByUser(user);
         return orders.stream().map(this::mapToOrderResponseDTO).collect(Collectors.toList());
+    }
+
+    @Override
+    public OrderResponseDTO getOrderById(Integer orderId, User user) {
+        log.info("Getting order {} for user: {}", orderId, user.getId());
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!order.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("You do not have permission to view this order");
+        }
+
+        return mapToOrderResponseDTO(order);
     }
 
     @Override
@@ -176,6 +243,18 @@ public class OrderServiceImpl implements OrderService {
 
         if (order.getOrderStatus() != Order.OrderStatus.pending) {
             throw new RuntimeException("Only orders with 'pending' status can be deleted");
+        }
+
+        // Hoàn tiền nếu đơn hàng đã thanh toán qua ví
+        if (order.getPaymentMethod() == Order.PaymentMethod.app_wallet
+                && order.getPaymentStatus() == Order.PaymentStatus.paid) {
+            try {
+                log.info("Refunding wallet payment for cancelled order {}", orderId);
+                walletService.refundOrder(order);
+            } catch (Exception e) {
+                log.error("Failed to refund order {}: {}", orderId, e.getMessage());
+                throw new RuntimeException("Không thể hoàn tiền: " + e.getMessage());
+            }
         }
 
         order.setOrderStatus(Order.OrderStatus.cancelled);

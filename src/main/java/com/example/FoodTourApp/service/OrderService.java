@@ -11,5 +11,7 @@ public interface OrderService {
 
     OrderResponseDTO createOrder(CreateOrderRequestDTO request, User user);
     List<OrderResponseDTO> getUserOrders(User user);
+    OrderResponseDTO getOrderById(Integer orderId, User user);
     void deleteOrder(Integer orderId, User user);
+    OrderResponseDTO payOrder(Integer orderId, User user);
 }

@@ -88,6 +88,6 @@ public class Order {
     }
 
     public enum PaymentMethod {
-        cash, card, e_wallet, bank_transfer
+        app_wallet, ship_cod, cash, card, e_wallet, bank_transfer
     }
 }

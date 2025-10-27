@@ -43,6 +43,29 @@ public class UserOrderController {
         }
     }
 
+    /**
+     * Thanh toán đơn hàng đã tạo
+     * POST /api/user/orders/{orderId}/pay
+     */
+    @PostMapping("/{orderId}/pay")
+    public ResponseEntity<?> payOrder(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
+        logger.info("User {} is paying for order {}", user.getEmail(), orderId);
+        try {
+            OrderResponseDTO order = orderService.payOrder(orderId, user);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Thanh toán thành công");
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error paying order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
     @GetMapping
     public ResponseEntity<?> getUserOrders(@AuthenticationPrincipal User user) {
         logger.info("User {} is getting orders", user.getEmail());
@@ -54,6 +77,24 @@ public class UserOrderController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error getting orders for user {}: {}", user.getEmail(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    @GetMapping("/{orderId}")
+    public ResponseEntity<?> getOrderById(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
+        logger.info("User {} is getting order {}", user.getEmail(), orderId);
+        try {
+            OrderResponseDTO order = orderService.getOrderById(orderId, user);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error getting order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

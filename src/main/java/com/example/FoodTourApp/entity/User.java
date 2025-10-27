@@ -48,6 +48,9 @@ public class User {
     @Column(name = "email_verified", nullable = false)
     private Boolean emailVerified = false;
 
+    @Column(name = "wallet_balance", nullable = false)
+    private Double walletBalance = 0.0;
+
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
 
