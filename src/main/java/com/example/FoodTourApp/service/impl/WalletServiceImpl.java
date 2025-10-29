@@ -14,8 +14,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,38 +29,150 @@ public class WalletServiceImpl implements WalletService {
 
     private final UserRepository userRepository;
     private final WalletTransactionRepository walletTransactionRepository;
+    private final PayPalPaymentService payPalService;
+    private final VNPayPaymentService vnPayService;
+    private final MoMoPaymentService moMoService;
+    private final ZaloPayPaymentService zaloPayService;
+
 
     @Override
     @Transactional
-    public WalletResponseDTO deposit(DepositRequestDTO request, User user) {
-        log.info("User {} is depositing {} to wallet", user.getId(), request.getAmount());
+    public WalletResponseDTO initiateDeposit(DepositRequestDTO request, User user) {
+        log.info("User {} initiating deposit of {} via {}", user.getId(), request.getAmount(), request.getPaymentMethod());
 
-        // Lấy user mới nhất từ DB
         User dbUser = userRepository.findById(user.getId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        Double balanceBefore = dbUser.getWalletBalance();
-        Double balanceAfter = balanceBefore + request.getAmount();
+        // Tạo transaction pending
+        WalletTransaction pendingTransaction = new WalletTransaction();
+        pendingTransaction.setUser(dbUser);
+        pendingTransaction.setTransactionType(WalletTransaction.TransactionType.deposit);
+        pendingTransaction.setAmount(request.getAmount());
+        pendingTransaction.setBalanceBefore(dbUser.getWalletBalance());
+        // Use BigDecimal add instead of primitive +
+        pendingTransaction.setBalanceAfter(dbUser.getWalletBalance().add(request.getAmount()));
+        pendingTransaction.setDescription(request.getDescription() != null ? request.getDescription() : "Nạp tiền qua " + request.getPaymentMethod());
+        pendingTransaction.setCreatedAt(LocalDateTime.now());
+        pendingTransaction.setStatus(WalletTransaction.TransactionStatus.PENDING);
+        String externalOrderId = UUID.randomUUID().toString();
+        pendingTransaction.setExternalOrderId(externalOrderId);
+        walletTransactionRepository.save(pendingTransaction);
 
-        // Cập nhật số dư
+        String paymentUrl;
+        try {
+            paymentUrl = switch (request.getPaymentMethod().toLowerCase()) {
+                case "paypal" -> payPalService.createPaymentUrl(request.getAmount(), "VND", externalOrderId, "Deposit to wallet");
+                case "vnpay" -> vnPayService.createPaymentUrl(request.getAmount(), externalOrderId, "Deposit to wallet");
+                case "momo" -> moMoService.createPaymentUrl(request.getAmount(), externalOrderId, "Deposit to wallet");
+                case "zalopay" -> zaloPayService.createPaymentUrl(request.getAmount(), externalOrderId, "Deposit to wallet");
+                default -> throw new RuntimeException("Unsupported payment method: " + request.getPaymentMethod());
+            };
+        } catch (Exception e) {
+            pendingTransaction.setStatus(WalletTransaction.TransactionStatus.FAILED);
+            walletTransactionRepository.save(pendingTransaction);
+            throw new RuntimeException("Failed to generate payment URL: " + e.getMessage());
+        }
+
+        log.info("Generated payment URL for user {}: {}", user.getId(), paymentUrl);
+
+        // Trả về DTO có paymentUrl
+        WalletResponseDTO response = new WalletResponseDTO();
+        response.setUserId(dbUser.getId());
+        response.setFullName(dbUser.getFullName());
+        response.setBalance(dbUser.getWalletBalance());
+        response.setPaymentUrl(paymentUrl);
+        response.setMessage("Yêu cầu nạp tiền đã được khởi tạo. Vui lòng thanh toán tại liên kết bên dưới.");
+        return response;
+    }
+
+    @Transactional
+    public void handlePaymentCallback(String paymentMethod, Map<String, String> params, User user) {
+        log.info("Handling callback for {} from user {}", paymentMethod, user.getId());
+
+        boolean isSuccess;
+        BigDecimal amount = BigDecimal.ZERO;
+        String externalOrderId = params.get("orderId"); // Mặc định, sẽ override cho từng cổng
+
+        switch (paymentMethod.toLowerCase()) {
+            case "paypal":
+                isSuccess = payPalService.verifyCallback(params);
+                try {
+                    String amt = params.get("amount");
+                    amount = (amt != null && !amt.isBlank()) ? new BigDecimal(amt) : BigDecimal.ZERO;
+                } catch (Exception ex) {
+                    log.warn("Unable to parse PayPal amount from callback: {}", params.get("amount"));
+                    amount = BigDecimal.ZERO;
+                }
+                externalOrderId = params.get("orderId");
+                break;
+            case "vnpay":
+                isSuccess = vnPayService.verifyCallback(params);
+                try {
+                    String vnpAmt = params.get("vnp_Amount");
+                    if (vnpAmt != null && !vnpAmt.isBlank()) {
+                        BigDecimal vnpAmount = new BigDecimal(vnpAmt);
+                        // VNPay amount is sent as VND*100
+                        amount = vnpAmount.divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                    } else {
+                        amount = BigDecimal.ZERO;
+                    }
+                } catch (Exception ex) {
+                    log.warn("Unable to parse VNPay amount from callback: {}", params.get("vnp_Amount"));
+                    amount = BigDecimal.ZERO;
+                }
+                externalOrderId = params.get("vnp_TxnRef");
+                break;
+            case "momo":
+                isSuccess = moMoService.verifyCallback(params);
+                try {
+                    String amt = params.get("amount");
+                    amount = (amt != null && !amt.isBlank()) ? new BigDecimal(amt) : BigDecimal.ZERO;
+                } catch (Exception ex) {
+                    log.warn("Unable to parse MoMo amount from callback: {}", params.get("amount"));
+                    amount = BigDecimal.ZERO;
+                }
+                externalOrderId = params.get("requestId");
+                break;
+            case "zalopay":
+                isSuccess = zaloPayService.verifyCallback(params);
+                try {
+                    String amt = params.get("amount");
+                    amount = (amt != null && !amt.isBlank()) ? new BigDecimal(amt) : BigDecimal.ZERO;
+                } catch (Exception ex) {
+                    log.warn("Unable to parse ZaloPay amount from callback: {}", params.get("amount"));
+                    amount = BigDecimal.ZERO;
+                }
+                externalOrderId = params.get("apptransid");
+                break;
+            default:
+                throw new RuntimeException("Unsupported payment method");
+        }
+
+        WalletTransaction transaction = walletTransactionRepository.findByExternalOrderId(externalOrderId)
+                .orElseThrow(() -> new RuntimeException("Transaction not found"));
+
+        if (!isSuccess) {
+            transaction.setStatus(WalletTransaction.TransactionStatus.FAILED);
+            walletTransactionRepository.save(transaction);
+            log.warn("Payment failed for user {} via {}", user.getId(), paymentMethod);
+            return;
+        }
+
+        User dbUser = userRepository.findById(user.getId())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        BigDecimal balanceBefore = dbUser.getWalletBalance();
+        BigDecimal balanceAfter = balanceBefore.add(amount);
+
         dbUser.setWalletBalance(balanceAfter);
         dbUser.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbUser);
 
-        // Tạo transaction record
-        WalletTransaction transaction = new WalletTransaction();
-        transaction.setUser(dbUser);
-        transaction.setTransactionType(WalletTransaction.TransactionType.deposit);
-        transaction.setAmount(request.getAmount());
-        transaction.setBalanceBefore(balanceBefore);
         transaction.setBalanceAfter(balanceAfter);
-        transaction.setDescription(request.getDescription() != null ? request.getDescription() : "Nạp tiền vào ví");
-        transaction.setCreatedAt(LocalDateTime.now());
+        transaction.setStatus(WalletTransaction.TransactionStatus.SUCCESS);
         walletTransactionRepository.save(transaction);
 
-        log.info("Deposit successful. User {} balance: {} -> {}", user.getId(), balanceBefore, balanceAfter);
-
-        return getWalletInfo(dbUser);
+        log.info("Deposit successful via {}. User {} balance: {} -> {}", paymentMethod, user.getId(), balanceBefore, balanceAfter);
     }
 
     @Override
@@ -103,14 +219,16 @@ public class WalletServiceImpl implements WalletService {
         User dbBuyer = userRepository.findById(buyer.getId())
                 .orElseThrow(() -> new RuntimeException("Buyer not found"));
 
-        Double buyerBalanceBefore = dbBuyer.getWalletBalance();
+        BigDecimal buyerBalanceBefore = dbBuyer.getWalletBalance();
 
-        if (buyerBalanceBefore < order.getTotalAmount()) {
+        BigDecimal orderTotal = order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO;
+
+        if (buyerBalanceBefore.compareTo(orderTotal) < 0) {
             throw new RuntimeException("Số dư ví không đủ để thanh toán đơn hàng này. Cần: "
-                    + order.getTotalAmount() + " VND, Có: " + buyerBalanceBefore + " VND");
+                    + orderTotal + " VND, Có: " + buyerBalanceBefore + " VND");
         }
 
-        Double buyerBalanceAfter = buyerBalanceBefore - order.getTotalAmount();
+        BigDecimal buyerBalanceAfter = buyerBalanceBefore.subtract(orderTotal);
         dbBuyer.setWalletBalance(buyerBalanceAfter);
         dbBuyer.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbBuyer);
@@ -119,7 +237,7 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction buyerTransaction = new WalletTransaction();
         buyerTransaction.setUser(dbBuyer);
         buyerTransaction.setTransactionType(WalletTransaction.TransactionType.payment);
-        buyerTransaction.setAmount(order.getTotalAmount());
+        buyerTransaction.setAmount(orderTotal);
         buyerTransaction.setBalanceBefore(buyerBalanceBefore);
         buyerTransaction.setBalanceAfter(buyerBalanceAfter);
         buyerTransaction.setOrder(order);
@@ -128,15 +246,15 @@ public class WalletServiceImpl implements WalletService {
         walletTransactionRepository.save(buyerTransaction);
 
         log.info("Deducted {} from buyer {}. Balance: {} -> {}",
-                order.getTotalAmount(), dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
+                orderTotal, dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
 
         // 2. Cộng tiền người bán
         User seller = order.getShop().getSeller();
         User dbSeller = userRepository.findById(seller.getId())
                 .orElseThrow(() -> new RuntimeException("Seller not found"));
 
-        Double sellerBalanceBefore = dbSeller.getWalletBalance();
-        Double sellerBalanceAfter = sellerBalanceBefore + order.getTotalAmount();
+        BigDecimal sellerBalanceBefore = dbSeller.getWalletBalance();
+        BigDecimal sellerBalanceAfter = sellerBalanceBefore.add(orderTotal);
         dbSeller.setWalletBalance(sellerBalanceAfter);
         dbSeller.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbSeller);
@@ -145,7 +263,7 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction sellerTransaction = new WalletTransaction();
         sellerTransaction.setUser(dbSeller);
         sellerTransaction.setTransactionType(WalletTransaction.TransactionType.received_payment);
-        sellerTransaction.setAmount(order.getTotalAmount());
+        sellerTransaction.setAmount(orderTotal);
         sellerTransaction.setBalanceBefore(sellerBalanceBefore);
         sellerTransaction.setBalanceAfter(sellerBalanceAfter);
         sellerTransaction.setOrder(order);
@@ -154,7 +272,7 @@ public class WalletServiceImpl implements WalletService {
         walletTransactionRepository.save(sellerTransaction);
 
         log.info("Added {} to seller {}. Balance: {} -> {}",
-                order.getTotalAmount(), dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
+                orderTotal, dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
 
         // 3. Cập nhật trạng thái đơn hàng
         order.setPaymentStatus(Order.PaymentStatus.paid);
@@ -184,8 +302,9 @@ public class WalletServiceImpl implements WalletService {
         User dbBuyer = userRepository.findById(buyer.getId())
                 .orElseThrow(() -> new RuntimeException("Buyer not found"));
 
-        Double buyerBalanceBefore = dbBuyer.getWalletBalance();
-        Double buyerBalanceAfter = buyerBalanceBefore + order.getTotalAmount();
+        BigDecimal buyerBalanceBefore = dbBuyer.getWalletBalance();
+        BigDecimal refundAmount = order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal buyerBalanceAfter = buyerBalanceBefore.add(refundAmount);
         dbBuyer.setWalletBalance(buyerBalanceAfter);
         dbBuyer.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbBuyer);
@@ -194,7 +313,7 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction buyerTransaction = new WalletTransaction();
         buyerTransaction.setUser(dbBuyer);
         buyerTransaction.setTransactionType(WalletTransaction.TransactionType.refund);
-        buyerTransaction.setAmount(order.getTotalAmount());
+        buyerTransaction.setAmount(refundAmount);
         buyerTransaction.setBalanceBefore(buyerBalanceBefore);
         buyerTransaction.setBalanceAfter(buyerBalanceAfter);
         buyerTransaction.setOrder(order);
@@ -203,17 +322,17 @@ public class WalletServiceImpl implements WalletService {
         walletTransactionRepository.save(buyerTransaction);
 
         log.info("Refunded {} to buyer {}. Balance: {} -> {}",
-                order.getTotalAmount(), dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
+                refundAmount, dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
 
         // 2. Trừ tiền người bán
         User seller = order.getShop().getSeller();
         User dbSeller = userRepository.findById(seller.getId())
                 .orElseThrow(() -> new RuntimeException("Seller not found"));
 
-        Double sellerBalanceBefore = dbSeller.getWalletBalance();
-        Double sellerBalanceAfter = sellerBalanceBefore - order.getTotalAmount();
+        BigDecimal sellerBalanceBefore = dbSeller.getWalletBalance();
+        BigDecimal sellerBalanceAfter = sellerBalanceBefore.subtract(refundAmount);
 
-        if (sellerBalanceAfter < 0) {
+        if (sellerBalanceAfter.compareTo(BigDecimal.ZERO) < 0) {
             log.warn("Seller {} has insufficient balance for refund. Balance will be negative.", dbSeller.getId());
         }
 
@@ -225,7 +344,8 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction sellerTransaction = new WalletTransaction();
         sellerTransaction.setUser(dbSeller);
         sellerTransaction.setTransactionType(WalletTransaction.TransactionType.refund);
-        sellerTransaction.setAmount(-order.getTotalAmount()); // Số âm để biểu thị trừ tiền
+        // Use negate instead of unary -
+        sellerTransaction.setAmount(refundAmount.negate()); // Số âm để biểu thị trừ tiền
         sellerTransaction.setBalanceBefore(sellerBalanceBefore);
         sellerTransaction.setBalanceAfter(sellerBalanceAfter);
         sellerTransaction.setOrder(order);
@@ -234,7 +354,7 @@ public class WalletServiceImpl implements WalletService {
         walletTransactionRepository.save(sellerTransaction);
 
         log.info("Deducted {} from seller {}. Balance: {} -> {}",
-                order.getTotalAmount(), dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
+                refundAmount, dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
 
         // 3. Cập nhật trạng thái đơn hàng
         order.setPaymentStatus(Order.PaymentStatus.refunded);

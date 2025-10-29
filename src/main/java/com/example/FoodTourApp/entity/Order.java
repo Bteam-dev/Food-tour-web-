@@ -3,6 +3,7 @@ package com.example.FoodTourApp.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "orders")
@@ -40,19 +41,19 @@ public class Order {
     private PaymentMethod paymentMethod;
 
     @Column(name = "subtotal", nullable = false)
-    private Double subtotal;
+    private BigDecimal subtotal = BigDecimal.ZERO;
 
     @Column(name = "delivery_fee")
-    private Double deliveryFee = 0.0;
+    private BigDecimal deliveryFee = BigDecimal.ZERO;
 
     @Column(name = "discount_amount")
-    private Double discountAmount = 0.0;
+    private BigDecimal discountAmount = BigDecimal.ZERO;
 
     @Column(name = "tax_amount")
-    private Double taxAmount = 0.0;
+    private BigDecimal taxAmount = BigDecimal.ZERO;
 
     @Column(name = "total_amount", nullable = false)
-    private Double totalAmount;
+    private BigDecimal totalAmount = BigDecimal.ZERO;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

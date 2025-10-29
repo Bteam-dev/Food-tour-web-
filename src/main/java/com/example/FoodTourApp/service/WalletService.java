@@ -7,17 +7,21 @@ import com.example.FoodTourApp.entity.Order;
 import com.example.FoodTourApp.entity.User;
 
 import java.util.List;
+import java.util.Map;
 
 public interface WalletService {
 
     /**
      * Nạp tiền vào ví
      */
-    WalletResponseDTO deposit(DepositRequestDTO request, User user);
+    WalletResponseDTO initiateDeposit(DepositRequestDTO request, User user);
 
     /**
      * Lấy thông tin ví của user
      */
+
+    void handlePaymentCallback(String paymentMethod, Map<String, String> params, User user);
+
     WalletResponseDTO getWalletInfo(User user);
 
     /**

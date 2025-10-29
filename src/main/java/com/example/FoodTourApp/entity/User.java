@@ -1,7 +1,10 @@
 package com.example.FoodTourApp.entity;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import lombok.Data;
+
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -49,7 +52,7 @@ public class User {
     private Boolean emailVerified = false;
 
     @Column(name = "wallet_balance", nullable = false)
-    private Double walletBalance = 0.0;
+    private BigDecimal walletBalance = BigDecimal.valueOf(0.0);
 
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
