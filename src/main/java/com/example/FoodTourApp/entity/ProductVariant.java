@@ -2,6 +2,7 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "product_variants")
@@ -22,8 +23,8 @@ public class ProductVariant {
     @Column(name = "variant_value", nullable = false, length = 100)
     private String variantValue; // Giá trị cụ thể: "Phô mai", "Lớn", ...
 
-    @Column(name = "price_adjustment", nullable = false)
-    private Double priceAdjustment = 0.0;
+    @Column(name = "price_adjustment", nullable = false, precision = 15, scale = 2)
+    private BigDecimal priceAdjustment = BigDecimal.ZERO;
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;

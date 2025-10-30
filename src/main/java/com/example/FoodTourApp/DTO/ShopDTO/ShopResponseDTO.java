@@ -51,4 +51,3 @@ public class ShopResponseDTO {
 
     private LocalDateTime updatedAt;
 }
-

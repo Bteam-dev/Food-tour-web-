@@ -4,6 +4,7 @@ import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
+import java.math.BigDecimal;
 
 @Data
 public class CreateVariantRequestDTO {
@@ -14,5 +15,5 @@ public class CreateVariantRequestDTO {
     private String variantValue; // Giá trị cụ thể: "Phô mai", "Lớn", ...
 
     @NotNull(message = "Price adjustment is required")
-    private Double priceAdjustment = 0.0;
+    private BigDecimal priceAdjustment = BigDecimal.ZERO;
 }

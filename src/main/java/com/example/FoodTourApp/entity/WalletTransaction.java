@@ -2,6 +2,7 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -20,14 +21,14 @@ public class WalletTransaction {
     @Column(name = "transaction_type", nullable = false)
     private TransactionType transactionType;
 
-    @Column(name = "amount", nullable = false)
-    private Double amount;
+    @Column(name = "amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal amount;
 
-    @Column(name = "balance_before", nullable = false)
-    private Double balanceBefore;
+    @Column(name = "balance_before", nullable = false, precision = 15, scale = 2)
+    private BigDecimal balanceBefore;
 
-    @Column(name = "balance_after", nullable = false)
-    private Double balanceAfter;
+    @Column(name = "balance_after", nullable = false, precision = 15, scale = 2)
+    private BigDecimal balanceAfter;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id")
@@ -48,4 +49,3 @@ public class WalletTransaction {
         admin_adjustment   // Admin điều chỉnh số dư
     }
 }
-

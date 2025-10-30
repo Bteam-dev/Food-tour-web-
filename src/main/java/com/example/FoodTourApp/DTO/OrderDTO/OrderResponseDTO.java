@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.ShopDTO.AddressResponseDTO;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -21,11 +22,11 @@ public class OrderResponseDTO {
     private String orderStatus;
     private String paymentStatus;
     private String paymentMethod;
-    private Double subtotal;
-    private Double deliveryFee;
-    private Double discountAmount;
-    private Double taxAmount;
-    private Double totalAmount;
+    private BigDecimal subtotal;
+    private BigDecimal deliveryFee;
+    private BigDecimal discountAmount;
+    private BigDecimal taxAmount;
+    private BigDecimal totalAmount;
     private String notes;
     private LocalDateTime estimatedDeliveryTime;
     private LocalDateTime actualDeliveryTime;

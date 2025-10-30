@@ -2,6 +2,7 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -39,20 +40,20 @@ public class Order {
     @Column(name = "payment_method", nullable = false)
     private PaymentMethod paymentMethod;
 
-    @Column(name = "subtotal", nullable = false)
-    private Double subtotal;
+    @Column(name = "subtotal", nullable = false, precision = 15, scale = 2)
+    private BigDecimal subtotal;
 
-    @Column(name = "delivery_fee")
-    private Double deliveryFee = 0.0;
+    @Column(name = "delivery_fee", precision = 15, scale = 2)
+    private BigDecimal deliveryFee = BigDecimal.ZERO;
 
-    @Column(name = "discount_amount")
-    private Double discountAmount = 0.0;
+    @Column(name = "discount_amount", precision = 15, scale = 2)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
 
-    @Column(name = "tax_amount")
-    private Double taxAmount = 0.0;
+    @Column(name = "tax_amount", precision = 15, scale = 2)
+    private BigDecimal taxAmount = BigDecimal.ZERO;
 
-    @Column(name = "total_amount", nullable = false)
-    private Double totalAmount;
+    @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal totalAmount;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;

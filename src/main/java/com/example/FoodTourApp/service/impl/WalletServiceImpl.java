@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -35,8 +36,8 @@ public class WalletServiceImpl implements WalletService {
         User dbUser = userRepository.findById(user.getId())
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        Double balanceBefore = dbUser.getWalletBalance();
-        Double balanceAfter = balanceBefore + request.getAmount();
+        BigDecimal balanceBefore = dbUser.getWalletBalance();
+        BigDecimal balanceAfter = balanceBefore.add(request.getAmount());
 
         // Cập nhật số dư
         dbUser.setWalletBalance(balanceAfter);
@@ -103,14 +104,14 @@ public class WalletServiceImpl implements WalletService {
         User dbBuyer = userRepository.findById(buyer.getId())
                 .orElseThrow(() -> new RuntimeException("Buyer not found"));
 
-        Double buyerBalanceBefore = dbBuyer.getWalletBalance();
+        BigDecimal buyerBalanceBefore = dbBuyer.getWalletBalance();
 
-        if (buyerBalanceBefore < order.getTotalAmount()) {
+        if (buyerBalanceBefore.compareTo(order.getTotalAmount()) < 0) {
             throw new RuntimeException("Số dư ví không đủ để thanh toán đơn hàng này. Cần: "
                     + order.getTotalAmount() + " VND, Có: " + buyerBalanceBefore + " VND");
         }
 
-        Double buyerBalanceAfter = buyerBalanceBefore - order.getTotalAmount();
+        BigDecimal buyerBalanceAfter = buyerBalanceBefore.subtract(order.getTotalAmount());
         dbBuyer.setWalletBalance(buyerBalanceAfter);
         dbBuyer.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbBuyer);
@@ -135,8 +136,8 @@ public class WalletServiceImpl implements WalletService {
         User dbSeller = userRepository.findById(seller.getId())
                 .orElseThrow(() -> new RuntimeException("Seller not found"));
 
-        Double sellerBalanceBefore = dbSeller.getWalletBalance();
-        Double sellerBalanceAfter = sellerBalanceBefore + order.getTotalAmount();
+        BigDecimal sellerBalanceBefore = dbSeller.getWalletBalance();
+        BigDecimal sellerBalanceAfter = sellerBalanceBefore.add(order.getTotalAmount());
         dbSeller.setWalletBalance(sellerBalanceAfter);
         dbSeller.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbSeller);
@@ -184,8 +185,8 @@ public class WalletServiceImpl implements WalletService {
         User dbBuyer = userRepository.findById(buyer.getId())
                 .orElseThrow(() -> new RuntimeException("Buyer not found"));
 
-        Double buyerBalanceBefore = dbBuyer.getWalletBalance();
-        Double buyerBalanceAfter = buyerBalanceBefore + order.getTotalAmount();
+        BigDecimal buyerBalanceBefore = dbBuyer.getWalletBalance();
+        BigDecimal buyerBalanceAfter = buyerBalanceBefore.add(order.getTotalAmount());
         dbBuyer.setWalletBalance(buyerBalanceAfter);
         dbBuyer.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbBuyer);
@@ -210,10 +211,10 @@ public class WalletServiceImpl implements WalletService {
         User dbSeller = userRepository.findById(seller.getId())
                 .orElseThrow(() -> new RuntimeException("Seller not found"));
 
-        Double sellerBalanceBefore = dbSeller.getWalletBalance();
-        Double sellerBalanceAfter = sellerBalanceBefore - order.getTotalAmount();
+        BigDecimal sellerBalanceBefore = dbSeller.getWalletBalance();
+        BigDecimal sellerBalanceAfter = sellerBalanceBefore.subtract(order.getTotalAmount());
 
-        if (sellerBalanceAfter < 0) {
+        if (sellerBalanceAfter.compareTo(BigDecimal.ZERO) < 0) {
             log.warn("Seller {} has insufficient balance for refund. Balance will be negative.", dbSeller.getId());
         }
 
@@ -225,7 +226,7 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction sellerTransaction = new WalletTransaction();
         sellerTransaction.setUser(dbSeller);
         sellerTransaction.setTransactionType(WalletTransaction.TransactionType.refund);
-        sellerTransaction.setAmount(-order.getTotalAmount()); // Số âm để biểu thị trừ tiền
+        sellerTransaction.setAmount(order.getTotalAmount().negate()); // Số âm để biểu thị trừ tiền
         sellerTransaction.setBalanceBefore(sellerBalanceBefore);
         sellerTransaction.setBalanceAfter(sellerBalanceAfter);
         sellerTransaction.setOrder(order);
@@ -264,4 +265,3 @@ public class WalletServiceImpl implements WalletService {
         return dto;
     }
 }
-

@@ -16,6 +16,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -88,7 +90,7 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdatedAt(LocalDateTime.now());
 
         // Tính toán giá
-        double subtotal = 0.0;
+        BigDecimal subtotal = BigDecimal.ZERO;
         for (CartItem cartItem : cartItems) {
             if (!cartItem.getProduct().getIsAvailable()) {
                 throw new RuntimeException("Product " + cartItem.getProduct().getName() + " is not available");
@@ -98,7 +100,7 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("Invalid quantity for product " + cartItem.getProduct().getName());
             }
 
-            double itemTotal = cartItem.getProduct().getPrice() * cartItem.getQuantity();
+            BigDecimal itemTotal = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             try {
                 Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
                 List<Integer> variantIds = variantMap.getOrDefault("variantIds", List.of());
@@ -109,20 +111,21 @@ public class OrderServiceImpl implements OrderService {
                     throw new RuntimeException("One or more variants for product " + cartItem.getProduct().getName() + " are invalid");
                 }
                 for (ProductVariant variant : variants) {
-                    itemTotal += (variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : 0) * cartItem.getQuantity();
+                    BigDecimal adjustment = variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : BigDecimal.ZERO;
+                    itemTotal = itemTotal.add(adjustment.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
                 }
             } catch (Exception e) {
                 log.error("Error deserializing variants for cartItem: {}: {}", cartItem.getId(), e.getMessage());
                 throw new RuntimeException("Error processing variants for product " + cartItem.getProduct().getName());
             }
-            subtotal += itemTotal;
+            subtotal = subtotal.add(itemTotal);
         }
 
         order.setSubtotal(subtotal);
-        order.setDeliveryFee(15000.0);
-        order.setTaxAmount(subtotal * 0.1);
-        order.setDiscountAmount(0.0);
-        order.setTotalAmount(subtotal + order.getDeliveryFee() + order.getTaxAmount() - order.getDiscountAmount());
+        order.setDeliveryFee(new BigDecimal("15000.00"));
+        order.setTaxAmount(subtotal.multiply(new BigDecimal("0.1")).setScale(2, RoundingMode.HALF_UP));
+        order.setDiscountAmount(BigDecimal.ZERO);
+        order.setTotalAmount(subtotal.add(order.getDeliveryFee()).add(order.getTaxAmount()).subtract(order.getDiscountAmount()));
 
         order = orderRepository.save(order);
 
@@ -133,13 +136,14 @@ public class OrderServiceImpl implements OrderService {
             orderItem.setProduct(cartItem.getProduct());
             orderItem.setQuantity(cartItem.getQuantity());
             orderItem.setUnitPrice(cartItem.getProduct().getPrice());
-            double itemTotal = cartItem.getProduct().getPrice() * cartItem.getQuantity();
+            BigDecimal itemTotal = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             try {
                 Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
                 List<Integer> variantIds = variantMap.getOrDefault("variantIds", List.of());
                 List<ProductVariant> variants = variantRepository.findAllById(variantIds);
                 for (ProductVariant variant : variants) {
-                    itemTotal += (variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : 0) * cartItem.getQuantity();
+                    BigDecimal adjustment = variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : BigDecimal.ZERO;
+                    itemTotal = itemTotal.add(adjustment.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
                 }
                 orderItem.setSelectedVariants(cartItem.getSelectedVariants());
             } catch (Exception e) {

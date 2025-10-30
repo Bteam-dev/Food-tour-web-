@@ -3,6 +3,7 @@ package com.example.FoodTourApp.DTO.ProductDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -15,8 +16,8 @@ public class ProductResponseDTO {
     private String categoryName;
     private String name;
     private String description;
-    private Double price;
-    private Double discountPrice;
+    private BigDecimal price;
+    private BigDecimal discountPrice;
     private List<String> imageUrls;
     private String ingredients;
     private String nutritionInfo;

@@ -2,14 +2,15 @@ package com.example.FoodTourApp.DTO.ProductDTO;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
 public class UpdateProductRequestDTO {
     private String name;
     private String description;
-    private Double price;
-    private Double discountPrice;
+    private BigDecimal price;
+    private BigDecimal discountPrice;
     private List<String> imageUrls;
     private String ingredients;
     private String nutritionInfo;

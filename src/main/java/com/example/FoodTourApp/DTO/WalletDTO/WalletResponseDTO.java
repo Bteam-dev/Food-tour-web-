@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Getter
@@ -15,7 +16,6 @@ public class WalletResponseDTO {
 
     private Integer userId;
     private String fullName;
-    private Double balance;
+    private BigDecimal balance;
     private List<WalletTransactionResponseDTO> recentTransactions;
 }
-

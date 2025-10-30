@@ -3,9 +3,10 @@ package com.example.FoodTourApp.DTO.ProductDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.CreateVariantRequestDTO;
 import lombok.Data;
 
-import javax.validation.constraints.Min;
+import javax.validation.constraints.DecimalMin;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -16,10 +17,10 @@ public class CreateProductRequestDTO {
     private String description;
 
     @NotNull(message = "Price is required")
-    @Min(value = 0, message = "Price must be non-negative")
-    private Double price;
+    @DecimalMin(value = "0.00", message = "Price must be non-negative")
+    private BigDecimal price;
 
-    private Double discountPrice;
+    private BigDecimal discountPrice;
 
     private List<String> imageUrls;
 

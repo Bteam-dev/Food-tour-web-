@@ -2,6 +2,7 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -48,8 +49,8 @@ public class User {
     @Column(name = "email_verified", nullable = false)
     private Boolean emailVerified = false;
 
-    @Column(name = "wallet_balance", nullable = false)
-    private Double walletBalance = 0.0;
+    @Column(name = "wallet_balance", nullable = false, precision = 15, scale = 2)
+    private BigDecimal walletBalance = BigDecimal.ZERO;
 
     @Column(name = "last_login")
     private LocalDateTime lastLogin;

@@ -2,6 +2,7 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -26,11 +27,11 @@ public class Product {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
-    @Column(name = "price", nullable = false)
-    private Double price;
+    @Column(name = "price", nullable = false, precision = 15, scale = 2)
+    private BigDecimal price;
 
-    @Column(name = "discount_price")
-    private Double discountPrice;
+    @Column(name = "discount_price", precision = 15, scale = 2)
+    private BigDecimal discountPrice;
 
     @Column(name = "image_urls", columnDefinition = "TEXT")
     private String imageUrls; // Lưu dạng: "url1,url2,url3"

@@ -5,6 +5,8 @@ import lombok.Data;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "order_items")
 @Data
@@ -24,11 +26,11 @@ public class OrderItem {
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
 
-    @Column(name = "unit_price", nullable = false)
-    private Double unitPrice;
+    @Column(name = "unit_price", nullable = false, precision = 15, scale = 2)
+    private BigDecimal unitPrice;
 
-    @Column(name = "total_price", nullable = false)
-    private Double totalPrice;
+    @Column(name = "total_price", nullable = false, precision = 15, scale = 2)
+    private BigDecimal totalPrice;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "selected_variants")
