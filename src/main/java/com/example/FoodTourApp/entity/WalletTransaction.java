@@ -34,6 +34,10 @@ public class WalletTransaction {
     @JoinColumn(name = "order_id")
     private Order order;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "momo_transaction_id")
+    private MomoTransaction momoTransaction;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 

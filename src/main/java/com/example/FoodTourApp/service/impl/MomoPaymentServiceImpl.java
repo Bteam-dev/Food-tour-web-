@@ -69,8 +69,15 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
             String orderId = "DEPOSIT_" + user.getId() + "_" + System.currentTimeMillis();
             String requestId = UUID.randomUUID().toString();
             Long amount = request.getAmount().setScale(0, BigDecimal.ROUND_DOWN).longValue();
-            String orderInfo = request.getDescription() != null ?
-                request.getDescription() : "Nạp tiền vào ví FoodTour";
+
+            // Sử dụng description từ user làm nội dung chuyển khoản trong QR MOMO
+            // User tự nhập nội dung để định danh (ví dụ: "USER04", "NGUYENVANA", "ID123", etc.)
+            String orderInfo = request.getDescription() != null && !request.getDescription().isEmpty()
+                ? request.getDescription()
+                : "Nạp tiền vào ví - User " + user.getId();
+
+            log.info("OrderInfo for MOMO QR: {}", orderInfo);
+
             String returnUrl = request.getReturnUrl() != null ?
                 request.getReturnUrl() : defaultReturnUrl;
 
@@ -226,6 +233,7 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
                 walletTransaction.setAmount(momoTransaction.getAmount());
                 walletTransaction.setBalanceBefore(balanceBefore);
                 walletTransaction.setBalanceAfter(balanceAfter);
+                walletTransaction.setMomoTransaction(momoTransaction); // Link với MomoTransaction
                 walletTransaction.setDescription("Nạp tiền qua MOMO - " + momoTransaction.getDescription() +
                     " (TransID: " + callback.getTransId() + ")");
                 walletTransaction.setCreatedAt(LocalDateTime.now());

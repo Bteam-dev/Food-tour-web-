@@ -254,9 +254,16 @@ public class WalletServiceImpl implements WalletService {
         dto.setBalanceBefore(transaction.getBalanceBefore());
         dto.setBalanceAfter(transaction.getBalanceAfter());
 
+        // Nếu là giao dịch liên quan đến Order (payment, refund)
         if (transaction.getOrder() != null) {
             dto.setOrderId(transaction.getOrder().getId());
             dto.setOrderNumber(transaction.getOrder().getOrderNumber());
+        }
+
+        // Nếu là giao dịch deposit qua MOMO
+        if (transaction.getMomoTransaction() != null) {
+            dto.setMomoTransactionId(String.valueOf(transaction.getMomoTransaction().getTransId()));
+            dto.setMomoOrderId(transaction.getMomoTransaction().getOrderId());
         }
 
         dto.setDescription(transaction.getDescription());
