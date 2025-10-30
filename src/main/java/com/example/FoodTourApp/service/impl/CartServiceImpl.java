@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -180,7 +181,7 @@ public class CartServiceImpl implements CartService {
         dto.setUnitPrice(cartItem.getProduct().getPrice());
         dto.setQuantity(cartItem.getQuantity());
 
-        double totalPrice = cartItem.getProduct().getPrice() * cartItem.getQuantity();
+        BigDecimal totalPrice = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
         List<ProductVariant> selectedVariants = List.of();
         try {
             Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
@@ -189,7 +190,8 @@ public class CartServiceImpl implements CartService {
                     .filter(v -> v.getProduct().getId().equals(cartItem.getProduct().getId()) && v.getIsActive())
                     .collect(Collectors.toList());
             for (ProductVariant variant : selectedVariants) {
-                totalPrice += (variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : 0) * cartItem.getQuantity();
+                BigDecimal priceAdjustment = variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : BigDecimal.ZERO;
+                totalPrice = totalPrice.add(priceAdjustment.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
             }
         } catch (Exception e) {
             log.error("Error deserializing variants for cartItem: {}: {}", cartItem.getId(), e.getMessage());

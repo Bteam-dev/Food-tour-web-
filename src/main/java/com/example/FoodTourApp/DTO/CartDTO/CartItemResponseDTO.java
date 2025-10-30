@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -14,9 +15,9 @@ public class CartItemResponseDTO {
     private Integer id;
     private Integer productId;
     private String productName;
-    private Double unitPrice;
+    private BigDecimal unitPrice;
     private Integer quantity;
-    private Double totalPrice;
+    private BigDecimal totalPrice;
     private List<VariantResponseDTO> selectedVariants;
     private String specialInstructions;
     private LocalDateTime addedAt;
