@@ -1,9 +1,8 @@
 package com.example.FoodTourApp.controller.UserController;
 
-import com.example.FoodTourApp.DTO.WalletDTO.DepositRequestDTO;
-import com.example.FoodTourApp.DTO.WalletDTO.WalletResponseDTO;
-import com.example.FoodTourApp.DTO.WalletDTO.WalletTransactionResponseDTO;
+import com.example.FoodTourApp.DTO.WalletDTO.*;
 import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.service.MomoPaymentService;
 import com.example.FoodTourApp.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,9 +24,36 @@ import java.util.Map;
 public class UserWalletController {
 
     private final WalletService walletService;
+    private final MomoPaymentService momoPaymentService;
 
     /**
-     * Nạp tiền vào ví
+     * Nạp tiền vào ví qua MOMO (Khuyên dùng)
+     * POST /api/user/wallet/deposit/momo
+     */
+    @PostMapping("/deposit/momo")
+    public ResponseEntity<?> depositViaMomo(@Valid @RequestBody MomoDepositRequestDTO request,
+                                            @AuthenticationPrincipal User user) {
+        log.info("User {} is creating MOMO deposit payment for amount {}", user.getEmail(), request.getAmount());
+
+        try {
+            MomoPaymentResponseDTO response = momoPaymentService.createDepositPayment(request, user);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Tạo link thanh toán MOMO thành công");
+            result.put("data", response);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error creating MOMO deposit for user {}: {}", user.getEmail(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Nạp tiền vào ví (Direct - chỉ dùng cho testing)
      * POST /api/user/wallet/deposit
      */
     @PostMapping("/deposit")
@@ -100,4 +126,3 @@ public class UserWalletController {
         }
     }
 }
-
