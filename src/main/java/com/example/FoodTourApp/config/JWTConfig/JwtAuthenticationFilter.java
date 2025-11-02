@@ -55,6 +55,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             logger.info("Token from cookie: {}", token != null ? "Found" : "Not found");
         }
 
+        // For WebSocket connections, try to get token from query parameter
+        if (token == null && requestUri.startsWith("/ws")) {
+            String tokenParam = request.getParameter("token");
+            if (tokenParam != null && !tokenParam.isEmpty()) {
+                token = tokenParam;
+                logger.info("Token from query parameter: Found");
+            } else {
+                logger.info("Token from query parameter: Not found");
+            }
+        }
+
         if (token != null) {
             // Kiểm tra token có bị blacklist không (đã logout)
             if (tokenBlacklistService.isTokenBlacklisted(token)) {
