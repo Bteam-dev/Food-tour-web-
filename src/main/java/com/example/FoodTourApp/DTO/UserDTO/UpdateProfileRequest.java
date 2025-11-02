@@ -8,10 +8,6 @@ import java.time.LocalDate;
 
 @Data
 public class UpdateProfileRequest {
-    @Email(message = "Email must be valid")
-    @Size(max = 100, message = "Email must not exceed 100 characters")
-    private String email;
-
     @Size(min = 3, max = 50, message = "Username must be between 3 and 50 characters")
     private String username;
 

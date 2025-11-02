@@ -1,6 +1,11 @@
 package com.example.FoodTourApp.service;
 
+import com.example.FoodTourApp.DTO.UserDTO.CreateUserRequest;
+import com.example.FoodTourApp.DTO.UserDTO.UpdateProfileRequest;
+import com.example.FoodTourApp.DTO.UserDTO.UpdateUserByAdminRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
+
+import java.util.List;
 
 public interface UserService {
     UserResponse getUserByUsername(String username);
@@ -9,5 +14,17 @@ public interface UserService {
     boolean existsByEmail(String email);
     boolean is2FAEnabled(String email);
     boolean verify2FA(String email, String code);
+
+    // Admin
+    List<UserResponse> getAllUsers();
+    UserResponse getUserById(Integer id);
+    UserResponse createUserByAdmin(CreateUserRequest request);
+    UserResponse updateUserByAdmin(Integer id, UpdateUserByAdminRequest request);
+    void deleteUser(Integer id);
+    void toggleUserActiveStatus(Integer id);
+
+    // User
+    UserResponse updateProfile(String email, UpdateProfileRequest request);
+    UserResponse getMyProfile(String email);
 }
 
