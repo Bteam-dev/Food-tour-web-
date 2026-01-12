@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +13,7 @@ import java.util.Date;
 import java.util.List;
 
 @Component
+@Slf4j
 public class JwtUtils {
     private final SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode("YourBase64EncodedSecretKeyHereMustBeAtLeast512BitsLongForHS512Algorithm=="));
     private final long JWT_EXPIRATION = 1000 * 60 * 60 * 24; // 24 hours
@@ -20,11 +22,12 @@ public class JwtUtils {
 
     /**
      * Tạo Access Token với userId, username và roles (truyền qua Header)
+     * Subject của token là userId thay vì username
      */
     public String generateAccessToken(Integer userId, String username, List<String> roles) {
         return Jwts.builder()
-                .subject(username)
-                .claim("userId", userId)
+                .subject(userId.toString())  // Dùng userId làm subject
+                .claim("username", username)  // Lưu username vào claim
                 .claim("roles", roles)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION))
@@ -33,11 +36,14 @@ public class JwtUtils {
     }
 
     /**
-     * Tạo Refresh Token
+     * Tạo Refresh Token với userId và roles
+     * ✅ Thêm roles để bảo mật hơn - tránh refresh token bị lạm dụng
      */
-    public String generateRefreshToken(String email) {
+    public String generateRefreshToken(Integer userId, List<String> roles) {
         return Jwts.builder()
-                .subject(email)
+                .subject(userId.toString())  // Dùng userId làm subject
+                .claim("roles", roles)        // ✅ Thêm roles để bảo mật hơn
+                .claim("type", "refresh")     // ✅ Đánh dấu đây là refresh token
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION))
                 .signWith(key)
@@ -56,7 +62,7 @@ public class JwtUtils {
     }
 
     /**
-     * Deprecated: Dùng generateAccessToken thay thế
+     * Deprecated: Dùng generateAccessToken(userId, username, roles) thay thế
      */
     @Deprecated
     public ResponseCookie generateTokenCookie(Integer userId, String username, List<String> roles) {
@@ -81,22 +87,29 @@ public class JwtUtils {
                 .build();
     }
 
-    public String getUsernameFromToken(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-        return claims.getSubject();
-    }
-
+    /**
+     * Lấy userId từ token (từ subject)
+     */
     public Integer getUserIdFromToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
-        return claims.get("userId", Integer.class);
+        String userIdStr = claims.getSubject();
+        return userIdStr != null ? Integer.parseInt(userIdStr) : null;
+    }
+
+    /**
+     * Lấy username từ token (từ claim, không phải subject)
+     */
+    public String getUsernameFromToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        return claims.get("username", String.class);
     }
 
     @SuppressWarnings("unchecked")
@@ -121,6 +134,23 @@ public class JwtUtils {
         return claims.getExpiration();
     }
 
+    /**
+     * Kiểm tra xem token có phải là refresh token không
+     */
+    public boolean isRefreshToken(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(key)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            String type = claims.get("type", String.class);
+            return "refresh".equals(type);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public boolean validateToken(String token) {
         try {
             Jwts.parser()
@@ -128,7 +158,23 @@ public class JwtUtils {
                     .build()
                     .parseSignedClaims(token);
             return true;
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            log.error("JWT token is expired: {}", e.getMessage());
+            return false;
+        } catch (io.jsonwebtoken.MalformedJwtException e) {
+            log.error("JWT token is malformed: {}", e.getMessage());
+            return false;
+        } catch (io.jsonwebtoken.security.SignatureException e) {
+            log.error("JWT signature does not match: {}", e.getMessage());
+            return false;
+        } catch (io.jsonwebtoken.UnsupportedJwtException e) {
+            log.error("JWT token is unsupported: {}", e.getMessage());
+            return false;
+        } catch (IllegalArgumentException e) {
+            log.error("JWT claims string is empty: {}", e.getMessage());
+            return false;
         } catch (Exception e) {
+            log.error("JWT token validation error: {}", e.getMessage());
             return false;
         }
     }
@@ -146,31 +192,87 @@ public class JwtUtils {
         return null;
     }
 
-    public String generateAccessToken(String email, String role) {
+    // =================================================================
+    // PHƯƠNG THỨC CHO CÁC TOKEN ĐẶC BIỆT (Email Verification, Password Reset)
+    // Những token này vẫn dùng email làm subject để tương thích với link gửi email
+    // =================================================================
+
+    /**
+     * Tạo token đặc biệt với userId và type (VERIFY_EMAIL, RESET_PASSWORD)
+     */
+    public String generateSpecialToken(Integer userId, String email, String type) {
         return Jwts.builder()
-                .subject(email)
-                .claim("role", role)
+                .subject(userId.toString())  // Dùng userId làm subject
+                .claim("email", email)       // Lưu email vào claim
+                .claim("type", type)         // VERIFY_EMAIL hoặc RESET_PASSWORD
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION))
                 .signWith(key)
                 .compact();
     }
 
+    /**
+     * Lấy email từ token đặc biệt
+     */
+    public String getEmailFromSpecialToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        return claims.get("email", String.class);
+    }
+
+    /**
+     * Lấy type từ token đặc biệt
+     */
+    public String getTypeFromSpecialToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        return claims.get("type", String.class);
+    }
+
+
+    /**
+     * @deprecated Dùng getEmailFromSpecialToken thay thế
+     */
+    @Deprecated
     public String getEmailFromToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+        // Thử lấy từ email claim trước (token mới)
+        String email = claims.get("email", String.class);
+        if (email != null) return email;
+
+        // Thử lấy từ username claim (access token)
+        String username = claims.get("username", String.class);
+        if (username != null) return username;
+
+        // Fallback: lấy từ subject (token cũ)
         return claims.getSubject();
     }
 
+    /**
+     * @deprecated Dùng getTypeFromSpecialToken thay thế
+     */
+    @Deprecated
     public String getRoleFromToken(String token) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+        // Thử lấy type trước (token mới)
+        String type = claims.get("type", String.class);
+        if (type != null) return type;
+
+        // Fallback: lấy role (token cũ)
         return claims.get("role", String.class);
     }
 }

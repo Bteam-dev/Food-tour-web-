@@ -35,16 +35,8 @@ public class UserSellerApprovalController {
     public ResponseEntity<?> submitApproval(@Valid @RequestBody SellerApprovalRequest request,
                                             Authentication authentication) {
         User user = (User) authentication.getPrincipal();
-        String userEmail = user.getEmail();
-        logger.info("User {} is submitting seller approval request, authorities: {}", userEmail, authentication.getAuthorities());
-
-        if (userEmail == null || userEmail.trim().isEmpty()) {
-            logger.error("Invalid user email from authentication");
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Invalid user authentication");
-            return ResponseEntity.badRequest().body(error);
-        }
+        Integer userId = user.getId();
+        logger.info("User ID {} is submitting seller approval request, authorities: {}", userId, authentication.getAuthorities());
 
         try {
             // Kiểm tra nếu user đã là seller rồi
@@ -52,15 +44,15 @@ public class UserSellerApprovalController {
                     .anyMatch(auth -> auth.getAuthority().equals("SELLER"));
 
             if (isSeller) {
-                logger.error("User {} is already a seller", userEmail);
+                logger.error("User ID {} is already a seller", userId);
                 Map<String, Object> error = new HashMap<>();
                 error.put("success", false);
                 error.put("message", "User is already a seller");
                 return ResponseEntity.badRequest().body(error);
             }
 
-            SellerApprovalResponse response = sellerApprovalService.submitApproval(userEmail, request);
-            logger.info("Seller approval request submitted successfully by user {}", userEmail);
+            SellerApprovalResponse response = sellerApprovalService.submitApproval(userId, request);
+            logger.info("Seller approval request submitted successfully by user ID {}", userId);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -69,19 +61,19 @@ public class UserSellerApprovalController {
 
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
-            logger.error("Failed to submit seller approval for user {}: {}", userEmail, e.getMessage());
+            logger.error("Failed to submit seller approval for user ID {}: {}", userId, e.getMessage());
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         } catch (jakarta.persistence.EntityNotFoundException e) {
-            logger.error("User not found for email {}: {}", userEmail, e.getMessage());
+            logger.error("User not found for ID {}: {}", userId, e.getMessage());
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "User not found");
             return ResponseEntity.badRequest().body(error);
         } catch (Exception e) {
-            logger.error("Unexpected error during seller approval submission for user {}: {}", userEmail, e.getMessage(), e);
+            logger.error("Unexpected error during seller approval submission for user ID {}: {}", userId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "An unexpected error occurred");
@@ -97,21 +89,13 @@ public class UserSellerApprovalController {
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
         User user = (User) authentication.getPrincipal();
-        String userEmail = user.getEmail();
-        logger.info("User {} is fetching their approval requests (page: {}, size: {})", userEmail, page, size);
-
-        if (userEmail == null || userEmail.trim().isEmpty()) {
-            logger.error("Invalid user email from authentication");
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Invalid user authentication");
-            return ResponseEntity.badRequest().body(error);
-        }
+        Integer userId = user.getId();
+        logger.info("User ID {} is fetching their approval requests (page: {}, size: {})", userId, page, size);
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
-            Page<SellerApprovalResponse> approvals = sellerApprovalService.getMyApprovals(userEmail, pageable);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getMyApprovals(userId, pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -122,7 +106,7 @@ public class UserSellerApprovalController {
 
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error fetching approvals for user {}: {}", userEmail, e.getMessage(), e);
+            logger.error("Error fetching approvals for user ID {}: {}", userId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "Failed to fetch approval requests");
@@ -133,22 +117,14 @@ public class UserSellerApprovalController {
     @GetMapping("/{id}")
     public ResponseEntity<?> getApprovalById(@PathVariable Integer id, Authentication authentication) {
         User user = (User) authentication.getPrincipal();
-        String userEmail = user.getEmail();
-        logger.info("User {} is fetching approval request with id {}", userEmail, id);
-
-        if (userEmail == null || userEmail.trim().isEmpty()) {
-            logger.error("Invalid user email from authentication");
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Invalid user authentication");
-            return ResponseEntity.badRequest().body(error);
-        }
+        Integer userId = user.getId();
+        logger.info("User ID {} is fetching approval request with id {}", userId, id);
 
         try {
             SellerApprovalResponse response = sellerApprovalService.getApprovalById(id);
 
-            // Kiểm tra xem đơn có phải của user này không
-            if (!response.getUserEmail().equals(userEmail)) {
+            // Kiểm tra xem đơn có phải của user này không - so sánh bằng userId
+            if (!response.getUserId().equals(userId)) {
                 Map<String, Object> error = new HashMap<>();
                 error.put("success", false);
                 error.put("message", "You don't have permission to view this approval request");
@@ -161,7 +137,7 @@ public class UserSellerApprovalController {
 
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error fetching approval {} for user {}: {}", id, userEmail, e.getMessage(), e);
+            logger.error("Error fetching approval {} for user ID {}: {}", id, userId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

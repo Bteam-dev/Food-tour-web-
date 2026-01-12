@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/variant-types")
+@RequestMapping("/api/public/variant-types")
 @RequiredArgsConstructor
 public class PublicVariantTypeController {
     private final VariantTypeService variantTypeService;

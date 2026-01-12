@@ -23,8 +23,7 @@ public interface UserService {
     void deleteUser(Integer id);
     void toggleUserActiveStatus(Integer id);
 
-    // User
-    UserResponse updateProfile(String email, UpdateProfileRequest request);
-    UserResponse getMyProfile(String email);
+    // User - Đổi từ email sang userId
+    UserResponse updateProfile(Integer userId, UpdateProfileRequest request);
+    UserResponse getMyProfile(Integer userId);
 }
-

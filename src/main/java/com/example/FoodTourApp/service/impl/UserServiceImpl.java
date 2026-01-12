@@ -49,16 +49,16 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserResponse getMyProfile(String email) {
-        User user = userRepository.findByEmail(email)
+    public UserResponse getMyProfile(Integer userId) {
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
         return mapToUserResponse(user);
     }
 
     @Override
     @Transactional
-    public UserResponse updateProfile(String email, UpdateProfileRequest request) {
-        User user = userRepository.findByEmail(email)
+    public UserResponse updateProfile(Integer userId, UpdateProfileRequest request) {
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
         if (request.getUsername() != null && !request.getUsername().equals(user.getUsername())) {

@@ -33,7 +33,7 @@ public class UserWalletController {
     @PostMapping("/deposit/momo")
     public ResponseEntity<?> depositViaMomo(@Valid @RequestBody MomoDepositRequestDTO request,
                                             @AuthenticationPrincipal User user) {
-        log.info("User {} is creating MOMO deposit payment for amount {}", user.getEmail(), request.getAmount());
+        log.info("User ID {} is creating MOMO deposit payment for amount {}", user.getId(), request.getAmount());
 
         try {
             MomoPaymentResponseDTO response = momoPaymentService.createDepositPayment(request, user);
@@ -44,7 +44,7 @@ public class UserWalletController {
             result.put("data", response);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error creating MOMO deposit for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error creating MOMO deposit for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -59,7 +59,7 @@ public class UserWalletController {
     @PostMapping("/deposit")
     public ResponseEntity<?> deposit(@Valid @RequestBody DepositRequestDTO request,
                                      @AuthenticationPrincipal User user) {
-        log.info("User {} is depositing {} to wallet", user.getEmail(), request.getAmount());
+        log.info("User ID {} is depositing {} to wallet", user.getId(), request.getAmount());
 
         try {
             WalletResponseDTO response = walletService.deposit(request, user);
@@ -70,7 +70,7 @@ public class UserWalletController {
             result.put("data", response);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error depositing to wallet for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error depositing to wallet for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -84,7 +84,7 @@ public class UserWalletController {
      */
     @GetMapping
     public ResponseEntity<?> getWalletInfo(@AuthenticationPrincipal User user) {
-        log.info("User {} is getting wallet info", user.getEmail());
+        log.info("User ID {} is getting wallet info", user.getId());
 
         try {
             WalletResponseDTO response = walletService.getWalletInfo(user);
@@ -94,7 +94,7 @@ public class UserWalletController {
             result.put("data", response);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error getting wallet info for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error getting wallet info for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -108,7 +108,7 @@ public class UserWalletController {
      */
     @GetMapping("/transactions")
     public ResponseEntity<?> getTransactionHistory(@AuthenticationPrincipal User user) {
-        log.info("User {} is getting transaction history", user.getEmail());
+        log.info("User ID {} is getting transaction history", user.getId());
 
         try {
             List<WalletTransactionResponseDTO> transactions = walletService.getTransactionHistory(user);
@@ -118,7 +118,7 @@ public class UserWalletController {
             result.put("data", transactions);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error getting transaction history for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error getting transaction history for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

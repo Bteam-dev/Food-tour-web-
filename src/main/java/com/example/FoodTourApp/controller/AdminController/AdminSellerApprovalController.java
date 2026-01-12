@@ -2,6 +2,7 @@ package com.example.FoodTourApp.controller.AdminController;
 
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.ReviewApprovalRequest;
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
+import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.SellerApprovalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,8 +38,8 @@ public class AdminSellerApprovalController {
             @RequestParam(defaultValue = "submittedAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
-        String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching all pending approval requests (page: {}, size: {})", adminEmail, page, size);
+        User admin = (User) authentication.getPrincipal();
+        logger.info("Admin ID {} is fetching all pending approval requests (page: {}, size: {})", admin.getId(), page, size);
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
@@ -66,8 +67,8 @@ public class AdminSellerApprovalController {
     public ResponseEntity<?> reviewApproval(@PathVariable Integer id,
                                             @Valid @RequestBody ReviewApprovalRequest request,
                                             Authentication authentication) {
-        String adminEmail = authentication.getName();
-        logger.info("Admin {} is reviewing approval request {}", adminEmail, id);
+        User admin = (User) authentication.getPrincipal();
+        logger.info("Admin ID {} is reviewing approval request {}", admin.getId(), id);
 
         // Set the approvalId from path variable to ensure consistency
         request.setApprovalId(id);
@@ -78,16 +79,16 @@ public class AdminSellerApprovalController {
                     .anyMatch(auth -> auth.getAuthority().equals("ADMIN"));
 
             if (!isAdmin) {
-                logger.error("User {} attempted to review approval without admin role", adminEmail);
+                logger.error("User ID {} attempted to review approval without admin role", admin.getId());
                 Map<String, Object> error = new HashMap<>();
                 error.put("success", false);
                 error.put("message", "Only admins can review approval requests");
                 return ResponseEntity.status(403).body(error);
             }
 
-            SellerApprovalResponse response = sellerApprovalService.reviewApproval(adminEmail, request);
-            logger.info("Admin {} successfully reviewed approval request {} with status {}",
-                       adminEmail, request.getApprovalId(), request.getStatus());
+            SellerApprovalResponse response = sellerApprovalService.reviewApproval(admin.getId(), request);
+            logger.info("Admin ID {} successfully reviewed approval request {} with status {}",
+                       admin.getId(), request.getApprovalId(), request.getStatus());
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -112,8 +113,8 @@ public class AdminSellerApprovalController {
 
     @GetMapping("/{id}")
     public ResponseEntity<?> getApprovalById(@PathVariable Integer id, Authentication authentication) {
-        String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching approval request with id {}", adminEmail, id);
+        User admin = (User) authentication.getPrincipal();
+        logger.info("Admin ID {} is fetching approval request with id {}", admin.getId(), id);
 
         try {
             SellerApprovalResponse response = sellerApprovalService.getApprovalById(id);
@@ -139,8 +140,8 @@ public class AdminSellerApprovalController {
             @RequestParam(defaultValue = "submittedAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
-        String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching all approval requests (page: {}, size: {})", adminEmail, page, size);
+        User admin = (User) authentication.getPrincipal();
+        logger.info("Admin ID {} is fetching all approval requests (page: {}, size: {})", admin.getId(), page, size);
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
@@ -173,8 +174,8 @@ public class AdminSellerApprovalController {
             @RequestParam(defaultValue = "submittedAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
-        String adminEmail = authentication.getName();
-        logger.info("Admin {} is fetching approval requests with status: {} (page: {}, size: {})", adminEmail, status, page, size);
+        User admin = (User) authentication.getPrincipal();
+        logger.info("Admin ID {} is fetching approval requests with status: {} (page: {}, size: {})", admin.getId(), status, page, size);
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
@@ -191,7 +192,7 @@ public class AdminSellerApprovalController {
 
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
-            logger.error("Invalid status filter '{}' requested by admin {}: {}", status, adminEmail, e.getMessage());
+            logger.error("Invalid status filter '{}' requested by admin ID {}: {}", status, admin.getId(), e.getMessage());
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

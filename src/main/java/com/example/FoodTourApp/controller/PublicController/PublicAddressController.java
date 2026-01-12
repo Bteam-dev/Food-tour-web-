@@ -14,7 +14,7 @@ import java.util.List;
  * Public Address Controller - Các endpoint địa chỉ public
  */
 @RestController
-@RequestMapping("/api/addresses")
+@RequestMapping("/api/public/addresses")
 @RequiredArgsConstructor
 @Slf4j
 public class PublicAddressController {

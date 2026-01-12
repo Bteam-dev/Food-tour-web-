@@ -77,18 +77,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Kiểm tra token có hợp lệ không
             logger.info("Validating token...");
             if (jwtUtils.validateToken(token)) {
-                String email = jwtUtils.getUsernameFromToken(token);
+                Integer userId = jwtUtils.getUserIdFromToken(token);
                 List<String> roles = jwtUtils.getRolesFromToken(token);
 
-                logger.info("Token valid! Email: {}, Roles from token: {}", email, roles);
+                logger.info("Token valid! UserId: {}, Roles from token: {}", userId, roles);
 
-                if (email != null && roles != null && !roles.isEmpty()) {
-                    // Load the actual User object from database
-                    logger.info("Loading user from database for email: {}", email);
+                if (userId != null && roles != null && !roles.isEmpty()) {
+                    // Load the actual User object from database by userId
+                    logger.info("Loading user from database for userId: {}", userId);
 
                     User user = null;
                     try {
-                        user = userRepository.findByEmail(email).orElse(null);
+                        user = userRepository.findById(userId).orElse(null);
                     } catch (Exception e) {
                         logger.error("ERROR loading user from database: {}", e.getMessage(), e);
                     }
@@ -96,6 +96,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     if (user != null) {
                         logger.info("User found in database: ID={}, Email={}, Role={}",
                                    user.getId(), user.getEmail(), user.getRole().getRoleName());
+
+                        // ⚠️ KIỂM TRA USER BỊ KHÓA HOẶC KHÔNG ACTIVE
+                        if (!user.getIsActive()) {
+                            logger.warn("❌ User {} is INACTIVE or BLOCKED - Rejecting authentication", userId);
+                            chain.doFilter(request, response);
+                            return;
+                        }
 
                         // Convert roles to authorities
                         List<SimpleGrantedAuthority> authorities = roles.stream()
@@ -106,8 +113,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 })
                                 .collect(Collectors.toList());
 
-                        logger.info("Setting authentication for email: {}, roles: {}, authorities: {}",
-                                   email, roles, authorities);
+                        logger.info("Setting authentication for userId: {}, roles: {}, authorities: {}",
+                                   userId, roles, authorities);
 
                         // Set the User object as principal instead of email String
                         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
@@ -115,17 +122,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(auth);
 
-                        logger.info("✅ Authentication SET successfully for {}", email);
+                        logger.info("✅ Authentication SET successfully for userId: {}", userId);
                     } else {
-                        logger.error("❌ USER NOT FOUND in database for email: {} - THIS WILL CAUSE 403!", email);
+                        logger.error("❌ USER NOT FOUND in database for userId: {} - THIS WILL CAUSE 403!", userId);
                         logger.error("Token is valid but user doesn't exist in DB. Possible causes:");
                         logger.error("1. Database connection issue");
                         logger.error("2. User was deleted");
                         logger.error("3. Hibernate/JPA cache issue");
                     }
                 } else {
-                    logger.warn("Email or roles are null/empty in token for request to {}", requestUri);
-                    logger.warn("Email: {}, Roles: {}", email, roles);
+                    logger.warn("UserId or roles are null/empty in token for request to {}", requestUri);
+                    logger.warn("UserId: {}, Roles: {}", userId, roles);
                 }
             } else {
                 logger.warn("Invalid JWT token for request to {}", requestUri);

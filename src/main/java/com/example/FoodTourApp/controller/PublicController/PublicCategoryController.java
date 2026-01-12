@@ -13,7 +13,7 @@ import java.util.List;
  * Public Category Controller - Các endpoint xem category (không cần authentication)
  */
 @RestController
-@RequestMapping("/api/categories")
+@RequestMapping("/api/public/categories")
 @RequiredArgsConstructor
 @Slf4j
 public class PublicCategoryController {

@@ -31,17 +31,17 @@ public class UserProfileController {
      */
     @GetMapping
     public ResponseEntity<?> getMyProfile(@AuthenticationPrincipal User user) {
-        log.info("User {} is retrieving their profile", user.getEmail());
+        log.info("User ID {} is retrieving their profile", user.getId());
 
         try {
-            UserResponse response = userService.getMyProfile(user.getEmail());
+            UserResponse response = userService.getMyProfile(user.getId());
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", response);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error retrieving profile for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error retrieving profile for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -57,10 +57,10 @@ public class UserProfileController {
     public ResponseEntity<?> updateProfile(
             @Valid @RequestBody UpdateProfileRequest request,
             @AuthenticationPrincipal User user) {
-        log.info("User {} is updating their profile", user.getEmail());
+        log.info("User ID {} is updating their profile", user.getId());
 
         try {
-            UserResponse response = userService.updateProfile(user.getEmail(), request);
+            UserResponse response = userService.updateProfile(user.getId(), request);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -68,7 +68,7 @@ public class UserProfileController {
             result.put("data", response);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error updating profile for user {}: {}", user.getEmail(), e.getMessage(), e);
+            log.error("Error updating profile for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

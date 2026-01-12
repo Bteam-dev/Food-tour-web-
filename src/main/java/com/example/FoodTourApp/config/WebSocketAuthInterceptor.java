@@ -82,16 +82,22 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private void authenticateUser(String token, StompHeaderAccessor accessor) {
         try {
-            String email = jwtUtils.getUsernameFromToken(token);
+            Integer userId = jwtUtils.getUserIdFromToken(token);
             List<String> roles = jwtUtils.getRolesFromToken(token);
 
-            log.info("WebSocket authentication - Email: {}, Roles: {}", email, roles);
+            log.info("WebSocket authentication - UserId: {}, Roles: {}", userId, roles);
 
-            // Load user from database
-            User user = userRepository.findByEmail(email).orElse(null);
+            // Load user from database bằng userId thay vì email
+            User user = userRepository.findById(userId).orElse(null);
 
             if (user != null) {
                 log.info("WebSocket user authenticated: ID={}, Email={}", user.getId(), user.getEmail());
+
+                // ⚠️ KIỂM TRA USER BỊ KHÓA HOẶC KHÔNG ACTIVE
+                if (!user.getIsActive()) {
+                    log.warn("❌ User {} is INACTIVE or BLOCKED - Rejecting WebSocket connection", userId);
+                    return;
+                }
 
                 List<SimpleGrantedAuthority> authorities = roles.stream()
                         .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
@@ -107,7 +113,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     accessor.getSessionAttributes().put("authenticated_user", user);
                 }
             } else {
-                log.warn("WebSocket user not found in database: {}", email);
+                log.warn("WebSocket user not found in database for userId: {}", userId);
             }
         } catch (Exception e) {
             log.error("Error authenticating WebSocket user: {}", e.getMessage(), e);

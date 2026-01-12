@@ -211,33 +211,60 @@ public class PublicAuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logoutUser(HttpServletRequest request) {
+    public ResponseEntity<?> logoutUser(HttpServletRequest request, @RequestBody(required = false) Map<String, String> body) {
         try {
-            // Lấy token từ Authorization Header
-            String token = jwtUtils.getJwtFromHeader(request);
+            // Lấy access token từ Authorization Header
+            String accessToken = jwtUtils.getJwtFromHeader(request);
 
-            if (token == null) {
+            if (accessToken == null) {
                 // Fallback: thử lấy từ cookie nếu không có trong header
-                token = jwtUtils.getJwtFromCookies(request);
+                accessToken = jwtUtils.getJwtFromCookies(request);
             }
 
-            if (token != null && jwtUtils.validateToken(token)) {
-                // Lấy thông tin từ token
-                String email = jwtUtils.getUsernameFromToken(token);
-                Date expirationDate = jwtUtils.getExpirationDateFromToken(token);
+            // Lấy refresh token từ request body (nếu có)
+            String refreshToken = null;
+            if (body != null && body.containsKey("refreshToken")) {
+                refreshToken = body.get("refreshToken");
+            }
+
+            boolean accessTokenBlacklisted = false;
+            boolean refreshTokenBlacklisted = false;
+
+            // ✅ Blacklist access token
+            if (accessToken != null && jwtUtils.validateToken(accessToken)) {
+                Integer userId = jwtUtils.getUserIdFromToken(accessToken);
+                Date expirationDate = jwtUtils.getExpirationDateFromToken(accessToken);
                 LocalDateTime expiresAt = expirationDate.toInstant()
                         .atZone(ZoneId.systemDefault())
                         .toLocalDateTime();
 
-                // Thêm token vào blacklist
-                tokenBlacklistService.blacklistToken(token, email, expiresAt);
+                tokenBlacklistService.blacklistToken(accessToken, "user_" + userId, expiresAt);
+                accessTokenBlacklisted = true;
+                logger.info("Access token blacklisted for userId: {}", userId);
+            }
 
-                logger.info("User logged out successfully, token blacklisted for email: {}", email);
+            // ✅ Blacklist refresh token (nếu có)
+            if (refreshToken != null && jwtUtils.validateToken(refreshToken)) {
+                Integer userId = jwtUtils.getUserIdFromToken(refreshToken);
+                Date expirationDate = jwtUtils.getExpirationDateFromToken(refreshToken);
+                LocalDateTime expiresAt = expirationDate.toInstant()
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDateTime();
 
+                tokenBlacklistService.blacklistToken(refreshToken, "user_" + userId + "_refresh", expiresAt);
+                refreshTokenBlacklisted = true;
+                logger.info("Refresh token blacklisted for userId: {}", userId);
+            }
+
+            if (accessTokenBlacklisted || refreshTokenBlacklisted) {
                 Map<String, Object> responseBody = new HashMap<>();
                 responseBody.put("success", true);
-                responseBody.put("message", "Logout successful. Token has been invalidated.");
+                responseBody.put("message", "Logout successful. Tokens have been invalidated.");
+                responseBody.put("accessTokenBlacklisted", accessTokenBlacklisted);
+                responseBody.put("refreshTokenBlacklisted", refreshTokenBlacklisted);
 
+                logger.info("User logged out successfully - Access: {}, Refresh: {}",
+                    accessTokenBlacklisted, refreshTokenBlacklisted);
                 return ResponseEntity.ok(responseBody);
             } else {
                 Map<String, Object> responseBody = new HashMap<>();

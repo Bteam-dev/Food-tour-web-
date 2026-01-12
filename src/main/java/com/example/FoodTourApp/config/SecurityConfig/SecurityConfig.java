@@ -37,12 +37,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints - không cần authentication
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/public/**").permitAll() // Cho phép MOMO callback
-                        .requestMatchers("/api/addresses/**").permitAll()
-                        .requestMatchers("/api/categories/**").permitAll()
-                        .requestMatchers("/api/shops/**").permitAll()
-                        .requestMatchers("/api/products/**").permitAll()
-                        .requestMatchers("/api/variant-types/**").permitAll()
+                        .requestMatchers("/api/public/**").permitAll()
                         .requestMatchers("/uploads/**").permitAll() // Allow public access to uploaded files
                         .requestMatchers("/ws/**").permitAll() // Allow WebSocket connections
                         .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")

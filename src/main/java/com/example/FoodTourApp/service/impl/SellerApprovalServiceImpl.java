@@ -35,8 +35,8 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
 
     @Override
     @Transactional
-    public SellerApprovalResponse submitApproval(String userEmail, SellerApprovalRequest request) {
-        User user = userRepository.findByEmail(userEmail)
+    public SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request) {
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
         // Kiểm tra nếu đã có đơn PENDING
@@ -58,8 +58,8 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
 
     @Override
     @Transactional
-    public SellerApprovalResponse reviewApproval(String adminEmail, ReviewApprovalRequest request) {
-        User admin = userRepository.findByEmail(adminEmail)
+    public SellerApprovalResponse reviewApproval(Integer adminId, ReviewApprovalRequest request) {
+        User admin = userRepository.findById(adminId)
                 .orElseThrow(() -> new EntityNotFoundException("Admin not found"));
 
         SellerApproval approval = sellerApprovalRepository.findById(request.getApprovalId())
@@ -126,8 +126,8 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
     }
 
     @Override
-    public Page<SellerApprovalResponse> getMyApprovals(String userEmail, Pageable pageable) {
-        User user = userRepository.findByEmail(userEmail)
+    public Page<SellerApprovalResponse> getMyApprovals(Integer userId, Pageable pageable) {
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
         Page<SellerApproval> approvals = sellerApprovalRepository.findByUserId(user.getId(), pageable);

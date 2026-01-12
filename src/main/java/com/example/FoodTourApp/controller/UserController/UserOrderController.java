@@ -26,7 +26,7 @@ public class UserOrderController {
 
     @PostMapping
     public ResponseEntity<?> createOrder(@Valid @RequestBody CreateOrderRequestDTO request, @AuthenticationPrincipal User user) {
-        logger.info("User {} is creating order with cartItemIds: {}", user.getEmail(), request.getCartItemIds());
+        logger.info("User ID {} is creating order with cartItemIds: {}", user.getId(), request.getCartItemIds());
         try {
             OrderResponseDTO order = orderService.createOrder(request, user);
             Map<String, Object> result = new HashMap<>();
@@ -35,7 +35,7 @@ public class UserOrderController {
             result.put("data", order);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error creating order for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error creating order for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -49,7 +49,7 @@ public class UserOrderController {
      */
     @PostMapping("/{orderId}/pay")
     public ResponseEntity<?> payOrder(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
-        logger.info("User {} is paying for order {}", user.getEmail(), orderId);
+        logger.info("User ID {} is paying for order {}", user.getId(), orderId);
         try {
             OrderResponseDTO order = orderService.payOrder(orderId, user);
             Map<String, Object> result = new HashMap<>();
@@ -58,7 +58,7 @@ public class UserOrderController {
             result.put("data", order);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error paying order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error paying order {} for user ID {}: {}", orderId, user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -68,7 +68,7 @@ public class UserOrderController {
 
     @GetMapping
     public ResponseEntity<?> getUserOrders(@AuthenticationPrincipal User user) {
-        logger.info("User {} is getting orders", user.getEmail());
+        logger.info("User ID {} is getting orders", user.getId());
         try {
             List<OrderResponseDTO> orders = orderService.getUserOrders(user);
             Map<String, Object> result = new HashMap<>();
@@ -76,7 +76,7 @@ public class UserOrderController {
             result.put("data", orders);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error getting orders for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error getting orders for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -86,7 +86,7 @@ public class UserOrderController {
 
     @GetMapping("/{orderId}")
     public ResponseEntity<?> getOrderById(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
-        logger.info("User {} is getting order {}", user.getEmail(), orderId);
+        logger.info("User ID {} is getting order {}", user.getId(), orderId);
         try {
             OrderResponseDTO order = orderService.getOrderById(orderId, user);
             Map<String, Object> result = new HashMap<>();
@@ -94,7 +94,7 @@ public class UserOrderController {
             result.put("data", order);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error getting order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error getting order {} for user ID {}: {}", orderId, user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -104,7 +104,7 @@ public class UserOrderController {
 
     @DeleteMapping("/{orderId}")
     public ResponseEntity<?> deleteOrder(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
-        logger.info("User {} is deleting order: {}", user.getEmail(), orderId);
+        logger.info("User ID {} is deleting order: {}", user.getId(), orderId);
         try {
             orderService.deleteOrder(orderId, user);
             Map<String, Object> result = new HashMap<>();
@@ -112,7 +112,7 @@ public class UserOrderController {
             result.put("message", "Order deleted successfully");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error deleting order {} for user {}: {}", orderId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error deleting order {} for user ID {}: {}", orderId, user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

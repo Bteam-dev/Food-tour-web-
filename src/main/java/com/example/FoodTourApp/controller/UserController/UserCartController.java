@@ -29,7 +29,7 @@ public class UserCartController {
 
     @PostMapping
     public ResponseEntity<?> addToCart(@Valid @RequestBody CreateCartItemRequestDTO request, @AuthenticationPrincipal User user) {
-        logger.info("User {} is adding product to cart: {}", user.getEmail(), request.getProductId());
+        logger.info("User ID {} is adding product to cart: {}", user.getId(), request.getProductId());
         try {
             CartItemResponseDTO cartItem = cartService.addToCart(request, user);
             Map<String, Object> result = new HashMap<>();
@@ -38,7 +38,7 @@ public class UserCartController {
             result.put("data", cartItem);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error adding product to cart for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error adding product to cart for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -48,7 +48,7 @@ public class UserCartController {
 
     @PutMapping("/{cartItemId}")
     public ResponseEntity<?> updateCartItem(@PathVariable Integer cartItemId, @Valid @RequestBody UpdateCartItemRequestDTO request, @AuthenticationPrincipal User user) {
-        logger.info("User {} is updating cart item: {}", user.getEmail(), cartItemId);
+        logger.info("User ID {} is updating cart item: {}", user.getId(), cartItemId);
         try {
             CartItemResponseDTO cartItem = cartService.updateCartItem(cartItemId, request, user);
             Map<String, Object> result = new HashMap<>();
@@ -57,7 +57,7 @@ public class UserCartController {
             result.put("data", cartItem);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error updating cart item {} for user {}: {}", cartItemId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error updating cart item {} for user ID {}: {}", cartItemId, user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -67,7 +67,7 @@ public class UserCartController {
 
     @DeleteMapping("/{cartItemId}")
     public ResponseEntity<?> removeFromCart(@PathVariable Integer cartItemId, @AuthenticationPrincipal User user) {
-        logger.info("User {} is removing cart item: {}", user.getEmail(), cartItemId);
+        logger.info("User ID {} is removing cart item: {}", user.getId(), cartItemId);
         try {
             cartService.removeFromCart(cartItemId, user);
             Map<String, Object> result = new HashMap<>();
@@ -75,7 +75,7 @@ public class UserCartController {
             result.put("message", "Cart item removed successfully");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error removing cart item {} for user {}: {}", cartItemId, user.getEmail(), e.getMessage(), e);
+            logger.error("Error removing cart item {} for user ID {}: {}", cartItemId, user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -85,7 +85,7 @@ public class UserCartController {
 
     @DeleteMapping("/clear")
     public ResponseEntity<?> clearCart(@AuthenticationPrincipal User user) {
-        logger.info("User {} is clearing cart", user.getEmail());
+        logger.info("User ID {} is clearing cart", user.getId());
         try {
             cartService.clearCart(user);
             Map<String, Object> result = new HashMap<>();
@@ -93,7 +93,7 @@ public class UserCartController {
             result.put("message", "Cart cleared successfully");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error clearing cart for user {}: {}", user.getEmail(), e.getMessage(), e);
+            logger.error("Error clearing cart for user ID {}: {}", user.getId(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -103,7 +103,7 @@ public class UserCartController {
 
     @GetMapping
     public ResponseEntity<?> getCartItems(@AuthenticationPrincipal User user) {
-        logger.info("User {} is getting cart items", user.getEmail());
+        logger.info("User ID {} is getting cart items", user.getId());
         try {
             List<CartItemResponseDTO> cartItems = cartService.getCartItems(user);
             Map<String, Object> result = new HashMap<>();

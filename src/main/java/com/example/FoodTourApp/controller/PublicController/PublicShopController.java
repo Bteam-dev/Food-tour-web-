@@ -13,7 +13,7 @@ import java.util.List;
  * Public Shop Controller - Các endpoint xem shop (không cần authentication)
  */
 @RestController
-@RequestMapping("/api/shops")
+@RequestMapping("/api/public/shops")
 @RequiredArgsConstructor
 @Slf4j
 public class PublicShopController {

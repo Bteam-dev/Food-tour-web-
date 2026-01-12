@@ -70,7 +70,8 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
 
         try {
-            String verifyToken = jwtUtil.generateAccessToken(user.getEmail(), "VERIFY_EMAIL");
+            // Dùng generateSpecialToken với userId
+            String verifyToken = jwtUtil.generateSpecialToken(user.getId(), user.getEmail(), "VERIFY_EMAIL");
             String verifyLink = "http://localhost:8080/api/auth/verify-email?token=" + verifyToken;
             sendVerificationEmail(user.getEmail(), verifyLink);
         } catch (MessagingException e) {
@@ -78,8 +79,16 @@ public class AuthServiceImpl implements AuthService {
         }
 
         UserResponse userResponse = mapToUserResponse(user);
-        String accessToken = jwtUtil.generateAccessToken(user.getEmail(), user.getRole().getRoleName().toString());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
+        // Dùng userId thay vì email khi tạo token
+        String accessToken = jwtUtil.generateAccessToken(
+            user.getId(),
+            user.getEmail(),
+            java.util.List.of(user.getRole().getRoleName().toString())
+        );
+        String refreshToken = jwtUtil.generateRefreshToken(
+            user.getId(),
+            java.util.List.of(user.getRole().getRoleName().toString())  // ✅ Thêm roles
+        );
 
         AuthResponse response = new AuthResponse();
         response.setSuccess(true);
@@ -109,8 +118,16 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
 
         UserResponse userResponse = mapToUserResponse(user);
-        String accessToken = jwtUtil.generateAccessToken(user.getEmail(), user.getRole().getRoleName().toString());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
+        // Dùng userId thay vì email khi tạo token
+        String accessToken = jwtUtil.generateAccessToken(
+            user.getId(),
+            user.getEmail(),
+            java.util.List.of(user.getRole().getRoleName().toString())
+        );
+        String refreshToken = jwtUtil.generateRefreshToken(
+            user.getId(),
+            java.util.List.of(user.getRole().getRoleName().toString())  // ✅ Thêm roles
+        );
 
         AuthResponse response = new AuthResponse();
         response.setSuccess(true);
@@ -125,7 +142,8 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
-        String resetToken = jwtUtil.generateAccessToken(user.getEmail(), "RESET_PASSWORD");
+        // Dùng generateSpecialToken với userId thay vì email
+        String resetToken = jwtUtil.generateSpecialToken(user.getId(), user.getEmail(), "RESET_PASSWORD");
         String resetLink = "http://localhost:8080/api/auth/reset-password?token=" + resetToken;
 
         try {
@@ -142,8 +160,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void resetPassword(ResetPasswordRequest request) {
-        String email = jwtUtil.getEmailFromToken(request.getToken());
-        if (!jwtUtil.validateToken(request.getToken()) || !jwtUtil.getRoleFromToken(request.getToken()).equals("RESET_PASSWORD")) {
+        // Dùng phương thức mới để lấy email và validate type
+        String email = jwtUtil.getEmailFromSpecialToken(request.getToken());
+        String type = jwtUtil.getTypeFromSpecialToken(request.getToken());
+
+        if (!jwtUtil.validateToken(request.getToken()) || !"RESET_PASSWORD".equals(type)) {
             throw new IllegalArgumentException("Invalid or expired token");
         }
 
@@ -157,8 +178,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void validateResetToken(String token) {
-        String email = jwtUtil.getEmailFromToken(token);
-        if (!jwtUtil.validateToken(token) || !jwtUtil.getRoleFromToken(token).equals("RESET_PASSWORD")) {
+        // Dùng phương thức mới để lấy email và validate type
+        String email = jwtUtil.getEmailFromSpecialToken(token);
+        String type = jwtUtil.getTypeFromSpecialToken(token);
+
+        if (!jwtUtil.validateToken(token) || !"RESET_PASSWORD".equals(type)) {
             throw new IllegalArgumentException("Invalid or expired reset token");
         }
 
@@ -168,8 +192,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void verifyEmail(VerifyEmailRequest request) {
-        String email = jwtUtil.getEmailFromToken(request.getToken());
-        if (!jwtUtil.validateToken(request.getToken()) || !jwtUtil.getRoleFromToken(request.getToken()).equals("VERIFY_EMAIL")) {
+        // Dùng phương thức mới để lấy email và validate type
+        String email = jwtUtil.getEmailFromSpecialToken(request.getToken());
+        String type = jwtUtil.getTypeFromSpecialToken(request.getToken());
+
+        if (!jwtUtil.validateToken(request.getToken()) || !"VERIFY_EMAIL".equals(type)) {
             throw new IllegalArgumentException("Invalid or expired verification token");
         }
 
@@ -183,17 +210,35 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse refreshToken(RefreshTokenRequest request) {
-        String email = jwtUtil.getEmailFromToken(request.getRefreshToken());
+        Integer userId = jwtUtil.getUserIdFromToken(request.getRefreshToken());
         if (!jwtUtil.validateToken(request.getRefreshToken())) {
             throw new IllegalArgumentException("Invalid or expired refresh token");
         }
 
-        User user = userRepository.findByEmail(email)
+        // ✅ Kiểm tra đây có phải là refresh token không
+        if (!jwtUtil.isRefreshToken(request.getRefreshToken())) {
+            throw new IllegalArgumentException("Token is not a refresh token");
+        }
+
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
+        // ✅ Kiểm tra user có bị khóa không
+        if (!user.getIsActive()) {
+            throw new IllegalArgumentException("User account is inactive or blocked");
+        }
+
         UserResponse userResponse = mapToUserResponse(user);
-        String accessToken = jwtUtil.generateAccessToken(user.getEmail(), user.getRole().getRoleName().toString());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getEmail());
+        // Dùng userId thay vì email khi tạo token
+        String accessToken = jwtUtil.generateAccessToken(
+            user.getId(),
+            user.getEmail(),
+            java.util.List.of(user.getRole().getRoleName().toString())
+        );
+        String refreshToken = jwtUtil.generateRefreshToken(
+            user.getId(),
+            java.util.List.of(user.getRole().getRoleName().toString())  // ✅ Thêm roles
+        );
 
         AuthResponse response = new AuthResponse();
         response.setSuccess(true);
