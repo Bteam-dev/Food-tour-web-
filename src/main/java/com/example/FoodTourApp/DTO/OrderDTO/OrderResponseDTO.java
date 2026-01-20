@@ -27,6 +27,9 @@ public class OrderResponseDTO {
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;
     private BigDecimal totalAmount;
+    private BigDecimal platformCommissionRate;
+    private BigDecimal platformCommissionAmount;
+    private BigDecimal sellerReceivedAmount;
     private String notes;
     private LocalDateTime estimatedDeliveryTime;
     private LocalDateTime actualDeliveryTime;

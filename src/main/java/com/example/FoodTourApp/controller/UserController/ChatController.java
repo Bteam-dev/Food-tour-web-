@@ -3,6 +3,8 @@ package com.example.FoodTourApp.controller.UserController;
 import com.example.FoodTourApp.DTO.ChatDTO.*;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.ChatService;
+import com.example.FoodTourApp.service.impl.FileStorageService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -25,6 +27,8 @@ import java.util.Map;
 public class ChatController {
 
     private final ChatService chatService;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     /**
      * Tạo hoặc lấy conversation với user khác
@@ -204,6 +208,53 @@ public class ChatController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Error uploading file: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Gửi tin nhắn có file đính kèm
+     * POST /api/user/chat/messages/file
+     *
+     * Content-Type: multipart/form-data
+     * - data: JSON string (conversationId)
+     * - file: File đính kèm (ảnh, pdf, max 5MB)
+     */
+    @PostMapping("/messages/file")
+    public ResponseEntity<?> sendFileMessage(
+            @RequestParam(value = "data", required = true) String dataJson,
+            @RequestParam(value = "file", required = true) MultipartFile file,
+            @AuthenticationPrincipal User user) {
+        log.info("User {} sending file message", user.getId());
+
+        try {
+            // Parse conversation ID từ JSON
+            Map<String, Object> data = objectMapper.readValue(dataJson, Map.class);
+            Long conversationId = Long.valueOf(data.get("conversationId").toString());
+
+            // Upload file vào FileMessage/conversation_X/
+            String subfolderId = "conversation_" + conversationId;
+            String fileUrl = fileStorageService.storeFile(file, FileStorageService.FileCategory.FILE_MESSAGE, subfolderId);
+            log.info("File uploaded for conversation {}: {}", conversationId, fileUrl);
+
+            // Tạo SendMessageRequest với file URL
+            SendMessageRequest request = new SendMessageRequest();
+            request.setConversationId(conversationId);
+            request.setContent(fileUrl); // Lưu đường dẫn file vào content
+            request.setMessageType("FILE");
+
+            MessageResponse response = chatService.sendMessage(user.getId(), request);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Đã gửi file");
+            result.put("data", response);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error sending file message: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());

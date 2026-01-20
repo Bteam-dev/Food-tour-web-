@@ -33,6 +33,7 @@ public class CreateShopRequestDTO {
     /**
      * Số điện thoại của shop - người dùng tự điền
      */
+    @NotBlank(message = "Số điện thoại không được để trống")
     private String phone;
 
     /**
@@ -51,5 +52,6 @@ public class CreateShopRequestDTO {
      * Giờ mở cửa - format JSON
      * Ví dụ: {"monday": {"open": "08:00", "close": "22:00"}, ...}
      */
+    @NotBlank(message = "Giờ mở cửa không được để trống")
     private String openingHours;
 }

@@ -75,15 +75,20 @@ public class DataInitializer implements CommandLineRunner {
             admin.setPasswordHash(passwordEncoder.encode("Admin123!"));
             admin.setFullName("Admin User");
             admin.setPhone("1234567890");
+            admin.setAvatarUrl(null); // Admin không cần avatar lúc khởi tạo
+            admin.setDateOfBirth(null); // Có thể cập nhật sau
+            admin.setGender(null); // Có thể cập nhật sau
             Role adminRole = roleRepository.findByRoleName(Role.RoleName.ADMIN)
                     .orElseThrow(() -> new IllegalStateException("Admin role not found"));
             admin.setRole(adminRole);
             admin.setIsActive(true);
             admin.setEmailVerified(true);
+            admin.setWalletBalance(new java.math.BigDecimal("0.00")); // Ví admin bắt đầu từ 0, sẽ nhận hoa hồng 12% từ mỗi đơn
+            admin.setLastLogin(null); // Chưa đăng nhập lần nào
             admin.setCreatedAt(LocalDateTime.now());
             admin.setUpdatedAt(LocalDateTime.now());
             userRepository.save(admin);
-            logger.info("Created admin user with email: admin@foodtourapp.com");
+            logger.info("Created admin user with email: admin@foodtourapp.com (Wallet: 0 VND - will receive 12% commission from orders)");
         } else {
             logger.info("Admin user already exists, skipping admin user creation.");
         }

@@ -4,13 +4,15 @@ import com.example.FoodTourApp.DTO.UserDTO.UpdateProfileRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.UserService;
+import com.example.FoodTourApp.service.impl.FileStorageService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.util.HashMap;
@@ -24,6 +26,8 @@ import java.util.Map;
 public class UserProfileController {
 
     private final UserService userService;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     /**
      * Xem thông tin profile cá nhân
@@ -50,16 +54,38 @@ public class UserProfileController {
     }
 
     /**
-     * Cập nhật profile cá nhân
+     * Cập nhật profile cá nhân (có thể upload avatar)
      * PUT /api/user/profile
+     *
+     * Cách sử dụng:
+     * - Không có avatar: gửi application/json với UpdateProfileRequest
+     * - Có avatar: gửi multipart/form-data với data (JSON string) + file avatar
      */
     @PutMapping
     public ResponseEntity<?> updateProfile(
-            @Valid @RequestBody UpdateProfileRequest request,
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "avatar", required = false) MultipartFile avatar,
             @AuthenticationPrincipal User user) {
         log.info("User ID {} is updating their profile", user.getId());
 
         try {
+            UpdateProfileRequest request;
+
+            // Nếu có dataJson (form-data) thì parse, nếu không thì tạo request rỗng
+            if (dataJson != null && !dataJson.isEmpty()) {
+                request = objectMapper.readValue(dataJson, UpdateProfileRequest.class);
+            } else {
+                request = new UpdateProfileRequest();
+            }
+
+            // Upload avatar nếu có - lưu vào UserAvatar/user_X/
+            if (avatar != null && !avatar.isEmpty()) {
+                String subfolderId = "user_" + user.getId();
+                String avatarUrl = fileStorageService.storeFile(avatar, FileStorageService.FileCategory.USER_AVATAR, subfolderId);
+                request.setAvatarUrl(avatarUrl);
+                log.info("Avatar uploaded for user {}: {}", user.getId(), avatarUrl);
+            }
+
             UserResponse response = userService.updateProfile(user.getId(), request);
 
             Map<String, Object> result = new HashMap<>();

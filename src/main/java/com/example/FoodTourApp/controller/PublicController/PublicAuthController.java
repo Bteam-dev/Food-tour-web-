@@ -60,19 +60,21 @@ public class PublicAuthController {
     @PostMapping("/login")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
         try {
-            // Xác thực email và password
+            // Xác thực username và password
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(
-                            loginRequest.getEmail(), loginRequest.getPassword()));
+                            loginRequest.getUsername(), loginRequest.getPassword()));
 
             // Kiểm tra xem người dùng có bật 2FA không
-            boolean is2FAEnabled = userService.is2FAEnabled(loginRequest.getEmail());
+            UserResponse userResponse = userService.getUserByUsername(loginRequest.getUsername());
+            boolean is2FAEnabled = userService.is2FAEnabled(userResponse.getEmail());
 
             if (is2FAEnabled) {
                 // Nếu 2FA được bật, trả về thông báo yêu cầu mã xác thực
                 Map<String, Object> responseBody = new HashMap<>();
                 responseBody.put("requires2FA", true);
-                responseBody.put("email", loginRequest.getEmail());
+                responseBody.put("username", loginRequest.getUsername());
+                responseBody.put("email", userResponse.getEmail());
                 responseBody.put("message", "Vui lòng nhập mã xác thực 2FA");
 
                 return ResponseEntity.ok(responseBody);
@@ -82,17 +84,15 @@ public class PublicAuthController {
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
             UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-
             List<String> roles = userDetails.getAuthorities().stream()
                     .map(GrantedAuthority::getAuthority)
                     .collect(Collectors.toList());
 
-            // Lấy userId từ userService dựa trên email
-            UserResponse userResponse = userService.getUserByEmail(userDetails.getUsername());
+            // Lấy userId từ userResponse
             Integer userId = userResponse.getId();
 
             // Tạo JWT token (không dùng cookie nữa, trả về trong response body)
-            String accessToken = jwtUtils.generateAccessToken(userId, userDetails.getUsername(), roles);
+            String accessToken = jwtUtils.generateAccessToken(userId, userResponse.getEmail(), roles);
 
             // Tạo response đầy đủ thông tin
             Map<String, Object> responseBody = new HashMap<>();
@@ -102,11 +102,11 @@ public class PublicAuthController {
             responseBody.put("accessToken", accessToken);
             responseBody.put("tokenType", "Bearer");
 
-            logger.info("Login successful for email: {}", loginRequest.getEmail());
+            logger.info("Login successful for username: {}", loginRequest.getUsername());
             return ResponseEntity.ok(responseBody);
 
         } catch (AuthenticationException ex) {
-            logger.error("Authentication failed for email: {}. Error: {}", loginRequest.getEmail(), ex.getMessage());
+            logger.error("Authentication failed for username: {}. Error: {}", loginRequest.getUsername(), ex.getMessage());
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("message", "Authentication failed: " + ex.getMessage());

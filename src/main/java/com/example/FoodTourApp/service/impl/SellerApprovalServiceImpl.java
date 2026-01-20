@@ -141,6 +141,19 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
         return mapToResponse(approval);
     }
 
+    @Override
+    public SellerApprovalResponse getApprovalById(Integer id, Integer userId) {
+        SellerApproval approval = sellerApprovalRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Approval request not found"));
+
+        // Kiểm tra quyền sở hữu: chỉ user sở hữu mới được xem
+        if (!approval.getUser().getId().equals(userId)) {
+            throw new SecurityException("You don't have permission to view this approval request");
+        }
+
+        return mapToResponse(approval);
+    }
+
     private SellerApprovalResponse mapToResponse(SellerApproval approval) {
         SellerApprovalResponse response = new SellerApprovalResponse();
         response.setId(approval.getId());

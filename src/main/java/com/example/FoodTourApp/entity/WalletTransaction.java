@@ -50,6 +50,7 @@ public class WalletTransaction {
         payment,           // Thanh toán đơn hàng (trừ tiền người mua)
         refund,            // Hoàn tiền
         received_payment,  // Nhận tiền từ đơn hàng (cộng tiền người bán)
-        admin_adjustment   // Admin điều chỉnh số dư
+        admin_adjustment,  // Admin điều chỉnh số dư
+        platform_commission // Hoa hồng nền tảng (admin nhận từ mỗi đơn hàng)
     }
 }

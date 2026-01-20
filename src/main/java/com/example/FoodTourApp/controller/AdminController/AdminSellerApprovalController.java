@@ -74,19 +74,7 @@ public class AdminSellerApprovalController {
         request.setApprovalId(id);
 
         try {
-            // Kiểm tra admin có quyền admin không
-            boolean isAdmin = authentication.getAuthorities().stream()
-                    .anyMatch(auth -> auth.getAuthority().equals("ADMIN"));
-
-            if (!isAdmin) {
-                logger.error("User ID {} attempted to review approval without admin role", admin.getId());
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("message", "Only admins can review approval requests");
-                return ResponseEntity.status(403).body(error);
-            }
-
-            SellerApprovalResponse response = sellerApprovalService.reviewApproval(admin.getId(), request);
+            SellerApprovalResponse response = sellerApprovalService.reviewApproval(git addadmin.getId(), request);
             logger.info("Admin ID {} successfully reviewed approval request {} with status {}",
                        admin.getId(), request.getApprovalId(), request.getStatus());
 

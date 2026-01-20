@@ -121,21 +121,20 @@ public class UserSellerApprovalController {
         logger.info("User ID {} is fetching approval request with id {}", userId, id);
 
         try {
-            SellerApprovalResponse response = sellerApprovalService.getApprovalById(id);
-
-            // Kiểm tra xem đơn có phải của user này không - so sánh bằng userId
-            if (!response.getUserId().equals(userId)) {
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("message", "You don't have permission to view this approval request");
-                return ResponseEntity.status(403).body(error);
-            }
+            // Kiểm tra quyền sở hữu được xử lý trong service layer
+            SellerApprovalResponse response = sellerApprovalService.getApprovalById(id, userId);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", response);
 
             return ResponseEntity.ok(result);
+        } catch (SecurityException e) {
+            logger.error("Permission denied for user ID {} to view approval {}: {}", userId, id, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(403).body(error);
         } catch (Exception e) {
             logger.error("Error fetching approval {} for user ID {}: {}", id, userId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();

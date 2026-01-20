@@ -43,14 +43,14 @@ public class Review {
     private Boolean isAnonymous = false;
 
     @Column(name = "admin_reply", columnDefinition = "TEXT")
-    private String adminReply;
+    private String reply;
 
     @Column(name = "admin_replied_at")
-    private LocalDateTime adminRepliedAt;
+    private LocalDateTime repliedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "admin_replied_by")
-    private User adminRepliedBy;
+    private User repliedBy;
 
     @Column(name = "is_approved", nullable = false)
     private Boolean isApproved = true;

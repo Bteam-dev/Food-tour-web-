@@ -34,17 +34,16 @@ public class SellerShopController {
     private final ObjectMapper objectMapper;
 
     /**
-     * Tạo cửa hàng mới (có thể upload ảnh logo và banner từ máy)
+     * Tạo cửa hàng mới (upload ảnh logo và banner dưới dạng form-data)
      * POST /api/seller/shops
      *
-     * Cách sử dụng giống như đăng bài trên Facebook:
-     * - Nếu KHÔNG có ảnh: gửi application/json với data thông thường
-     * - Nếu CÓ ảnh: gửi multipart/form-data với data (JSON string) + file logo/banner
-     *
-     * Form data (khi có ảnh):
-     * - data: JSON string (CreateShopRequestDTO)
+     * Cách sử dụng:
+     * - Content-Type: multipart/form-data
+     * - data: JSON string (CreateShopRequestDTO) - REQUIRED
      * - logo: file (optional, jpg/jpeg/png, max 5MB)
      * - banner: file (optional, jpg/jpeg/png, max 5MB)
+     *
+     * NOTE: Không cần gửi logoUrl/bannerUrl trong JSON nữa, chỉ cần upload file
      */
     @PostMapping
     public ResponseEntity<ShopResponseDTO> createShop(
@@ -63,16 +62,19 @@ public class SellerShopController {
 
             CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
 
-            // Upload logo nếu có (giống như chọn ảnh đại diện trên Facebook)
+            // Tạo subfolder ID dựa trên seller ID (vì chưa có shop ID)
+            String subfolderId = "seller_" + seller.getId();
+
+            // Upload logo nếu có - lưu vào thư mục ShopLogo/seller_X/
             if (logo != null && !logo.isEmpty()) {
-                String logoUrl = fileStorageService.storeFile(logo, "shops/" + seller.getId());
+                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
                 request.setLogoUrl(logoUrl);
                 log.info("Logo uploaded: {}", logoUrl);
             }
 
-            // Upload banner nếu có (giống như chọn ảnh bìa trên Facebook)
+            // Upload banner nếu có - lưu vào thư mục ShopBanner/seller_X/
             if (banner != null && !banner.isEmpty()) {
-                String bannerUrl = fileStorageService.storeFile(banner, "shops/" + seller.getId());
+                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
                 request.setBannerUrl(bannerUrl);
                 log.info("Banner uploaded: {}", bannerUrl);
             }
@@ -88,12 +90,14 @@ public class SellerShopController {
     }
 
     /**
-     * Cập nhật thông tin cửa hàng (có thể upload ảnh logo và banner mới từ máy)
+     * Cập nhật thông tin cửa hàng (upload ảnh logo và banner mới dưới dạng form-data)
      * PUT /api/seller/shops/{shopId}
      *
-     * Cách sử dụng giống như đổi ảnh đại diện trên Facebook:
-     * - Nếu KHÔNG đổi ảnh: gửi application/json với data thông thường
-     * - Nếu CÓ đổi ảnh: gửi multipart/form-data với data + file logo/banner mới
+     * Cách sử dụng:
+     * - Content-Type: multipart/form-data
+     * - data: JSON string (UpdateShopRequestDTO) - REQUIRED
+     * - logo: file (optional, nếu muốn đổi logo mới)
+     * - banner: file (optional, nếu muốn đổi banner mới)
      */
     @PutMapping("/{shopId}")
     public ResponseEntity<ShopResponseDTO> updateShop(
@@ -113,16 +117,19 @@ public class SellerShopController {
 
             UpdateShopRequestDTO request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
 
-            // Upload logo mới nếu có
+            // Tạo subfolder ID dựa trên shop ID - để phân biệt từng shop
+            String subfolderId = "shop_" + shopId;
+
+            // Upload logo mới nếu có - lưu vào thư mục ShopLogo/shop_X/
             if (logo != null && !logo.isEmpty()) {
-                String logoUrl = fileStorageService.storeFile(logo, "shops/" + seller.getId());
+                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
                 request.setLogoUrl(logoUrl);
                 log.info("Logo uploaded: {}", logoUrl);
             }
 
-            // Upload banner mới nếu có
+            // Upload banner mới nếu có - lưu vào thư mục ShopBanner/shop_X/
             if (banner != null && !banner.isEmpty()) {
-                String bannerUrl = fileStorageService.storeFile(banner, "shops/" + seller.getId());
+                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
                 request.setBannerUrl(bannerUrl);
                 log.info("Banner uploaded: {}", bannerUrl);
             }

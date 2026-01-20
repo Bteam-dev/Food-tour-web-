@@ -9,6 +9,5 @@ import java.util.List;
 @Repository
 public interface WalletTransactionRepository extends JpaRepository<WalletTransaction, Integer> {
     List<WalletTransaction> findByUserIdOrderByCreatedAtDesc(Integer userId);
-    List<WalletTransaction> findByOrderIdOrderByCreatedAtDesc(Integer orderId);
 }
 

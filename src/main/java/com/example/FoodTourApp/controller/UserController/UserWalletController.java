@@ -52,31 +52,6 @@ public class UserWalletController {
         }
     }
 
-    /**
-     * Nạp tiền vào ví (Direct - chỉ dùng cho testing)
-     * POST /api/user/wallet/deposit
-     */
-    @PostMapping("/deposit")
-    public ResponseEntity<?> deposit(@Valid @RequestBody DepositRequestDTO request,
-                                     @AuthenticationPrincipal User user) {
-        log.info("User ID {} is depositing {} to wallet", user.getId(), request.getAmount());
-
-        try {
-            WalletResponseDTO response = walletService.deposit(request, user);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("message", "Nạp tiền thành công");
-            result.put("data", response);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            log.error("Error depositing to wallet for user ID {}: {}", user.getId(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
-        }
-    }
 
     /**
      * Lấy thông tin ví

@@ -288,6 +288,9 @@ public class OrderServiceImpl implements OrderService {
         dto.setDiscountAmount(order.getDiscountAmount());
         dto.setTaxAmount(order.getTaxAmount());
         dto.setTotalAmount(order.getTotalAmount());
+        dto.setPlatformCommissionRate(order.getPlatformCommissionRate());
+        dto.setPlatformCommissionAmount(order.getPlatformCommissionAmount());
+        dto.setSellerReceivedAmount(order.getSellerReceivedAmount());
         dto.setNotes(order.getNotes());
         dto.setEstimatedDeliveryTime(order.getEstimatedDeliveryTime());
         dto.setActualDeliveryTime(order.getActualDeliveryTime());

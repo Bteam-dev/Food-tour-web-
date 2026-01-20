@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.WalletDTO.DepositRequestDTO;
 import com.example.FoodTourApp.DTO.WalletDTO.WalletResponseDTO;
 import com.example.FoodTourApp.DTO.WalletDTO.WalletTransactionResponseDTO;
 import com.example.FoodTourApp.entity.Order;
+import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.entity.WalletTransaction;
 import com.example.FoodTourApp.repository.UserRepository;
@@ -131,13 +132,30 @@ public class WalletServiceImpl implements WalletService {
         log.info("Deducted {} from buyer {}. Balance: {} -> {}",
                 order.getTotalAmount(), dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
 
-        // 2. Cộng tiền người bán
+        // 2. Tính toán hoa hồng nền tảng (12%)
+        BigDecimal commissionRate = order.getPlatformCommissionRate() != null
+                ? order.getPlatformCommissionRate()
+                : new BigDecimal("12.00");
+        BigDecimal commissionAmount = order.getTotalAmount()
+                .multiply(commissionRate)
+                .divide(new BigDecimal("100"), 2, java.math.RoundingMode.HALF_UP);
+        BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
+
+        // Lưu thông tin hoa hồng vào đơn hàng
+        order.setPlatformCommissionRate(commissionRate);
+        order.setPlatformCommissionAmount(commissionAmount);
+        order.setSellerReceivedAmount(sellerReceiveAmount);
+
+        log.info("Order {} commission: {}% = {} VND, Seller receives: {} VND",
+                order.getId(), commissionRate, commissionAmount, sellerReceiveAmount);
+
+        // 3. Cộng tiền cho người bán (sau khi trừ hoa hồng)
         User seller = order.getShop().getSeller();
         User dbSeller = userRepository.findById(seller.getId())
                 .orElseThrow(() -> new RuntimeException("Seller not found"));
 
         BigDecimal sellerBalanceBefore = dbSeller.getWalletBalance();
-        BigDecimal sellerBalanceAfter = sellerBalanceBefore.add(order.getTotalAmount());
+        BigDecimal sellerBalanceAfter = sellerBalanceBefore.add(sellerReceiveAmount);
         dbSeller.setWalletBalance(sellerBalanceAfter);
         dbSeller.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbSeller);
@@ -146,22 +164,51 @@ public class WalletServiceImpl implements WalletService {
         WalletTransaction sellerTransaction = new WalletTransaction();
         sellerTransaction.setUser(dbSeller);
         sellerTransaction.setTransactionType(WalletTransaction.TransactionType.received_payment);
-        sellerTransaction.setAmount(order.getTotalAmount());
+        sellerTransaction.setAmount(sellerReceiveAmount);
         sellerTransaction.setBalanceBefore(sellerBalanceBefore);
         sellerTransaction.setBalanceAfter(sellerBalanceAfter);
         sellerTransaction.setOrder(order);
-        sellerTransaction.setDescription("Nhận tiền từ đơn hàng #" + order.getOrderNumber());
+        sellerTransaction.setDescription("Nhận tiền từ đơn hàng #" + order.getOrderNumber()
+                + " (đã trừ hoa hồng " + commissionRate + "%)");
         sellerTransaction.setCreatedAt(LocalDateTime.now());
         walletTransactionRepository.save(sellerTransaction);
 
         log.info("Added {} to seller {}. Balance: {} -> {}",
-                order.getTotalAmount(), dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
+                sellerReceiveAmount, dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
 
-        // 3. Cập nhật trạng thái đơn hàng
+        // 4. Cộng hoa hồng cho admin (nền tảng)
+        // Tìm user admin đầu tiên trong hệ thống
+        User admin = userRepository.findFirstByRoleName(Role.RoleName.ADMIN)
+                .orElseThrow(() -> new RuntimeException("Admin account not found in system"));
+
+        BigDecimal adminBalanceBefore = admin.getWalletBalance();
+        BigDecimal adminBalanceAfter = adminBalanceBefore.add(commissionAmount);
+        admin.setWalletBalance(adminBalanceAfter);
+        admin.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(admin);
+
+        // Tạo transaction record cho admin (hoa hồng nền tảng)
+        WalletTransaction adminTransaction = new WalletTransaction();
+        adminTransaction.setUser(admin);
+        adminTransaction.setTransactionType(WalletTransaction.TransactionType.platform_commission);
+        adminTransaction.setAmount(commissionAmount);
+        adminTransaction.setBalanceBefore(adminBalanceBefore);
+        adminTransaction.setBalanceAfter(adminBalanceAfter);
+        adminTransaction.setOrder(order);
+        adminTransaction.setDescription("Hoa hồng nền tảng " + commissionRate + "% từ đơn hàng #"
+                + order.getOrderNumber() + " (Shop: " + order.getShop().getShopName() + ")");
+        adminTransaction.setCreatedAt(LocalDateTime.now());
+        walletTransactionRepository.save(adminTransaction);
+
+        log.info("Added commission {} to admin {}. Balance: {} -> {}",
+                commissionAmount, admin.getId(), adminBalanceBefore, adminBalanceAfter);
+
+        // 5. Cập nhật trạng thái đơn hàng
         order.setPaymentStatus(Order.PaymentStatus.paid);
         order.setUpdatedAt(LocalDateTime.now());
 
-        log.info("Order {} payment completed successfully via wallet", order.getId());
+        log.info("Order {} payment completed successfully via wallet. Buyer paid: {}, Seller received: {}, Platform commission: {}",
+                order.getId(), order.getTotalAmount(), sellerReceiveAmount, commissionAmount);
     }
 
     @Override

@@ -101,17 +101,16 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid email or password"));
+        User user = userRepository.findByUsername(request.getUsername())
+                .orElseThrow(() -> new IllegalArgumentException("Invalid username or password"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new IllegalArgumentException("Invalid email or password");
+            throw new IllegalArgumentException("Invalid username or password");
         }
 
-        // (Tùy chọn) Kiểm tra email đã verify chưa
-        // if (!user.getEmailVerified()) {
-        //     throw new IllegalArgumentException("Email not verified. Please verify your email before logging in.");
-        // }
+         if (!user.getEmailVerified()) {
+             throw new IllegalArgumentException("Email not verified. Please verify your email before logging in.");
+         }
 
         user.setLastLogin(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());

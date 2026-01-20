@@ -13,4 +13,5 @@ public interface SellerApprovalService {
     Page<SellerApprovalResponse> getAllApprovalsByStatus(String status, Pageable pageable);
     Page<SellerApprovalResponse> getMyApprovals(Integer userId, Pageable pageable);
     SellerApprovalResponse getApprovalById(Integer id);
+    SellerApprovalResponse getApprovalById(Integer id, Integer userId);
 }

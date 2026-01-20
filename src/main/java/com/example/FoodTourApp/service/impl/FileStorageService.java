@@ -15,28 +15,46 @@ import java.util.UUID;
 @Slf4j
 public class FileStorageService {
 
-    // Các thư mục lưu trữ cố định
+    // Các thư mục lưu trữ cố định - chia theo loại file rõ ràng
     private static final String BASE_DIR = "D:\\Project\\BackEnd\\FoodTourApp_BE\\StorageFile";
-    private static final String PRODUCT_DIR = BASE_DIR + "\\Product";
+    private static final String PRODUCT_IMAGE_DIR = BASE_DIR + "\\ProductImage";
+    private static final String SHOP_LOGO_DIR = BASE_DIR + "\\ShopLogo";
+    private static final String SHOP_BANNER_DIR = BASE_DIR + "\\ShopBanner";
+    private static final String REVIEW_IMAGE_DIR = BASE_DIR + "\\ReviewImage";
+    private static final String USER_AVATAR_DIR = BASE_DIR + "\\UserAvatar";
     private static final String FILE_MESSAGE_DIR = BASE_DIR + "\\FileMessage";
-    private static final String AVATAR_DIR = BASE_DIR + "\\Avatar";
 
     /**
      * Enum định nghĩa các loại file storage
+     * Chia nhỏ để dễ quản lý và theo dõi
      */
     public enum FileCategory {
-        PRODUCT,
-        FILE_MESSAGE,
-        AVATAR
+        PRODUCT_IMAGE,      // Ảnh sản phẩm
+        SHOP_LOGO,          // Logo cửa hàng
+        SHOP_BANNER,        // Banner cửa hàng
+        REVIEW_IMAGE,       // Ảnh đánh giá (review)
+        USER_AVATAR,        // Avatar người dùng
+        FILE_MESSAGE        // File gửi trong chat
     }
 
     /**
      * Lưu file theo category và trả về đường dẫn public
      * @param file File cần lưu
-     * @param category Loại file (PRODUCT, FILE_MESSAGE, AVATAR)
+     * @param category Loại file
      * @return Đường dẫn đầy đủ của file đã lưu
      */
     public String storeFile(MultipartFile file, FileCategory category) throws IOException {
+        return storeFile(file, category, null);
+    }
+
+    /**
+     * Lưu file theo category và subfolder ID (để phân biệt theo product/shop/user)
+     * @param file File cần lưu
+     * @param category Loại file
+     * @param subfolderId ID của product/shop/user (để tạo thư mục con)
+     * @return Đường dẫn đầy đủ của file đã lưu
+     */
+    public String storeFile(MultipartFile file, FileCategory category, String subfolderId) throws IOException {
         if (file == null || file.isEmpty()) {
             return null;
         }
@@ -74,6 +92,12 @@ public class FileStorageService {
 
         // Chọn thư mục dựa trên category
         String targetDir = getDirectoryByCategory(category);
+
+        // Nếu có subfolderId, tạo thêm thư mục con (VD: ProductImage/product_5/)
+        if (subfolderId != null && !subfolderId.isEmpty()) {
+            targetDir = targetDir + "\\" + subfolderId;
+        }
+
         Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
 
         // Tạo thư mục nếu chưa tồn tại
@@ -83,7 +107,7 @@ public class FileStorageService {
 
         try {
             Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-            log.info("File saved successfully to {}: {}", category, targetPath);
+            log.info("File saved successfully to {} (subfolder: {}): {}", category, subfolderId, targetPath);
         } catch (IOException e) {
             log.error("Could not store file {} to {}: {}", originalFilename, category, e.getMessage());
             throw new IOException("Không thể lưu file " + originalFilename, e);
@@ -99,18 +123,7 @@ public class FileStorageService {
      */
     @Deprecated
     public String storeFile(MultipartFile file, String subfolder) throws IOException {
-        // Map subfolder cũ sang FileCategory mới
-        FileCategory category;
-        if (subfolder.contains("product")) {
-            category = FileCategory.PRODUCT;
-        } else if (subfolder.contains("message") || subfolder.contains("chat")) {
-            category = FileCategory.FILE_MESSAGE;
-        } else if (subfolder.contains("avatar") || subfolder.contains("user") || subfolder.contains("shop")) {
-            category = FileCategory.AVATAR;
-        } else {
-            category = FileCategory.PRODUCT; // Default
-        }
-
+        FileCategory category = getCategoryFromSubfolder(subfolder);
         return storeFile(file, category);
     }
 
@@ -121,6 +134,17 @@ public class FileStorageService {
      * @return Danh sách đường dẫn đầy đủ của các file
      */
     public List<String> storeFiles(MultipartFile[] files, FileCategory category) throws IOException {
+        return storeFiles(files, category, null);
+    }
+
+    /**
+     * Lưu nhiều file cùng lúc với subfolder ID
+     * @param files Mảng các file cần lưu
+     * @param category Loại file
+     * @param subfolderId ID của product/shop/user
+     * @return Danh sách đường dẫn đầy đủ của các file
+     */
+    public List<String> storeFiles(MultipartFile[] files, FileCategory category, String subfolderId) throws IOException {
         if (files == null || files.length == 0) {
             return new ArrayList<>();
         }
@@ -128,7 +152,7 @@ public class FileStorageService {
         List<String> paths = new ArrayList<>();
         for (MultipartFile file : files) {
             if (file != null && !file.isEmpty()) {
-                String path = storeFile(file, category);
+                String path = storeFile(file, category, subfolderId);
                 paths.add(path);
             }
         }
@@ -167,14 +191,20 @@ public class FileStorageService {
      */
     private String getDirectoryByCategory(FileCategory category) {
         switch (category) {
-            case PRODUCT:
-                return PRODUCT_DIR;
+            case PRODUCT_IMAGE:
+                return PRODUCT_IMAGE_DIR;
+            case SHOP_LOGO:
+                return SHOP_LOGO_DIR;
+            case SHOP_BANNER:
+                return SHOP_BANNER_DIR;
+            case REVIEW_IMAGE:
+                return REVIEW_IMAGE_DIR;
+            case USER_AVATAR:
+                return USER_AVATAR_DIR;
             case FILE_MESSAGE:
                 return FILE_MESSAGE_DIR;
-            case AVATAR:
-                return AVATAR_DIR;
             default:
-                return PRODUCT_DIR;
+                return PRODUCT_IMAGE_DIR;
         }
     }
 
@@ -183,19 +213,27 @@ public class FileStorageService {
      */
     private FileCategory getCategoryFromSubfolder(String subfolder) {
         if (subfolder == null) {
-            return FileCategory.PRODUCT;
+            return FileCategory.PRODUCT_IMAGE;
         }
 
         subfolder = subfolder.toLowerCase();
         if (subfolder.contains("product")) {
-            return FileCategory.PRODUCT;
+            return FileCategory.PRODUCT_IMAGE;
         } else if (subfolder.contains("message") || subfolder.contains("chat")) {
             return FileCategory.FILE_MESSAGE;
-        } else if (subfolder.contains("avatar") || subfolder.contains("user") || subfolder.contains("shop")) {
-            return FileCategory.AVATAR;
+        } else if (subfolder.contains("shop") && subfolder.contains("banner")) {
+            return FileCategory.SHOP_BANNER;
+        } else if (subfolder.contains("shop") && subfolder.contains("logo")) {
+            return FileCategory.SHOP_LOGO;
+        } else if (subfolder.contains("shop")) {
+            return FileCategory.SHOP_LOGO; // Default cho shop
+        } else if (subfolder.contains("review")) {
+            return FileCategory.REVIEW_IMAGE;
+        } else if (subfolder.contains("avatar") || subfolder.contains("user")) {
+            return FileCategory.USER_AVATAR;
         }
 
-        return FileCategory.PRODUCT;
+        return FileCategory.PRODUCT_IMAGE;
     }
 
     /**

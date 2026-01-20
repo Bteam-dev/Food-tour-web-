@@ -55,6 +55,15 @@ public class Order {
     @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmount;
 
+    @Column(name = "platform_commission_rate", precision = 5, scale = 2)
+    private BigDecimal platformCommissionRate = new BigDecimal("12.00"); // 12% hoa hồng platform (admin)
+
+    @Column(name = "platform_commission_amount", precision = 15, scale = 2)
+    private BigDecimal platformCommissionAmount = BigDecimal.ZERO; // Số tiền hoa hồng thực tế
+
+    @Column(name = "seller_received_amount", precision = 15, scale = 2)
+    private BigDecimal sellerReceivedAmount = BigDecimal.ZERO; // Số tiền seller thực nhận (sau khi trừ hoa hồng)
+
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
 

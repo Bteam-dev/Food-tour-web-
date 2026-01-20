@@ -6,10 +6,7 @@ import com.example.FoodTourApp.DTO.ProductDTO.UpdateProductRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.CreateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.UpdateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
-import com.example.FoodTourApp.entity.Role;
-import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.example.FoodTourApp.service.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,29 +30,27 @@ public class SellerProductController {
 
     private static final Logger logger = LoggerFactory.getLogger(SellerProductController.class);
     private final ProductService productService;
-    private final ShopRepository shopRepository;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
-    public SellerProductController(ProductService productService, ShopRepository shopRepository,
+    public SellerProductController(ProductService productService,
                                    FileStorageService fileStorageService, ObjectMapper objectMapper) {
         this.productService = productService;
-        this.shopRepository = shopRepository;
         this.fileStorageService = fileStorageService;
         this.objectMapper = objectMapper;
     }
 
     /**
-     * Tạo sản phẩm mới (có thể upload nhiều ảnh đồ ăn từ máy)
+     * Tạo sản phẩm mới (upload ảnh sản phẩm dưới dạng form-data)
      * POST /api/seller/products
      *
-     * Cách sử dụng giống như đăng bài trên Facebook:
-     * - Nếu KHÔNG có ảnh: gửi application/json với data thông thường
-     * - Nếu CÓ ảnh: gửi multipart/form-data với data + nhiều file ảnh
+     * Cách sử dụng:
+     * - Content-Type: multipart/form-data
+     * - data: JSON string (CreateProductRequestDTO) - REQUIRED
+     * - images: multiple files (có thể chọn nhiều ảnh, jpg/jpeg/png, max 5MB each)
      *
-     * Form data (khi có ảnh):
-     * - data: JSON string (CreateProductRequestDTO)
-     * - images: multiple files (có thể chọn nhiều ảnh cùng lúc, jpg/jpeg/png, max 5MB each)
+     * NOTE: Không cần gửi imageUrls trong JSON nữa, chỉ cần upload file
+     * NOTE 2: Ảnh sẽ được lưu vào ProductImage/shop_X/ để phân biệt theo shop
      */
     @PostMapping
     public ResponseEntity<?> createProduct(
@@ -85,12 +80,14 @@ public class SellerProductController {
             logger.info("Parsed request: name={}, shopId={}, categoryId={}",
                 request.getName(), request.getShopId(), request.getCategoryId());
 
-            // Upload nhiều ảnh nếu có (giống như chọn nhiều ảnh khi đăng bài Facebook)
+            // Upload nhiều ảnh nếu có - lưu vào thư mục ProductImage/shop_X/
             if (images != null && images.length > 0) {
                 logger.info("Starting to upload {} images...", images.length);
-                List<String> imageUrls = fileStorageService.storeFiles(images, "products/" + user.getId());
+                // Tạo subfolder ID dựa trên shop ID - để phân biệt ảnh của từng shop
+                String subfolderId = "shop_" + request.getShopId();
+                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
-                logger.info("Uploaded {} images successfully. URLs: {}", imageUrls.size(), imageUrls);
+                logger.info("Uploaded {} images successfully to ProductImage/{}/", imageUrls.size(), subfolderId);
             } else {
                 logger.warn("No images received in request!");
             }
@@ -114,12 +111,15 @@ public class SellerProductController {
     }
 
     /**
-     * Cập nhật sản phẩm (có thể upload nhiều ảnh mới từ máy)
+     * Cập nhật sản phẩm (upload ảnh mới dưới dạng form-data)
      * PUT /api/seller/products/{id}
      *
-     * Cách sử dụng giống như chỉnh sửa bài đăng trên Facebook:
-     * - Nếu KHÔNG đổi ảnh: gửi application/json với data thông thường
-     * - Nếu CÓ đổi ảnh: gửi multipart/form-data với data + file ảnh mới
+     * Cách sử dụng:
+     * - Content-Type: multipart/form-data
+     * - data: JSON string (UpdateProductRequestDTO) - REQUIRED
+     * - images: multiple files (optional, nếu muốn đổi ảnh mới)
+     *
+     * NOTE: Ảnh sẽ THAY THẾ ảnh cũ và lưu vào ProductImage/shop_X/ (cùng folder với ảnh tạo mới)
      */
     @PutMapping("/{id}")
     public ResponseEntity<?> updateProduct(
@@ -138,14 +138,19 @@ public class SellerProductController {
 
             UpdateProductRequestDTO request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
 
-            // Upload nhiều ảnh mới nếu có (sẽ thay thế ảnh cũ)
+            // Upload nhiều ảnh mới nếu có - lưu vào thư mục ProductImage/shop_X/ (cùng folder với ảnh tạo)
             if (images != null && images.length > 0) {
-                List<String> imageUrls = fileStorageService.storeFiles(images, "products/" + user.getId());
+                // Lấy thông tin product để biết shopId
+                ProductResponseDTO product = productService.getProductById(id);
+
+                // Tạo subfolder ID dựa trên shop ID - để tất cả ảnh của shop ở cùng 1 folder
+                String subfolderId = "shop_" + product.getShopId();
+                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
-                logger.info("Uploaded {} images for product {}", imageUrls.size(), id);
+                logger.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), id, subfolderId);
             }
 
-            // Lưu cập nhật vào database
+            // Lưu cập nhật vào database (sẽ xóa ảnh cũ nếu có ảnh mới)
             ProductResponseDTO response = productService.updateProduct(id, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -191,17 +196,7 @@ public class SellerProductController {
         logger.info("User {} is adding variant to product {}", user.getEmail(), productId);
 
         try {
-            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép thêm variant
-            ProductResponseDTO product = productService.getProductById(productId);
-            Shop shop = shopRepository.findById(product.getShopId())
-                    .orElseThrow(() -> new RuntimeException("Shop not found"));
-
-            if (!shop.getSeller().getId().equals(user.getId()) &&
-                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                throw new RuntimeException("You do not have permission to add variant to this product");
-            }
-
-            // Thêm variant mới
+            // Thêm variant mới - kiểm tra quyền sở hữu được xử lý trong service layer
             VariantResponseDTO variantResponse = productService.addVariant(productId, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -226,17 +221,7 @@ public class SellerProductController {
         logger.info("User {} is updating variant {} for product {}", user.getEmail(), variantId, productId);
 
         try {
-            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép sửa variant
-            ProductResponseDTO product = productService.getProductById(productId);
-            Shop shop = shopRepository.findById(product.getShopId())
-                    .orElseThrow(() -> new RuntimeException("Shop not found"));
-
-            if (!shop.getSeller().getId().equals(user.getId()) &&
-                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                throw new RuntimeException("You do not have permission to update variant of this product");
-            }
-
-            // Cập nhật variant
+            // Cập nhật variant - kiểm tra quyền sở hữu được xử lý trong service layer
             VariantResponseDTO variantResponse = productService.updateVariant(variantId, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -260,17 +245,7 @@ public class SellerProductController {
         logger.info("User {} is deleting variant {} from product {}", user.getEmail(), variantId, productId);
 
         try {
-            // Kiểm tra quyền: chỉ seller sở hữu sản phẩm hoặc admin mới được phép xóa variant
-            ProductResponseDTO product = productService.getProductById(productId);
-            Shop shop = shopRepository.findById(product.getShopId())
-                    .orElseThrow(() -> new RuntimeException("Shop not found"));
-
-            if (!shop.getSeller().getId().equals(user.getId()) &&
-                !user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                throw new RuntimeException("You do not have permission to delete variant from this product");
-            }
-
-            // Xóa variant
+            // Xóa variant - kiểm tra quyền sở hữu được xử lý trong service layer
             productService.deleteVariant(variantId, user);
 
             Map<String, Object> result = new HashMap<>();
