@@ -74,7 +74,7 @@ public class AdminSellerApprovalController {
         request.setApprovalId(id);
 
         try {
-            SellerApprovalResponse response = sellerApprovalService.reviewApproval(git addadmin.getId(), request);
+            SellerApprovalResponse response = sellerApprovalService.reviewApproval(admin.getId(), request);
             logger.info("Admin ID {} successfully reviewed approval request {} with status {}",
                        admin.getId(), request.getApprovalId(), request.getStatus());
 
