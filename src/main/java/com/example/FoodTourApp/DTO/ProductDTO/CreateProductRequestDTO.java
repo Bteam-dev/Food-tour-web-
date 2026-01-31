@@ -43,7 +43,6 @@ public class CreateProductRequestDTO {
     @NotNull(message = "Category ID is required")
     private Integer categoryId;
 
-    // Thêm trường shopId
-    @NotNull(message = "Shop ID is required")
+    // shopId sẽ được set từ URL path, không cần frontend gửi
     private Integer shopId;
 }

@@ -21,6 +21,5 @@ public class MomoDepositRequestDTO {
     private String returnUrl;
 
     // Phương thức thanh toán: "app" (dùng App MOMO) hoặc "card" (dùng thẻ test)
-    // Mặc định là "app" để có thể test bằng tài khoản MOMO UAT trên điện thoại
-    private String paymentMethod = "app";
+    private String paymentMethod;
 }

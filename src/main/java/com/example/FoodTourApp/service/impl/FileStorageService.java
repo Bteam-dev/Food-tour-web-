@@ -24,8 +24,11 @@ public class FileStorageService {
     private static final String USER_AVATAR_DIR = BASE_DIR + "\\UserAvatar";
     private static final String FILE_MESSAGE_DIR = BASE_DIR + "\\FileMessage";
 
+    // Base URL để truy cập file từ frontend
+    private static final String BASE_URL = "/uploads";
+
     /**
-     * Enum định nghĩa các loại file storage
+     * Enum định ngh��a các loại file storage
      * Chia nhỏ để dễ quản lý và theo dõi
      */
     public enum FileCategory {
@@ -38,10 +41,10 @@ public class FileStorageService {
     }
 
     /**
-     * Lưu file theo category và trả về đường dẫn public
+     * Lưu file theo category và trả về URL tương đối (accessible URL)
      * @param file File cần lưu
      * @param category Loại file
-     * @return Đường dẫn đầy đủ của file đã lưu
+     * @return URL tương đối có thể truy cập từ frontend
      */
     public String storeFile(MultipartFile file, FileCategory category) throws IOException {
         return storeFile(file, category, null);
@@ -52,7 +55,7 @@ public class FileStorageService {
      * @param file File cần lưu
      * @param category Loại file
      * @param subfolderId ID của product/shop/user (để tạo thư mục con)
-     * @return Đường dẫn đầy đủ của file đã lưu
+     * @return URL tương đối có thể truy cập từ frontend
      */
     public String storeFile(MultipartFile file, FileCategory category, String subfolderId) throws IOException {
         if (file == null || file.isEmpty()) {
@@ -113,8 +116,10 @@ public class FileStorageService {
             throw new IOException("Không thể lưu file " + originalFilename, e);
         }
 
-        // Trả về đường dẫn đầy đủ của file
-        return targetPath.toString();
+        // Trả về URL tương đối thay vì đường dẫn tuyệt đối
+        String relativePath = convertToRelativeUrl(targetPath.toString());
+        log.info("File URL for frontend: {}", relativePath);
+        return relativePath;
     }
 
     /**
@@ -131,7 +136,7 @@ public class FileStorageService {
      * Lưu nhiều file cùng lúc
      * @param files Mảng các file cần lưu
      * @param category Loại file
-     * @return Danh sách đường dẫn đầy đủ của các file
+     * @return Danh sách URL tương đối có thể truy cập từ frontend
      */
     public List<String> storeFiles(MultipartFile[] files, FileCategory category) throws IOException {
         return storeFiles(files, category, null);
@@ -142,7 +147,7 @@ public class FileStorageService {
      * @param files Mảng các file cần lưu
      * @param category Loại file
      * @param subfolderId ID của product/shop/user
-     * @return Danh sách đường dẫn đầy đủ của các file
+     * @return Danh sách URL tương đối có thể truy cập từ frontend
      */
     public List<String> storeFiles(MultipartFile[] files, FileCategory category, String subfolderId) throws IOException {
         if (files == null || files.length == 0) {
@@ -152,8 +157,8 @@ public class FileStorageService {
         List<String> paths = new ArrayList<>();
         for (MultipartFile file : files) {
             if (file != null && !file.isEmpty()) {
-                String path = storeFile(file, category, subfolderId);
-                paths.add(path);
+                String url = storeFile(file, category, subfolderId);
+                paths.add(url);
             }
         }
         return paths;
@@ -169,20 +174,25 @@ public class FileStorageService {
     }
 
     /**
-     * Xóa file
-     * @param filePath Đường dẫn đầy đủ của file cần xóa
+     * Xóa file bằng URL tương đối hoặc đường dẫn tuyệt đối
+     * @param filePathOrUrl Đường dẫn đầy đủ hoặc URL tương đối của file cần xóa
      */
-    public void deleteFile(String filePath) {
-        if (filePath == null || filePath.isEmpty()) {
+    public void deleteFile(String filePathOrUrl) {
+        if (filePathOrUrl == null || filePathOrUrl.isEmpty()) {
             return;
         }
 
         try {
-            Path path = Paths.get(filePath).toAbsolutePath().normalize();
+            // Nếu là URL tương đối, chuyển về đường dẫn tuyệt đối
+            String fullPath = filePathOrUrl.startsWith(BASE_URL)
+                ? convertUrlToFullPath(filePathOrUrl)
+                : filePathOrUrl;
+
+            Path path = Paths.get(fullPath).toAbsolutePath().normalize();
             Files.deleteIfExists(path);
             log.info("File deleted successfully: {}", path);
         } catch (IOException e) {
-            log.error("Could not delete file {}: {}", filePath, e.getMessage());
+            log.error("Could not delete file {}: {}", filePathOrUrl, e.getMessage());
         }
     }
 
@@ -237,15 +247,45 @@ public class FileStorageService {
     }
 
     /**
+     * Chuyển đường dẫn tuyệt đối thành URL tương đối
+     * VD: D:\Project\BackEnd\FoodTourApp_BE\StorageFile\ProductImage\shop_1\abc.jpg
+     *     -> /uploads/ProductImage/shop_1/abc.jpg
+     */
+    private String convertToRelativeUrl(String fullPath) {
+        if (fullPath == null || fullPath.isEmpty()) {
+            return null;
+        }
+
+        // Loại bỏ BASE_DIR và thêm BASE_URL
+        String relativePath = fullPath.replace(BASE_DIR, "")
+                                      .replace("\\", "/");
+
+        return BASE_URL + relativePath;
+    }
+
+    /**
+     * Chuyển URL tương đối thành đường dẫn tuyệt đối
+     * VD: /uploads/ProductImage/shop_1/abc.jpg
+     *     -> D:\Project\BackEnd\FoodTourApp_BE\StorageFile\ProductImage\shop_1\abc.jpg
+     */
+    private String convertUrlToFullPath(String relativeUrl) {
+        if (relativeUrl == null || relativeUrl.isEmpty()) {
+            return null;
+        }
+
+        // Loại bỏ BASE_URL và thêm BASE_DIR
+        String path = relativeUrl.replace(BASE_URL, "")
+                                 .replace("/", "\\");
+
+        return BASE_DIR + path;
+    }
+
+    /**
      * Lấy đường dẫn tương đối để trả về cho client (nếu cần)
      * @param fullPath Đường dẫn đầy đủ
      * @return Đường dẫn tương đối từ thư mục base
      */
     public String getRelativePath(String fullPath) {
-        if (fullPath == null || fullPath.isEmpty()) {
-            return null;
-        }
-
-        return fullPath.replace(BASE_DIR, "").replace("\\", "/");
+        return convertToRelativeUrl(fullPath);
     }
 }

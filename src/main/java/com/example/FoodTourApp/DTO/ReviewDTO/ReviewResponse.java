@@ -14,6 +14,7 @@ public class ReviewResponse {
     private String reviewableType; // "shop" hoặc "product"
     private Integer reviewableId;
     private String reviewableName; // Tên shop hoặc product
+    private List<String> reviewableImageUrls; // Ảnh của sản phẩm/shop được review
     private Integer orderId;
     private Integer rating;
     private String comment;

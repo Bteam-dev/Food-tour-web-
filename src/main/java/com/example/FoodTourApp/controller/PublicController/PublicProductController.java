@@ -1,17 +1,18 @@
 package com.example.FoodTourApp.controller.PublicController;
 
+import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.service.ProductService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -26,15 +27,24 @@ public class PublicProductController {
     }
 
     @GetMapping
-    public ResponseEntity<?> getAllActiveProducts() {
-        logger.info("Fetching all active products");
+    public ResponseEntity<?> getAllActiveProducts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        logger.info("Fetching all active products with pagination - page: {}, size: {}", page, size);
 
         try {
-            List<ProductResponseDTO> products = productService.getAllActiveProducts();
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<ProductResponseDTO> products = productService.getAllActiveProducts(pageable);
+            PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", products);
+            result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching active products: {}", e.getMessage(), e);
@@ -66,15 +76,25 @@ public class PublicProductController {
     }
 
     @GetMapping("/shop/{shopId}")
-    public ResponseEntity<?> getActiveProductsByShop(@PathVariable Integer shopId) {
-        logger.info("Fetching active products for shop: {}", shopId);
+    public ResponseEntity<?> getActiveProductsByShop(
+            @PathVariable Integer shopId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        logger.info("Fetching active products for shop: {} with pagination", shopId);
 
         try {
-            List<ProductResponseDTO> products = productService.getActiveProductsByShop(shopId);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<ProductResponseDTO> products = productService.getActiveProductsByShop(shopId, pageable);
+            PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", products);
+            result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching products for shop {}: {}", shopId, e.getMessage(), e);
@@ -86,15 +106,25 @@ public class PublicProductController {
     }
 
     @GetMapping("/category/{categoryId}")
-    public ResponseEntity<?> getProductsByCategory(@PathVariable Integer categoryId) {
-        logger.info("Fetching products for category: {}", categoryId);
+    public ResponseEntity<?> getProductsByCategory(
+            @PathVariable Integer categoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        logger.info("Fetching products for category: {} with pagination", categoryId);
 
         try {
-            List<ProductResponseDTO> products = productService.getProductsByCategory(categoryId);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<ProductResponseDTO> products = productService.getProductsByCategory(categoryId, pageable);
+            PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", products);
+            result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching products for category {}: {}", categoryId, e.getMessage(), e);

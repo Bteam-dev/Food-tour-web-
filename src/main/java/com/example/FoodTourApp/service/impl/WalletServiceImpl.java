@@ -1,6 +1,5 @@
 package com.example.FoodTourApp.service.impl;
 
-import com.example.FoodTourApp.DTO.WalletDTO.DepositRequestDTO;
 import com.example.FoodTourApp.DTO.WalletDTO.WalletResponseDTO;
 import com.example.FoodTourApp.DTO.WalletDTO.WalletTransactionResponseDTO;
 import com.example.FoodTourApp.entity.Order;
@@ -13,6 +12,8 @@ import com.example.FoodTourApp.service.WalletService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -27,39 +28,6 @@ public class WalletServiceImpl implements WalletService {
 
     private final UserRepository userRepository;
     private final WalletTransactionRepository walletTransactionRepository;
-
-    @Override
-    @Transactional
-    public WalletResponseDTO deposit(DepositRequestDTO request, User user) {
-        log.info("User {} is depositing {} to wallet", user.getId(), request.getAmount());
-
-        // Lấy user mới nhất từ DB
-        User dbUser = userRepository.findById(user.getId())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        BigDecimal balanceBefore = dbUser.getWalletBalance();
-        BigDecimal balanceAfter = balanceBefore.add(request.getAmount());
-
-        // Cập nhật số dư
-        dbUser.setWalletBalance(balanceAfter);
-        dbUser.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(dbUser);
-
-        // Tạo transaction record
-        WalletTransaction transaction = new WalletTransaction();
-        transaction.setUser(dbUser);
-        transaction.setTransactionType(WalletTransaction.TransactionType.deposit);
-        transaction.setAmount(request.getAmount());
-        transaction.setBalanceBefore(balanceBefore);
-        transaction.setBalanceAfter(balanceAfter);
-        transaction.setDescription(request.getDescription() != null ? request.getDescription() : "Nạp tiền vào ví");
-        transaction.setCreatedAt(LocalDateTime.now());
-        walletTransactionRepository.save(transaction);
-
-        log.info("Deposit successful. User {} balance: {} -> {}", user.getId(), balanceBefore, balanceAfter);
-
-        return getWalletInfo(dbUser);
-    }
 
     @Override
     public WalletResponseDTO getWalletInfo(User user) {
@@ -86,13 +54,11 @@ public class WalletServiceImpl implements WalletService {
     }
 
     @Override
-    public List<WalletTransactionResponseDTO> getTransactionHistory(User user) {
-        List<WalletTransaction> transactions = walletTransactionRepository
-                .findByUserIdOrderByCreatedAtDesc(user.getId());
-
-        return transactions.stream()
-                .map(this::convertToTransactionDTO)
-                .collect(Collectors.toList());
+    public Page<WalletTransactionResponseDTO> getTransactionHistory(User user, Pageable pageable) {
+        log.info("Getting transaction history for user: {} with pagination", user.getId());
+        Page<WalletTransaction> transactions = walletTransactionRepository
+                .findByUserIdOrderByCreatedAtDesc(user.getId(), pageable);
+        return transactions.map(this::convertToTransactionDTO);
     }
 
     @Override

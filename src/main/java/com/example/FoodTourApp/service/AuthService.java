@@ -7,10 +7,12 @@ import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
 public interface AuthService {
     AuthResponse register(RegisterRequest request);
     AuthResponse login(LoginRequest request);
-    void forgotPassword(ForgotPasswordRequest request);
-    void resetPassword(ResetPasswordRequest request);
+
+    void forgotPassword(ForgotPasswordRequest request); // Gửi OTP qua email
+    void verifyOtp(VerifyOtpRequest request); // Verify OTP
+    void resetPassword(ResetPasswordWithOtpRequest request); // Reset password với OTP
+
     void verifyEmail(VerifyEmailRequest request);
     AuthResponse refreshToken(RefreshTokenRequest request);
-    void validateResetToken(String token);
     void logout(String token);
 }

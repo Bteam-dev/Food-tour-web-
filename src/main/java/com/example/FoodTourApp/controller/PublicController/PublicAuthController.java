@@ -283,50 +283,65 @@ public class PublicAuthController {
     }
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<AuthResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
         logger.info("Received forgot-password request for email: {}", request.getEmail());
         try {
             authService.forgotPassword(request);
-            AuthResponse response = new AuthResponse();
-            response.setSuccess(true);
-            response.setMessage("Email sent successfully");
-            logger.info("Password reset email sent successfully for email: {}", request.getEmail());
-            return ResponseEntity.ok(response);
+
+            Map<String, Object> responseBody = new HashMap<>();
+            responseBody.put("success", true);
+            responseBody.put("message", "Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra email.");
+
+            logger.info("OTP sent successfully for email: {}", request.getEmail());
+            return ResponseEntity.ok(responseBody);
         } catch (Exception e) {
-            logger.error("Failed to send password reset email for email: {}. Error: {}", request.getEmail(), e.getMessage(), e);
-            throw e;
+            logger.error("Failed to send OTP for email: {}. Error: {}", request.getEmail(), e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    @PostMapping("/verify-otp")
+    public ResponseEntity<?> verifyOtp(@Valid @RequestBody VerifyOtpRequest request) {
+        logger.info("Received verify-otp request for email: {}", request.getEmail());
+        try {
+            authService.verifyOtp(request);
+
+            Map<String, Object> responseBody = new HashMap<>();
+            responseBody.put("success", true);
+            responseBody.put("message", "Mã OTP hợp lệ. Bạn có thể đặt lại mật khẩu.");
+
+            logger.info("OTP verified successfully for email: {}", request.getEmail());
+            return ResponseEntity.ok(responseBody);
+        } catch (Exception e) {
+            logger.error("OTP verification failed for email: {}. Error: {}", request.getEmail(), e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
         }
     }
 
     @PostMapping("/reset-password")
-    public ResponseEntity<AuthResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        logger.info("Received POST reset-password request with token: {}", request.getToken().substring(0, Math.min(10, request.getToken().length())) + "...");
+    public ResponseEntity<?> resetPassword(@Valid @RequestBody ResetPasswordWithOtpRequest request) {
+        logger.info("Received reset-password request for email: {}", request.getEmail());
         try {
             authService.resetPassword(request);
-            AuthResponse response = new AuthResponse();
-            response.setSuccess(true);
-            response.setMessage("Password reset successfully");
-            logger.info("Password reset successful for token: {}", request.getToken().substring(0, Math.min(10, request.getToken().length())) + "...");
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            logger.error("Password reset failed for token: {}. Error: {}", request.getToken().substring(0, Math.min(10, request.getToken().length())) + "...", e.getMessage(), e);
-            throw e;
-        }
-    }
 
-    @GetMapping("/reset-password")
-    public ResponseEntity<?> verifyResetToken(@RequestParam("token") String token) {
-        logger.info("Received GET reset-password request with token: {}", token.substring(0, Math.min(10, token.length())) + "...");
-        try {
-            authService.validateResetToken(token);
-            AuthResponse response = new AuthResponse();
-            response.setSuccess(true);
-            response.setMessage("Reset token is valid. Please provide new password.");
-            logger.info("Reset token validated successfully for token: {}", token.substring(0, Math.min(10, token.length())) + "...");
-            return ResponseEntity.ok(response);
+            Map<String, Object> responseBody = new HashMap<>();
+            responseBody.put("success", true);
+            responseBody.put("message", "Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.");
+
+            logger.info("Password reset successfully for email: {}", request.getEmail());
+            return ResponseEntity.ok(responseBody);
         } catch (Exception e) {
-            logger.error("Reset token validation failed for token: {}. Error: {}", token.substring(0, Math.min(10, token.length())) + "...", e.getMessage(), e);
-            throw e;
+            logger.error("Password reset failed for email: {}. Error: {}", request.getEmail(), e.getMessage(), e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(errorResponse);
         }
     }
 
@@ -361,4 +376,3 @@ public class PublicAuthController {
         }
     }
 }
-

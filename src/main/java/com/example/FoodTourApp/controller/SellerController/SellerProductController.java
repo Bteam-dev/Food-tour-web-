@@ -6,12 +6,19 @@ import com.example.FoodTourApp.DTO.ProductDTO.UpdateProductRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.CreateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.UpdateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
+import com.example.FoodTourApp.entity.Role;
+import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.example.FoodTourApp.service.ProductService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,8 +30,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Controller quản lý sản phẩm theo SHOP
+ * Pattern: /api/seller/shops/{shopId}/products
+ * shopId lấy từ URL path, không cần điền trong request body
+ */
 @RestController
-@RequestMapping("/api/seller/products")
+@RequestMapping("/api/seller/shops/{shopId}/products")
 @PreAuthorize("hasAnyRole('SELLER', 'ADMIN')")
 public class SellerProductController {
 
@@ -32,33 +44,75 @@ public class SellerProductController {
     private final ProductService productService;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
+    private final ShopRepository shopRepository;
 
     public SellerProductController(ProductService productService,
-                                   FileStorageService fileStorageService, ObjectMapper objectMapper) {
+                                   FileStorageService fileStorageService,
+                                   ObjectMapper objectMapper,
+                                   ShopRepository shopRepository) {
         this.productService = productService;
         this.fileStorageService = fileStorageService;
         this.objectMapper = objectMapper;
+        this.shopRepository = shopRepository;
+    }
+
+    /**
+     * Lấy danh sách sản phẩm của shop (có phân trang)
+     * GET /api/seller/shops/{shopId}/products?page=0&size=10
+     */
+    @GetMapping
+    public ResponseEntity<?> getShopProducts(
+            @PathVariable Integer shopId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String direction,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("Getting products for shop {} by user {}", shopId, user.getEmail());
+
+        try {
+            // Validate quyền sở hữu shop
+            validateShopOwnership(shopId, user);
+
+            // Tạo pageable
+            Sort.Direction sortDirection = direction.equalsIgnoreCase("ASC") ? Sort.Direction.ASC : Sort.Direction.DESC;
+            Pageable pageable = PageRequest.of(page, size, Sort.by(sortDirection, sortBy));
+
+            // Lấy sản phẩm của shop
+            Page<ProductResponseDTO> products = productService.getActiveProductsByShop(shopId, pageable);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", products.getContent());
+            result.put("currentPage", products.getNumber());
+            result.put("totalItems", products.getTotalElements());
+            result.put("totalPages", products.getTotalPages());
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            logger.error("Error getting products for shop {}: {}", shopId, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
     }
 
     /**
      * Tạo sản phẩm mới (upload ảnh sản phẩm dưới dạng form-data)
-     * POST /api/seller/products
+     * POST /api/seller/shops/{shopId}/products
      *
-     * Cách sử dụng:
-     * - Content-Type: multipart/form-data
-     * - data: JSON string (CreateProductRequestDTO) - REQUIRED
-     * - images: multiple files (có thể chọn nhiều ảnh, jpg/jpeg/png, max 5MB each)
-     *
-     * NOTE: Không cần gửi imageUrls trong JSON nữa, chỉ cần upload file
-     * NOTE 2: Ảnh sẽ được lưu vào ProductImage/shop_X/ để phân biệt theo shop
+     * shopId từ URL path - KHÔNG CẦN điền trong request body
      */
     @PostMapping
     public ResponseEntity<?> createProduct(
+            @PathVariable Integer shopId,
             @RequestParam(value = "data", required = false) String dataJson,
             @RequestParam(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal User user) {
 
-        logger.info("User {} is creating a product", user.getEmail());
+        logger.info("User {} is creating a product for shop {}", user.getEmail(), shopId);
         logger.info("Received dataJson: {}", dataJson);
         logger.info("Received images count: {}", images != null ? images.length : 0);
 
@@ -70,6 +124,9 @@ public class SellerProductController {
         }
 
         try {
+            // Validate quyền sở hữu shop
+            validateShopOwnership(shopId, user);
+
             // Parse request từ JSON string
             if (dataJson == null || dataJson.isEmpty()) {
                 throw new RuntimeException("Thiếu dữ liệu sản phẩm");
@@ -77,14 +134,16 @@ public class SellerProductController {
 
             CreateProductRequestDTO request = objectMapper.readValue(dataJson, CreateProductRequestDTO.class);
 
+            // TỰ ĐỘNG gán shopId từ URL path
+            request.setShopId(shopId);
+
             logger.info("Parsed request: name={}, shopId={}, categoryId={}",
                 request.getName(), request.getShopId(), request.getCategoryId());
 
             // Upload nhiều ảnh nếu có - lưu vào thư mục ProductImage/shop_X/
             if (images != null && images.length > 0) {
                 logger.info("Starting to upload {} images...", images.length);
-                // Tạo subfolder ID dựa trên shop ID - để phân biệt ảnh của từng shop
-                String subfolderId = "shop_" + request.getShopId();
+                String subfolderId = "shop_" + shopId;
                 List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
                 logger.info("Uploaded {} images successfully to ProductImage/{}/", imageUrls.size(), subfolderId);
@@ -92,7 +151,7 @@ public class SellerProductController {
                 logger.warn("No images received in request!");
             }
 
-            // Lưu product vào database (đã có list URL ảnh nếu user đã upload)
+            // Lưu product vào database
             ProductResponseDTO response = productService.createProduct(request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -111,26 +170,58 @@ public class SellerProductController {
     }
 
     /**
-     * Cập nhật sản phẩm (upload ảnh mới dưới dạng form-data)
-     * PUT /api/seller/products/{id}
-     *
-     * Cách sử dụng:
-     * - Content-Type: multipart/form-data
-     * - data: JSON string (UpdateProductRequestDTO) - REQUIRED
-     * - images: multiple files (optional, nếu muốn đổi ảnh mới)
-     *
-     * NOTE: Ảnh sẽ THAY THẾ ảnh cũ và lưu vào ProductImage/shop_X/ (cùng folder với ảnh tạo mới)
+     * Lấy chi tiết sản phẩm
+     * GET /api/seller/shops/{shopId}/products/{productId}
      */
-    @PutMapping("/{id}")
+    @GetMapping("/{productId}")
+    public ResponseEntity<?> getProduct(
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is getting product {} from shop {}", user.getEmail(), productId, shopId);
+
+        try {
+            validateShopOwnership(shopId, user);
+
+            ProductResponseDTO product = productService.getProductById(productId);
+
+            // Kiểm tra sản phẩm có thuộc shop này không
+            if (!product.getShopId().equals(shopId)) {
+                throw new RuntimeException("Sản phẩm không thuộc shop này");
+            }
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", product);
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            logger.error("Error getting product {} from shop {}: {}", productId, shopId, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Cập nhật sản phẩm (upload ảnh mới dưới dạng form-data)
+     * PUT /api/seller/shops/{shopId}/products/{productId}
+     */
+    @PutMapping("/{productId}")
     public ResponseEntity<?> updateProduct(
-            @PathVariable Integer id,
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
             @RequestParam(value = "data", required = false) String dataJson,
             @RequestParam(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal User user) {
 
-        logger.info("User {} is updating product {}", user.getEmail(), id);
+        logger.info("User {} is updating product {} in shop {}", user.getEmail(), productId, shopId);
 
         try {
+            validateShopOwnership(shopId, user);
+
             // Parse request từ JSON string
             if (dataJson == null || dataJson.isEmpty()) {
                 throw new RuntimeException("Thiếu dữ liệu cập nhật");
@@ -138,20 +229,22 @@ public class SellerProductController {
 
             UpdateProductRequestDTO request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
 
-            // Upload nhiều ảnh mới nếu có - lưu vào thư mục ProductImage/shop_X/ (cùng folder với ảnh tạo)
-            if (images != null && images.length > 0) {
-                // Lấy thông tin product để biết shopId
-                ProductResponseDTO product = productService.getProductById(id);
-
-                // Tạo subfolder ID dựa trên shop ID - để tất cả ảnh của shop ở cùng 1 folder
-                String subfolderId = "shop_" + product.getShopId();
-                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
-                request.setImageUrls(imageUrls);
-                logger.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), id, subfolderId);
+            // Kiểm tra sản phẩm có thuộc shop này không
+            ProductResponseDTO product = productService.getProductById(productId);
+            if (!product.getShopId().equals(shopId)) {
+                throw new RuntimeException("Sản phẩm không thuộc shop này");
             }
 
-            // Lưu cập nhật vào database (sẽ xóa ảnh cũ nếu có ảnh mới)
-            ProductResponseDTO response = productService.updateProduct(id, request, user);
+            // Upload nhiều ảnh mới nếu có
+            if (images != null && images.length > 0) {
+                String subfolderId = "shop_" + shopId;
+                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
+                request.setImageUrls(imageUrls);
+                logger.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), productId, subfolderId);
+            }
+
+            // Lưu cập nhật vào database
+            ProductResponseDTO response = productService.updateProduct(productId, request, user);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -160,7 +253,7 @@ public class SellerProductController {
             return ResponseEntity.ok(result);
 
         } catch (Exception e) {
-            logger.error("Error updating product {} for user {}: {}", id, user.getEmail(), e.getMessage(), e);
+            logger.error("Error updating product {} for user {}: {}", productId, user.getEmail(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -168,20 +261,26 @@ public class SellerProductController {
         }
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteProduct(@PathVariable Integer id,
-                                           @AuthenticationPrincipal User user) {
-        logger.info("User {} is deleting product {}", user.getEmail(), id);
+    @DeleteMapping("/{productId}")
+    public ResponseEntity<?> deleteProduct(
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is deleting product {} from shop {}", user.getEmail(), productId, shopId);
 
         try {
-            productService.deleteProduct(id, user);
+            validateShopOwnership(shopId, user);
+
+
+            productService.deleteProduct(productId, user);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Product deleted successfully");
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error deleting product {} for user {}: {}", id, user.getEmail(), e.getMessage(), e);
+            logger.error("Error deleting product {} for user {}: {}", productId, user.getEmail(), e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -190,13 +289,23 @@ public class SellerProductController {
     }
 
     @PostMapping("/{productId}/variants")
-    public ResponseEntity<?> addVariant(@PathVariable Integer productId,
-                                        @Valid @RequestBody CreateVariantRequestDTO request,
-                                        @AuthenticationPrincipal User user) {
-        logger.info("User {} is adding variant to product {}", user.getEmail(), productId);
+    public ResponseEntity<?> addVariant(
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
+            @Valid @RequestBody CreateVariantRequestDTO request,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is adding variant to product {} in shop {}", user.getEmail(), productId, shopId);
 
         try {
-            // Thêm variant mới - kiểm tra quyền sở hữu được xử lý trong service layer
+            validateShopOwnership(shopId, user);
+
+            // Kiểm tra sản phẩm có thuộc shop này không
+            ProductResponseDTO product = productService.getProductById(productId);
+            if (!product.getShopId().equals(shopId)) {
+                throw new RuntimeException("Sản phẩm không thuộc shop này");
+            }
+
             VariantResponseDTO variantResponse = productService.addVariant(productId, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -214,14 +323,24 @@ public class SellerProductController {
     }
 
     @PutMapping("/{productId}/variants/{variantId}")
-    public ResponseEntity<?> updateVariant(@PathVariable Integer productId,
-                                           @PathVariable Integer variantId,
-                                           @Valid @RequestBody UpdateVariantRequestDTO request,
-                                           @AuthenticationPrincipal User user) {
-        logger.info("User {} is updating variant {} for product {}", user.getEmail(), variantId, productId);
+    public ResponseEntity<?> updateVariant(
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
+            @PathVariable Integer variantId,
+            @Valid @RequestBody UpdateVariantRequestDTO request,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is updating variant {} for product {} in shop {}", user.getEmail(), variantId, productId, shopId);
 
         try {
-            // Cập nhật variant - kiểm tra quyền sở hữu được xử lý trong service layer
+            validateShopOwnership(shopId, user);
+
+            // Kiểm tra sản phẩm có thuộc shop này không
+            ProductResponseDTO product = productService.getProductById(productId);
+            if (!product.getShopId().equals(shopId)) {
+                throw new RuntimeException("Sản phẩm không thuộc shop này");
+            }
+
             VariantResponseDTO variantResponse = productService.updateVariant(variantId, request, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -239,13 +358,23 @@ public class SellerProductController {
     }
 
     @DeleteMapping("/{productId}/variants/{variantId}")
-    public ResponseEntity<?> deleteVariant(@PathVariable Integer productId,
-                                           @PathVariable Integer variantId,
-                                           @AuthenticationPrincipal User user) {
-        logger.info("User {} is deleting variant {} from product {}", user.getEmail(), variantId, productId);
+    public ResponseEntity<?> deleteVariant(
+            @PathVariable Integer shopId,
+            @PathVariable Integer productId,
+            @PathVariable Integer variantId,
+            @AuthenticationPrincipal User user) {
+
+        logger.info("User {} is deleting variant {} from product {} in shop {}", user.getEmail(), variantId, productId, shopId);
 
         try {
-            // Xóa variant - kiểm tra quyền sở hữu được xử lý trong service layer
+            validateShopOwnership(shopId, user);
+
+            // Kiểm tra sản phẩm có thuộc shop này không
+            ProductResponseDTO product = productService.getProductById(productId);
+            if (!product.getShopId().equals(shopId)) {
+                throw new RuntimeException("Sản phẩm không thuộc shop này");
+            }
+
             productService.deleteVariant(variantId, user);
 
             Map<String, Object> result = new HashMap<>();
@@ -261,14 +390,14 @@ public class SellerProductController {
         }
     }
 
-    // Endpoint mới để admin lấy tất cả sản phẩm (kể cả inactive)
+    // Endpoint để admin lấy tất cả sản phẩm (kể cả inactive)
     @GetMapping("/all")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> getAllProducts(@AuthenticationPrincipal User user) {
         logger.info("Admin {} is fetching all products", user.getEmail());
 
         try {
-            List<ProductResponseDTO> products = productService.getAllProducts(); // Giả sử có method này trong ProductService
+            List<ProductResponseDTO> products = productService.getAllProducts();
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -282,5 +411,22 @@ public class SellerProductController {
             return ResponseEntity.internalServerError().body(error);
         }
     }
-}
 
+    /**
+     * Helper: Validate quyền sở hữu shop
+     */
+    private Shop validateShopOwnership(Integer shopId, User user) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Shop không tồn tại"));
+
+        // Kiểm tra role ADMIN
+        boolean isAdmin = user.getRole() != null &&
+                         user.getRole().getRoleName() == Role.RoleName.ADMIN;
+
+        if (!isAdmin && !shop.getSeller().getId().equals(user.getId())) {
+            throw new RuntimeException("Bạn không có quyền truy cập shop này");
+        }
+
+        return shop;
+    }
+}

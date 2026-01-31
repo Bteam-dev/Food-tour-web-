@@ -1,11 +1,16 @@
 package com.example.FoodTourApp.controller.UserController;
 
+import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.WalletDTO.*;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.MomoPaymentService;
 import com.example.FoodTourApp.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -13,7 +18,6 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -78,19 +82,29 @@ public class UserWalletController {
     }
 
     /**
-     * Lấy lịch sử giao dịch
+     * Lấy lịch sử giao dịch - WITH PAGINATION
      * GET /api/user/wallet/transactions
      */
     @GetMapping("/transactions")
-    public ResponseEntity<?> getTransactionHistory(@AuthenticationPrincipal User user) {
-        log.info("User ID {} is getting transaction history", user.getId());
+    public ResponseEntity<?> getTransactionHistory(
+            @AuthenticationPrincipal User user,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        log.info("User ID {} is getting transaction history with pagination", user.getId());
 
         try {
-            List<WalletTransactionResponseDTO> transactions = walletService.getTransactionHistory(user);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<WalletTransactionResponseDTO> transactions = walletService.getTransactionHistory(user, pageable);
+            PageResponse<WalletTransactionResponseDTO> pageResponse = PageResponse.of(transactions);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", transactions);
+            result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Error getting transaction history for user ID {}: {}", user.getId(), e.getMessage(), e);

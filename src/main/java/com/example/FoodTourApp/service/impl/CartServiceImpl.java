@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -178,6 +179,14 @@ public class CartServiceImpl implements CartService {
         dto.setId(cartItem.getId());
         dto.setProductId(cartItem.getProduct().getId());
         dto.setProductName(cartItem.getProduct().getName());
+
+        // Map imageUrls from Product
+        if (cartItem.getProduct().getImageUrls() != null && !cartItem.getProduct().getImageUrls().isEmpty()) {
+            dto.setImageUrls(Arrays.asList(cartItem.getProduct().getImageUrls().split(",")));
+        } else {
+            dto.setImageUrls(List.of());
+        }
+
         dto.setUnitPrice(cartItem.getProduct().getPrice());
         dto.setQuantity(cartItem.getQuantity());
 

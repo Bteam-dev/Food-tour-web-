@@ -5,8 +5,10 @@ import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
+import com.example.FoodTourApp.entity.PasswordResetOtp;
 import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.repository.PasswordResetOtpRepository;
 import com.example.FoodTourApp.repository.RoleRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.AuthService;
@@ -20,8 +22,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.time.LocalDateTime;
+import java.util.Random;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -32,14 +36,20 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtil;
     private final JavaMailSender mailSender;
+    private final PasswordResetOtpRepository otpRepository;
+
+    @Value("${app.base-url}")
+    private String appBaseUrl;
 
     public AuthServiceImpl(UserRepository userRepository, RoleRepository roleRepository,
-                           PasswordEncoder passwordEncoder, JwtUtils jwtUtil, JavaMailSender mailSender) {
+                           PasswordEncoder passwordEncoder, JwtUtils jwtUtil, JavaMailSender mailSender,
+                           PasswordResetOtpRepository otpRepository) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.mailSender = mailSender;
+        this.otpRepository = otpRepository;
     }
 
     @Override
@@ -72,7 +82,7 @@ public class AuthServiceImpl implements AuthService {
         try {
             // Dùng generateSpecialToken với userId
             String verifyToken = jwtUtil.generateSpecialToken(user.getId(), user.getEmail(), "VERIFY_EMAIL");
-            String verifyLink = "http://localhost:8080/api/auth/verify-email?token=" + verifyToken;
+            String verifyLink = appBaseUrl + "/api/auth/verify-email?token=" + verifyToken;
             sendVerificationEmail(user.getEmail(), verifyLink);
         } catch (MessagingException e) {
             System.err.println("Failed to send verification email: " + e.getMessage());
@@ -137,56 +147,104 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+                .orElseThrow(() -> new EntityNotFoundException("Email không tồn tại trong hệ thống"));
 
-        // Dùng generateSpecialToken với userId thay vì email
-        String resetToken = jwtUtil.generateSpecialToken(user.getId(), user.getEmail(), "RESET_PASSWORD");
-        String resetLink = "http://localhost:8080/api/auth/reset-password?token=" + resetToken;
+        // Xóa các OTP cũ của email này (nếu có)
+        otpRepository.deleteByEmail(request.getEmail());
 
+        // Tạo OTP 6 số ngẫu nhiên
+        String otpCode = generateOtpCode();
+
+        // Lưu OTP vào database
+        PasswordResetOtp otp = new PasswordResetOtp();
+        otp.setEmail(request.getEmail());
+        otp.setOtpCode(otpCode);
+        otp.setCreatedAt(LocalDateTime.now());
+        otp.setExpiresAt(LocalDateTime.now().plusMinutes(5)); // OTP hết hạn sau 5 phút
+        otp.setIsUsed(false);
+        otpRepository.save(otp);
+
+        // Gửi OTP qua email
         try {
             MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true);
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setTo(user.getEmail());
-            helper.setSubject("Password Reset Request");
-            helper.setText("Click the link to reset your password: " + resetLink, true);
+            helper.setSubject("Mã OTP đặt lại mật khẩu");
+
+            String emailContent = String.format(
+                "<html><body>" +
+                "<h2>Đặt lại mật khẩu</h2>" +
+                "<p>Xin chào <strong>%s</strong>,</p>" +
+                "<p>Mã OTP của bạn là: <strong style='font-size: 24px; color: #ff0000;'>%s</strong></p>" +
+                "<p>Mã này có hiệu lực trong <strong>5 phút</strong>.</p>" +
+                "<p>Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này.</p>" +
+                "</body></html>",
+                user.getFullName(), otpCode
+            );
+
+            helper.setText(emailContent, true);
             mailSender.send(message);
+            logger.info("OTP sent successfully to email: {}", request.getEmail());
         } catch (MessagingException e) {
-            throw new RuntimeException("Failed to send email", e);
+            logger.error("Failed to send OTP email: {}", e.getMessage());
+            throw new RuntimeException("Không thể gửi email. Vui lòng thử lại sau.");
         }
     }
 
     @Override
-    public void resetPassword(ResetPasswordRequest request) {
-        // Dùng phương thức mới để lấy email và validate type
-        String email = jwtUtil.getEmailFromSpecialToken(request.getToken());
-        String type = jwtUtil.getTypeFromSpecialToken(request.getToken());
+    @Transactional
+    public void verifyOtp(VerifyOtpRequest request) {
+        // Tìm OTP chưa sử dụng mới nhất
+        PasswordResetOtp otp = otpRepository.findByEmailAndOtpCodeAndIsUsedFalse(
+                request.getEmail(), request.getOtp())
+                .orElseThrow(() -> new IllegalArgumentException("Mã OTP không hợp lệ"));
 
-        if (!jwtUtil.validateToken(request.getToken()) || !"RESET_PASSWORD".equals(type)) {
-            throw new IllegalArgumentException("Invalid or expired token");
+        // Kiểm tra OTP đã hết hạn chưa
+        if (LocalDateTime.now().isAfter(otp.getExpiresAt())) {
+            throw new IllegalArgumentException("Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.");
         }
 
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        // Đánh dấu OTP đã được verify (nhưng chưa dùng)
+        otp.setVerifiedAt(LocalDateTime.now());
+        otpRepository.save(otp);
+
+        logger.info("OTP verified successfully for email: {}", request.getEmail());
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(ResetPasswordWithOtpRequest request) {
+        // Tìm OTP đã được verify và chưa sử dụng
+        PasswordResetOtp otp = otpRepository.findByEmailAndOtpCodeAndIsUsedFalse(
+                request.getEmail(), request.getOtp())
+                .orElseThrow(() -> new IllegalArgumentException("Mã OTP không hợp lệ"));
+
+        // Kiểm tra OTP đã được verify chưa
+        if (otp.getVerifiedAt() == null) {
+            throw new IllegalArgumentException("Mã OTP chưa được xác thực. Vui lòng verify OTP trước.");
+        }
+
+        // Kiểm tra OTP đã hết hạn chưa
+        if (LocalDateTime.now().isAfter(otp.getExpiresAt())) {
+            throw new IllegalArgumentException("Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.");
+        }
+
+        // Tìm user và reset password
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new EntityNotFoundException("User không tồn tại"));
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         user.setUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
-    }
 
-    @Override
-    public void validateResetToken(String token) {
-        // Dùng phương thức mới để lấy email và validate type
-        String email = jwtUtil.getEmailFromSpecialToken(token);
-        String type = jwtUtil.getTypeFromSpecialToken(token);
+        // Đánh dấu OTP đã sử dụng
+        otp.setIsUsed(true);
+        otpRepository.save(otp);
 
-        if (!jwtUtil.validateToken(token) || !"RESET_PASSWORD".equals(type)) {
-            throw new IllegalArgumentException("Invalid or expired reset token");
-        }
-
-        userRepository.findByEmail(email)
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        logger.info("Password reset successfully for email: {}", request.getEmail());
     }
 
     @Override
@@ -279,5 +337,14 @@ public class AuthServiceImpl implements AuthService {
         response.setEmailVerified(user.getEmailVerified());
         response.setLastLogin(user.getLastLogin());
         return response;
+    }
+
+    /**
+     * Generate random 6-digit OTP code
+     */
+    private String generateOtpCode() {
+        Random random = new Random();
+        int otp = 100000 + random.nextInt(900000); // 6 digit number
+        return String.valueOf(otp);
     }
 }

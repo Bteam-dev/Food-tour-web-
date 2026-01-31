@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 @Service
@@ -312,8 +313,9 @@ public class ReviewServiceImpl implements ReviewService {
         response.setReviewableType(review.getReviewableType().toString());
         response.setReviewableId(review.getReviewableId());
 
-        // Lấy tên shop/product
+        // Lấy tên shop/product và ảnh
         response.setReviewableName(getReviewableName(review.getReviewableType(), review.getReviewableId()));
+        response.setReviewableImageUrls(getReviewableImageUrls(review.getReviewableType(), review.getReviewableId()));
 
         response.setOrderId(review.getOrder() != null ? review.getOrder().getId() : null);
         response.setRating(review.getRating());
@@ -359,6 +361,33 @@ public class ReviewServiceImpl implements ReviewService {
             }
         } catch (Exception e) {
             return "Unknown";
+        }
+    }
+
+    private List<String> getReviewableImageUrls(Review.ReviewableType type, Integer id) {
+        try {
+            if (type == Review.ReviewableType.shop) {
+                return shopRepository.findById(id)
+                        .map(shop -> {
+                            if (shop.getLogoUrl() != null && !shop.getLogoUrl().isEmpty()) {
+                                return List.of(shop.getLogoUrl());
+                            }
+                            return List.<String>of();
+                        })
+                        .orElse(List.of());
+            } else {
+                return productRepository.findById(id)
+                        .map(product -> {
+                            if (product.getImageUrls() != null && !product.getImageUrls().isEmpty()) {
+                                return Arrays.asList(product.getImageUrls().split(","));
+                            }
+                            return List.<String>of();
+                        })
+                        .orElse(List.of());
+            }
+        } catch (Exception e) {
+            log.error("Error getting reviewable image URLs: {}", e.getMessage());
+            return List.of();
         }
     }
 }

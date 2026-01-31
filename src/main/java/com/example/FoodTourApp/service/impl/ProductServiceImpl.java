@@ -7,15 +7,13 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.CreateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.UpdateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.*;
-import com.example.FoodTourApp.repository.CategoryRepository;
-import com.example.FoodTourApp.repository.ProductRepository;
-import com.example.FoodTourApp.repository.ProductVariantRepository;
-import com.example.FoodTourApp.repository.ShopRepository;
-import com.example.FoodTourApp.repository.VariantTypeRepository;
+import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.ProductService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -32,6 +30,8 @@ public class ProductServiceImpl implements ProductService {
     private final ShopRepository shopRepository;
     private final CategoryRepository categoryRepository;
     private final VariantTypeRepository variantTypeRepository;
+    private final CartItemRepository cartItemRepository;
+    private final WishlistRepository wishlistRepository;
 
     @Override
     @Transactional
@@ -172,11 +172,23 @@ public class ProductServiceImpl implements ProductService {
             }
         }
 
-        product.setIsAvailable(false);
-        product.setUpdatedAt(LocalDateTime.now());
-        productRepository.save(product);
+        // Hard delete - XÓA THẬT khỏi database
+        // Bước 1: Xóa tất cả variants của product
+        variantRepository.deleteByProductId(productId);
+        log.info("Deleted all variants for product: {}", productId);
 
-        log.info("Product deleted (soft) successfully: {}", productId);
+        // Bước 2: Xóa product khỏi giỏ hàng của tất cả users
+        cartItemRepository.deleteByProductId(productId);
+        log.info("Deleted all cart items for product: {}", productId);
+
+        // Bước 3: Xóa product khỏi wishlist
+        wishlistRepository.deleteByProductId(productId);
+        log.info("Deleted all wishlist items for product: {}", productId);
+
+        // Bước 4: Xóa product bằng ID (không dùng entity để tránh lỗi Hibernate)
+        productRepository.deleteById(productId);
+
+        log.info("Product deleted (hard delete) successfully: {}", productId);
     }
 
     @Override
@@ -198,30 +210,24 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
-    public List<ProductResponseDTO> getActiveProductsByShop(Integer shopId) {
-        log.info("Getting active products for shop: {}", shopId);
-
-        Shop shop = shopRepository.findById(shopId)
-                .orElseThrow(() -> new RuntimeException("Shop not found"));
-
-        List<Product> products = productRepository.findActiveByShop(shop);
-        return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
+    public Page<ProductResponseDTO> getActiveProductsByShop(Integer shopId, Pageable pageable) {
+        log.info("Getting active products for shop: {} with pagination", shopId);
+        Page<Product> products = productRepository.findActiveByShopId(shopId, pageable);
+        return products.map(this::mapToProductResponseDTO);
     }
 
     @Override
-    public List<ProductResponseDTO> getAllActiveProducts() {
-        log.info("Getting all active products");
-
-        List<Product> products = productRepository.findAllActive();
-        return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
+    public Page<ProductResponseDTO> getAllActiveProducts(Pageable pageable) {
+        log.info("Getting all active products with pagination");
+        Page<Product> products = productRepository.findAllActive(pageable);
+        return products.map(this::mapToProductResponseDTO);
     }
 
     @Override
-    public List<ProductResponseDTO> getProductsByCategory(Integer categoryId) {
-        log.info("Getting products by category: {}", categoryId);
-
-        List<Product> products = productRepository.findByCategoryId(categoryId);
-        return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
+    public Page<ProductResponseDTO> getProductsByCategory(Integer categoryId, Pageable pageable) {
+        log.info("Getting products by category: {} with pagination", categoryId);
+        Page<Product> products = productRepository.findByCategoryId(categoryId, pageable);
+        return products.map(this::mapToProductResponseDTO);
     }
 
     @Override
@@ -305,7 +311,6 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public List<ProductResponseDTO> getAllProducts() {
         log.info("Getting all products (including inactive)");
-
         List<Product> products = productRepository.findAll();
         return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
     }
@@ -366,4 +371,3 @@ public class ProductServiceImpl implements ProductService {
         return dto;
     }
 }
-

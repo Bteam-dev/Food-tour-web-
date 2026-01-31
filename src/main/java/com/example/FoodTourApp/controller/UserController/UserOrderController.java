@@ -2,18 +2,22 @@ package com.example.FoodTourApp.controller.UserController;
 
 import com.example.FoodTourApp.DTO.OrderDTO.CreateOrderRequestDTO;
 import com.example.FoodTourApp.DTO.OrderDTO.OrderResponseDTO;
+import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -67,13 +71,24 @@ public class UserOrderController {
     }
 
     @GetMapping
-    public ResponseEntity<?> getUserOrders(@AuthenticationPrincipal User user) {
-        logger.info("User ID {} is getting orders", user.getId());
+    public ResponseEntity<?> getUserOrders(
+            @AuthenticationPrincipal User user,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        logger.info("User ID {} is getting orders with pagination", user.getId());
         try {
-            List<OrderResponseDTO> orders = orderService.getUserOrders(user);
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<OrderResponseDTO> orders = orderService.getUserOrders(user, pageable);
+            PageResponse<OrderResponseDTO> pageResponse = PageResponse.of(orders);
+
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", orders);
+            result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error getting orders for user ID {}: {}", user.getId(), e.getMessage(), e);

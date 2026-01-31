@@ -10,6 +10,8 @@ import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.ShopService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -160,14 +162,12 @@ public class ShopServiceImpl implements ShopService {
     }
 
     @Override
-    public List<ShopResponseDTO> getAllActiveShops() {
-        log.info("Getting all active shops");
-
-        List<Shop> shops = shopRepository.findByIsActiveTrue();
-        return shops.stream()
-                .map(this::mapToShopResponseDTO)
-                .collect(Collectors.toList());
+    public Page<ShopResponseDTO> getAllActiveShops(Pageable pageable) {
+        log.info("Getting all active shops with pagination");
+        Page<Shop> shops = shopRepository.findByIsActiveTrue(pageable);
+        return shops.map(this::mapToShopResponseDTO);
     }
+
 
     @Override
     @Transactional

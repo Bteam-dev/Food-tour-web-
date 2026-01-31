@@ -14,6 +14,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -212,11 +214,10 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public List<OrderResponseDTO> getUserOrders(User user) {
-        log.info("Getting orders for user: {}", user.getId());
-
-        List<Order> orders = orderRepository.findByUser(user);
-        return orders.stream().map(this::mapToOrderResponseDTO).collect(Collectors.toList());
+    public Page<OrderResponseDTO> getUserOrders(User user, Pageable pageable) {
+        log.info("Getting orders for user: {} with pagination", user.getId());
+        Page<Order> orders = orderRepository.findByUser(user, pageable);
+        return orders.map(this::mapToOrderResponseDTO);
     }
 
     @Override

@@ -1,13 +1,19 @@
 package com.example.FoodTourApp.controller.PublicController;
 
+import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
 import com.example.FoodTourApp.service.ShopService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Public Shop Controller - Các endpoint xem shop (không cần authentication)
@@ -33,15 +39,35 @@ public class PublicShopController {
     }
 
     /**
-     * Lấy tất cả cửa hàng đang hoạt động (PUBLIC - không cần authentication)
-     * GET /api/shops
+     * Lấy tất cả cửa hàng đang hoạt động (PUBLIC - không cần authentication) - WITH PAGINATION
+     * GET /api/public/shops
      */
     @GetMapping
-    public ResponseEntity<List<ShopResponseDTO>> getAllActiveShops() {
-        log.info("Getting all active shops");
+    public ResponseEntity<?> getAllActiveShops(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        log.info("Getting all active shops with pagination - page: {}, size: {}", page, size);
 
-        List<ShopResponseDTO> response = shopService.getAllActiveShops();
-        return ResponseEntity.ok(response);
+        try {
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            Page<ShopResponseDTO> shops = shopService.getAllActiveShops(pageable);
+            PageResponse<ShopResponseDTO> pageResponse = PageResponse.of(shops);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", pageResponse);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error fetching active shops: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch shops");
+            return ResponseEntity.internalServerError().body(error);
+        }
     }
 }
-

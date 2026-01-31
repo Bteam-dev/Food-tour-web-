@@ -8,6 +8,8 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.UpdateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 
@@ -28,14 +30,14 @@ public interface ProductService {
     // Lấy tất cả product của shop (cho seller hoặc admin)
     List<ProductResponseDTO> getProductsByShop(Shop shop);
 
-    // Lấy tất cả product active của shop (public)
-    List<ProductResponseDTO> getActiveProductsByShop(Integer shopId);
+    // Lấy tất cả product active của shop (public) - WITH PAGINATION
+    Page<ProductResponseDTO> getActiveProductsByShop(Integer shopId, Pageable pageable);
 
-    // Lấy tất cả product active (public)
-    List<ProductResponseDTO> getAllActiveProducts();
+    // Lấy tất cả product active (public) - WITH PAGINATION
+    Page<ProductResponseDTO> getAllActiveProducts(Pageable pageable);
 
-    // Lấy product theo category (public)
-    List<ProductResponseDTO> getProductsByCategory(Integer categoryId);
+    // Lấy product theo category (public) - WITH PAGINATION
+    Page<ProductResponseDTO> getProductsByCategory(Integer categoryId, Pageable pageable);
 
     // Thêm variant cho product
     VariantResponseDTO addVariant(Integer productId, CreateVariantRequestDTO request, User user);

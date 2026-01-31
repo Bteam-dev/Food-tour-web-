@@ -14,6 +14,7 @@ public class OrderItemResponseDTO {
     private Integer id;
     private Integer productId;
     private String productName;
+    private List<String> imageUrls;
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal totalPrice;

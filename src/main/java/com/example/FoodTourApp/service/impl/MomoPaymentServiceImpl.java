@@ -24,6 +24,7 @@ import org.springframework.web.client.RestTemplate;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -41,22 +42,22 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${momo.partner-code:MOMO}")
+    @Value("${momo.partner-code}")
     private String partnerCode;
 
-    @Value("${momo.access-key:F8BBA842ECF85}")
+    @Value("${momo.access-key}")
     private String accessKey;
 
-    @Value("${momo.secret-key:K951B6PE1waDMi640xX08PD3vg6EkVlz}")
+    @Value("${momo.secret-key}")
     private String secretKey;
 
-    @Value("${momo.endpoint:https://test-payment.momo.vn/v2/gateway/api/create}")
+    @Value("${momo.endpoint}")
     private String momoEndpoint;
 
-    @Value("${momo.return-url:http://localhost:8080/api/public/momo/callback}")
+    @Value("${momo.return-url}")
     private String defaultReturnUrl;
 
-    @Value("${momo.notify-url:http://localhost:8080/api/public/momo/ipn}")
+    @Value("${momo.notify-url}")
     private String notifyUrl;
 
     @Override
@@ -68,7 +69,7 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
             // Tạo orderId và requestId unique
             String orderId = "DEPOSIT_" + user.getId() + "_" + System.currentTimeMillis();
             String requestId = UUID.randomUUID().toString();
-            Long amount = request.getAmount().setScale(0, BigDecimal.ROUND_DOWN).longValue();
+            Long amount = request.getAmount().setScale(0, RoundingMode.DOWN).longValue();
 
             // Sử dụng description từ user làm nội dung chuyển khoản trong QR MOMO
             // User tự nhập nội dung để định danh (ví dụ: "USER04", "NGUYENVANA", "ID123", etc.)
@@ -82,11 +83,11 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
                 request.getReturnUrl() : defaultReturnUrl;
 
             // Xác định requestType dựa trên paymentMethod
-            // "app" hoặc null => payWithATM (cho phép thanh toán qua App MOMO)
-            // "card" => captureWallet (thanh toán qua thẻ test)
+            // "app" => captureWallet (thanh toán qua QR Momo App)
+            // "card" => payWithATM (thanh toán qua thẻ test)
             String requestType = "app".equals(request.getPaymentMethod()) || request.getPaymentMethod() == null
-                ? "payWithATM"
-                : "captureWallet";
+                ? "captureWallet"
+                : "payWithATM";
 
             log.info("Using requestType: {} for paymentMethod: {}", requestType, request.getPaymentMethod());
 
@@ -128,7 +129,7 @@ public class MomoPaymentServiceImpl implements MomoPaymentService {
             momoTransaction.setUser(user);
             momoTransaction.setOrderId(orderId);
             momoTransaction.setRequestId(requestId);
-            momoTransaction.setAmount(request.getAmount().setScale(2, BigDecimal.ROUND_HALF_UP));
+            momoTransaction.setAmount(request.getAmount().setScale(2, RoundingMode.HALF_UP));
             momoTransaction.setStatus(MomoTransaction.MomoTransactionStatus.pending);
             momoTransaction.setDescription(orderInfo);
             momoTransaction.setCreatedAt(LocalDateTime.now());

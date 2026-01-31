@@ -4,6 +4,8 @@ import com.example.FoodTourApp.DTO.ShopDTO.CreateShopRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.UpdateShopRequestDTO;
 import com.example.FoodTourApp.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 
@@ -44,10 +46,9 @@ public interface ShopService {
     List<ShopResponseDTO> getShopsBySeller(User seller);
 
     /**
-     * Lấy tất cả shop đang hoạt động
-     * @return Danh sách shop active
+     * Lấy tất cả shop đang hoạt động - WITH PAGINATION
      */
-    List<ShopResponseDTO> getAllActiveShops();
+    Page<ShopResponseDTO> getAllActiveShops(Pageable pageable);
 
     /**
      * Xóa shop (soft delete - set isActive = false)
@@ -56,4 +57,3 @@ public interface ShopService {
      */
     void deleteShop(Integer shopId, User seller);
 }
-
