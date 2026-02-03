@@ -235,9 +235,9 @@ public class SellerProductController {
                 throw new RuntimeException("Sản phẩm không thuộc shop này");
             }
 
-            // Upload nhiều ảnh mới nếu có
+            // ✅ Upload ảnh mới vào thư mục: ProductImage/shop_{shopId}/product_{productId}/
             if (images != null && images.length > 0) {
-                String subfolderId = "shop_" + shopId;
+                String subfolderId = "shop_" + shopId + "/product_" + productId;
                 List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
                 logger.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), productId, subfolderId);

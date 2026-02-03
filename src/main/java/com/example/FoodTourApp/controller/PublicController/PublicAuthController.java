@@ -93,6 +93,8 @@ public class PublicAuthController {
 
             // Tạo JWT token (không dùng cookie nữa, trả về trong response body)
             String accessToken = jwtUtils.generateAccessToken(userId, userResponse.getEmail(), roles);
+            // ✅ Tạo refresh token
+            String refreshToken = jwtUtils.generateRefreshToken(userId, roles);
 
             // Tạo response đầy đủ thông tin
             Map<String, Object> responseBody = new HashMap<>();
@@ -100,6 +102,7 @@ public class PublicAuthController {
             responseBody.put("message", "Login successful");
             responseBody.put("user", userResponse);
             responseBody.put("accessToken", accessToken);
+            responseBody.put("refreshToken", refreshToken); // ✅ Thêm refresh token
             responseBody.put("tokenType", "Bearer");
 
             logger.info("Login successful for username: {}", loginRequest.getUsername());
@@ -150,6 +153,8 @@ public class PublicAuthController {
 
             // Tạo JWT token
             String accessToken = jwtUtils.generateAccessToken(userId, email, roles);
+            // ✅ Tạo refresh token
+            String refreshToken = jwtUtils.generateRefreshToken(userId, roles);
 
             // Tạo response đầy đủ thông tin
             Map<String, Object> responseBody = new HashMap<>();
@@ -157,6 +162,7 @@ public class PublicAuthController {
             responseBody.put("message", "2FA verification successful");
             responseBody.put("user", userResponse);
             responseBody.put("accessToken", accessToken);
+            responseBody.put("refreshToken", refreshToken); // ✅ Thêm refresh token
             responseBody.put("tokenType", "Bearer");
 
             logger.info("2FA verification successful for email: {}", email);

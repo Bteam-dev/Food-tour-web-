@@ -182,7 +182,11 @@ public class CartServiceImpl implements CartService {
 
         // Map imageUrls from Product
         if (cartItem.getProduct().getImageUrls() != null && !cartItem.getProduct().getImageUrls().isEmpty()) {
-            dto.setImageUrls(Arrays.asList(cartItem.getProduct().getImageUrls().split(",")));
+            List<String> imageUrls = Arrays.stream(cartItem.getProduct().getImageUrls().split(","))
+                    .map(String::trim)
+                    .filter(url -> !url.isEmpty())
+                    .collect(Collectors.toList());
+            dto.setImageUrls(imageUrls.isEmpty() ? List.of() : imageUrls);
         } else {
             dto.setImageUrls(List.of());
         }

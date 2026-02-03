@@ -17,6 +17,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -80,6 +81,7 @@ public class ProductServiceImpl implements ProductService {
         product.setCreatedAt(LocalDateTime.now());
         product.setUpdatedAt(LocalDateTime.now());
 
+        // ✅ LƯU PRODUCT TRƯỚC để có ID
         product = productRepository.save(product);
 
         if (request.getVariants() != null && !request.getVariants().isEmpty()) {
@@ -327,9 +329,13 @@ public class ProductServiceImpl implements ProductService {
         dto.setPrice(product.getPrice());
         dto.setDiscountPrice(product.getDiscountPrice());
 
-        // Fix: Xử lý imageUrls khi convert về List
-        if (product.getImageUrls() != null && !product.getImageUrls().isEmpty()) {
-            dto.setImageUrls(List.of(product.getImageUrls().split(",")));
+        // Xử lý imageUrls khi convert về List
+        if (product.getImageUrls() != null && !product.getImageUrls().trim().isEmpty()) {
+            List<String> imageUrls = Arrays.stream(product.getImageUrls().split(","))
+                    .map(String::trim)
+                    .filter(url -> !url.isEmpty())
+                    .collect(Collectors.toList());
+            dto.setImageUrls(imageUrls.isEmpty() ? null : imageUrls);
         } else {
             dto.setImageUrls(null);
         }
@@ -359,6 +365,7 @@ public class ProductServiceImpl implements ProductService {
 
         return dto;
     }
+
 
     private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
         VariantResponseDTO dto = new VariantResponseDTO();

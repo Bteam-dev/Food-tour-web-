@@ -62,25 +62,37 @@ public class SellerShopController {
 
             CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
 
-            // Tạo subfolder ID dựa trên seller ID (vì chưa có shop ID)
-            String subfolderId = "seller_" + seller.getId();
+            // ✅ TẠO SHOP TRƯỚC để có shopId
+            ShopResponseDTO tempShop = shopService.createShop(request, seller);
+            Integer shopId = tempShop.getId();
 
-            // Upload logo nếu có - lưu vào thư mục ShopLogo/seller_X/
+            // ✅ Upload logo vào thư mục: ShopLogo/shop_{shopId}/
             if (logo != null && !logo.isEmpty()) {
+                String subfolderId = "shop_" + shopId;
                 String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
-                request.setLogoUrl(logoUrl);
-                log.info("Logo uploaded: {}", logoUrl);
+
+                // Cập nhật logo cho shop
+                UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
+                updateRequest.setLogoUrl(logoUrl);
+                tempShop = shopService.updateShop(shopId, updateRequest, seller);
+
+                log.info("Logo uploaded to ShopLogo/{}/", subfolderId);
             }
 
-            // Upload banner nếu có - lưu vào thư mục ShopBanner/seller_X/
+            // ✅ Upload banner vào thư mục: ShopBanner/shop_{shopId}/
             if (banner != null && !banner.isEmpty()) {
+                String subfolderId = "shop_" + shopId;
                 String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
-                request.setBannerUrl(bannerUrl);
-                log.info("Banner uploaded: {}", bannerUrl);
+
+                // Cập nhật banner cho shop
+                UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
+                updateRequest.setBannerUrl(bannerUrl);
+                tempShop = shopService.updateShop(shopId, updateRequest, seller);
+
+                log.info("Banner uploaded to ShopBanner/{}/", subfolderId);
             }
 
-            // Lưu shop vào database (đã có URL ảnh nếu user đã upload)
-            ShopResponseDTO response = shopService.createShop(request, seller);
+            ShopResponseDTO response = tempShop;
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
 
         } catch (Exception e) {

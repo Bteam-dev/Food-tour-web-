@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -316,6 +317,18 @@ public class OrderServiceImpl implements OrderService {
         dto.setId(orderItem.getId());
         dto.setProductId(orderItem.getProduct().getId());
         dto.setProductName(orderItem.getProduct().getName());
+
+        // Map product image URLs
+        if (orderItem.getProduct().getImageUrls() != null && !orderItem.getProduct().getImageUrls().trim().isEmpty()) {
+            List<String> imageUrls = Arrays.stream(orderItem.getProduct().getImageUrls().split(","))
+                    .map(String::trim)
+                    .filter(url -> !url.isEmpty())
+                    .collect(Collectors.toList());
+            dto.setImageUrls(imageUrls.isEmpty() ? List.of() : imageUrls);
+        } else {
+            dto.setImageUrls(List.of());
+        }
+
         dto.setQuantity(orderItem.getQuantity());
         dto.setUnitPrice(orderItem.getUnitPrice());
         dto.setTotalPrice(orderItem.getTotalPrice());
@@ -331,6 +344,7 @@ public class OrderServiceImpl implements OrderService {
         dto.setSpecialInstructions(orderItem.getSpecialInstructions());
         return dto;
     }
+
 
     private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
         VariantResponseDTO dto = new VariantResponseDTO();

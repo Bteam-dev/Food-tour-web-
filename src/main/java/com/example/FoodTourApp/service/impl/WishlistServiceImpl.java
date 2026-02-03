@@ -127,11 +127,12 @@ public class WishlistServiceImpl implements WishlistService {
         dto.setAddedAt(wishlist.getCreatedAt());
 
         // Parse image URLs
-        if (product.getImageUrls() != null && !product.getImageUrls().isEmpty()) {
+        if (product.getImageUrls() != null && !product.getImageUrls().trim().isEmpty()) {
             List<String> imageUrls = Arrays.stream(product.getImageUrls().split(","))
                     .map(String::trim)
+                    .filter(url -> !url.isEmpty())
                     .collect(Collectors.toList());
-            dto.setImageUrls(imageUrls);
+            dto.setImageUrls(imageUrls.isEmpty() ? Collections.emptyList() : imageUrls);
         } else {
             dto.setImageUrls(Collections.emptyList());
         }
