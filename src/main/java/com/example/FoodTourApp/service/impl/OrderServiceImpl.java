@@ -1,8 +1,11 @@
 package com.example.FoodTourApp.service.impl;
 
 import com.example.FoodTourApp.DTO.OrderDTO.CreateOrderRequestDTO;
+import com.example.FoodTourApp.DTO.OrderDTO.DashboardStatisticsDTO;
 import com.example.FoodTourApp.DTO.OrderDTO.OrderItemResponseDTO;
 import com.example.FoodTourApp.DTO.OrderDTO.OrderResponseDTO;
+import com.example.FoodTourApp.DTO.OrderDTO.ProductSalesStatisticsDTO;
+import com.example.FoodTourApp.DTO.OrderDTO.RevenueStatisticsDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.AddressRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.AddressResponseDTO;
@@ -38,6 +41,7 @@ public class OrderServiceImpl implements OrderService {
     private final AddressRepository addressRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
+    private final ShopRepository shopRepository;
     private final WalletService walletService;
     private final ObjectMapper objectMapper;
 
@@ -68,14 +72,35 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Selected cart items must belong to the same shop");
         }
 
-        // Kiểm tra payment method
+        // Kiểm tra payment method và normalize
+        Order.PaymentMethod paymentMethod;
         try {
-            Order.PaymentMethod paymentMethod = Order.PaymentMethod.valueOf(request.getPaymentMethod());
+            // ✅ Normalize payment method từ client
+            String normalizedMethod = request.getPaymentMethod().toUpperCase();
+
+            // Map các tên thân thiện sang tên enum - CHỈ WALLET VÀ COD
+            switch (normalizedMethod) {
+                case "WALLET":
+                case "APP_WALLET":
+                    normalizedMethod = "APP_WALLET";
+                    break;
+                case "COD":
+                case "CASH":
+                case "SHIP_COD":
+                    normalizedMethod = "SHIP_COD";
+                    break;
+                default:
+                    throw new RuntimeException("Invalid payment method: " + request.getPaymentMethod() +
+                            ". Only WALLET (app wallet) and COD (cash on delivery) are allowed.");
+            }
+
+            paymentMethod = Order.PaymentMethod.valueOf(normalizedMethod.toLowerCase());
         } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid payment method");
+            throw new RuntimeException("Invalid payment method: " + request.getPaymentMethod() +
+                ". Only WALLET (app wallet) and COD (cash on delivery) are allowed.");
         }
 
-        // Tạo và lưu địa chỉ giao hàng
+        // ✅ Tạo địa chỉ giao hàng từ request (user luôn nhập địa chỉ mới)
         Address deliveryAddress = createAddressFromDTO(request.getDeliveryAddress(), user);
         deliveryAddress = addressRepository.save(deliveryAddress);
 
@@ -87,7 +112,7 @@ public class OrderServiceImpl implements OrderService {
         order.setDeliveryAddress(deliveryAddress);
         order.setOrderStatus(Order.OrderStatus.pending);
         order.setPaymentStatus(Order.PaymentStatus.pending);
-        order.setPaymentMethod(Order.PaymentMethod.valueOf(request.getPaymentMethod()));
+        order.setPaymentMethod(paymentMethod); // ✅ Dùng biến đã normalize
         order.setNotes(request.getNotes());
         order.setCreatedAt(LocalDateTime.now());
         order.setUpdatedAt(LocalDateTime.now());
@@ -368,8 +393,8 @@ public class OrderServiceImpl implements OrderService {
         address.setPostalCode(dto.getPostalCode());
         address.setLatitude(dto.getLatitude());
         address.setLongitude(dto.getLongitude());
-        address.setIsDefault(false);
-        address.setAddressType(Address.AddressType.other);
+        address.setIsDefault(false); // ✅ Set default value
+        address.setAddressType(Address.AddressType.other); // ✅ Set default value
         address.setCreatedAt(LocalDateTime.now());
         return address;
     }
@@ -394,5 +419,291 @@ public class OrderServiceImpl implements OrderService {
         dto.setFullAddress(fullAddress.toString());
 
         return dto;
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO confirmCODPayment(Integer orderId, User seller) {
+        log.info("Seller {} is confirming COD payment for order {}", seller.getId(), orderId);
+
+        // Lấy đơn hàng
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu (phải là seller của shop)
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền xác nhận đơn hàng này");
+        }
+
+        // Kiểm tra phương thức thanh toán
+        if (order.getPaymentMethod() != Order.PaymentMethod.ship_cod) {
+            throw new RuntimeException("Chỉ đơn hàng COD mới cần xác nhận thanh toán");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getPaymentStatus() == Order.PaymentStatus.paid) {
+            throw new RuntimeException("Đơn hàng đã được thanh toán rồi");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Không thể xác nhận đơn hàng đã hủy");
+        }
+
+        // Xử lý COD: Không trừ tiền wallet, chỉ cập nhật trạng thái
+        // Tính toán hoa hồng cho platform (12%)
+        BigDecimal commissionRate = order.getPlatformCommissionRate() != null
+                ? order.getPlatformCommissionRate()
+                : new BigDecimal("12.00");
+        BigDecimal commissionAmount = order.getTotalAmount()
+                .multiply(commissionRate)
+                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
+
+        // Lưu thông tin hoa hồng vào đơn hàng
+        order.setPlatformCommissionRate(commissionRate);
+        order.setPlatformCommissionAmount(commissionAmount);
+        order.setSellerReceivedAmount(sellerReceiveAmount);
+
+        log.info("Order {} COD confirmed. Total: {}, Commission: {} ({}%), Seller receives: {}",
+                order.getId(), order.getTotalAmount(), commissionAmount, commissionRate, sellerReceiveAmount);
+
+        // Cập nhật trạng thái thanh toán
+        order.setPaymentStatus(Order.PaymentStatus.paid);
+        order.setOrderStatus(Order.OrderStatus.delivered); // Tự động chuyển sang đã giao hàng
+        order.setActualDeliveryTime(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+
+        orderRepository.save(order);
+
+        log.info("COD payment confirmed successfully for order {}. Seller confirmed receiving cash from shipper.", order.getId());
+
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable) {
+        log.info("Getting orders for seller: {} with pagination", seller.getId());
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        Page<Order> orders = orderRepository.findByShop(shop, pageable);
+        return orders.map(this::mapToOrderResponseDTO);
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getShopOrdersWithFilter(
+            User seller,
+            Order.OrderStatus status,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Pageable pageable) {
+        log.info("Getting filtered orders for seller: {}, status: {}, startDate: {}, endDate: {}",
+                seller.getId(), status, startDate, endDate);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        Page<Order> orders;
+
+        // Lọc theo các điều kiện
+        if (status != null && startDate != null && endDate != null) {
+            // Lọc cả trạng thái và thời gian
+            orders = orderRepository.findByShopAndOrderStatusAndCreatedAtBetween(shop, status, startDate, endDate, pageable);
+        } else if (status != null) {
+            // Chỉ lọc theo trạng thái
+            orders = orderRepository.findByShopAndOrderStatus(shop, status, pageable);
+        } else if (startDate != null && endDate != null) {
+            // Chỉ lọc theo thời gian
+            orders = orderRepository.findByShopAndCreatedAtBetween(shop, startDate, endDate, pageable);
+        } else {
+            // Không lọc gì, lấy tất cả
+            orders = orderRepository.findByShop(shop, pageable);
+        }
+
+        return orders.map(this::mapToOrderResponseDTO);
+    }
+
+    @Override
+    public List<RevenueStatisticsDTO> getRevenueStatistics(
+            User seller,
+            String periodType,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
+        log.info("Getting revenue statistics for seller: {}, periodType: {}, startDate: {}, endDate: {}",
+                seller.getId(), periodType, startDate, endDate);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        // Lấy đơn hàng đã thanh toán trong khoảng thời gian
+        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
+
+        // Nhóm theo period type
+        Map<String, List<Order>> groupedOrders = new java.util.HashMap<>();
+
+        for (Order order : paidOrders) {
+            String period;
+            if ("day".equalsIgnoreCase(periodType)) {
+                period = order.getCreatedAt().toLocalDate().toString(); // "2024-01-15"
+            } else if ("month".equalsIgnoreCase(periodType)) {
+                period = order.getCreatedAt().getYear() + "-" +
+                         String.format("%02d", order.getCreatedAt().getMonthValue()); // "2024-01"
+            } else if ("year".equalsIgnoreCase(periodType)) {
+                period = String.valueOf(order.getCreatedAt().getYear()); // "2024"
+            } else {
+                throw new RuntimeException("Invalid period type. Allowed: day, month, year");
+            }
+
+            groupedOrders.computeIfAbsent(period, k -> new java.util.ArrayList<>()).add(order);
+        }
+
+        // Tính toán thống kê cho từng period
+        List<RevenueStatisticsDTO> statistics = new java.util.ArrayList<>();
+
+        for (Map.Entry<String, List<Order>> entry : groupedOrders.entrySet()) {
+            String period = entry.getKey();
+            List<Order> orders = entry.getValue();
+
+            long totalOrders = orders.size();
+            BigDecimal totalRevenue = orders.stream()
+                    .map(Order::getTotalAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal platformCommission = orders.stream()
+                    .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal sellerRevenue = orders.stream()
+                    .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            statistics.add(new RevenueStatisticsDTO(period, totalOrders, totalRevenue, platformCommission, sellerRevenue));
+        }
+
+        // Sắp xếp theo period (tăng dần)
+        statistics.sort((a, b) -> a.getPeriod().compareTo(b.getPeriod()));
+
+        log.info("Revenue statistics calculated: {} periods", statistics.size());
+        return statistics;
+    }
+
+    @Override
+    public List<ProductSalesStatisticsDTO> getTopSellingProducts(
+            User seller,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            int limit) {
+        log.info("Getting top selling products for seller: {}, startDate: {}, endDate: {}, limit: {}",
+                seller.getId(), startDate, endDate, limit);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        // Lấy danh sách sản phẩm bán chạy
+        List<Object[]> results = orderItemRepository.findTopSellingProductsByShopAndDateRange(shop, startDate, endDate);
+
+        // Lấy hoa hồng platform để tính seller revenue
+        BigDecimal commissionRate = new BigDecimal("12.00"); // 12%
+
+        List<ProductSalesStatisticsDTO> statistics = new java.util.ArrayList<>();
+
+        int count = 0;
+        for (Object[] row : results) {
+            if (count >= limit) break;
+
+            Integer productId = (Integer) row[0];
+            String productName = (String) row[1];
+            String imageUrls = (String) row[2];
+            Long totalQuantity = ((Number) row[3]).longValue();
+            Long totalOrders = ((Number) row[4]).longValue();
+            BigDecimal totalRevenue = (BigDecimal) row[5];
+
+            // Tính seller revenue (sau khi trừ hoa hồng)
+            BigDecimal sellerRevenue = totalRevenue
+                    .multiply(BigDecimal.ONE.subtract(commissionRate.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)))
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            // Lấy ảnh đầu tiên
+            String firstImage = "";
+            if (imageUrls != null && !imageUrls.trim().isEmpty()) {
+                String[] images = imageUrls.split(",");
+                if (images.length > 0) {
+                    firstImage = images[0].trim();
+                }
+            }
+
+            ProductSalesStatisticsDTO dto = new ProductSalesStatisticsDTO(
+                    productId, productName, firstImage, totalQuantity, totalOrders, totalRevenue, sellerRevenue);
+            statistics.add(dto);
+            count++;
+        }
+
+        log.info("Top selling products: {} products", statistics.size());
+        return statistics;
+    }
+
+    @Override
+    public DashboardStatisticsDTO getDashboardStatistics(User seller, LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Getting dashboard statistics for seller: {}, startDate: {}, endDate: {}",
+                seller.getId(), startDate, endDate);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        DashboardStatisticsDTO dashboard = new DashboardStatisticsDTO();
+
+        // Đếm đơn hàng theo trạng thái
+        Long totalOrders = orderRepository.countByShop(shop);
+        Long pendingOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.pending);
+        Long completedOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.delivered);
+        Long cancelledOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.cancelled);
+
+        dashboard.setTotalOrders(totalOrders);
+        dashboard.setPendingOrders(pendingOrders);
+        dashboard.setCompletedOrders(completedOrders);
+        dashboard.setCancelledOrders(cancelledOrders);
+
+        // Tính doanh thu trong khoảng thời gian
+        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
+
+        BigDecimal totalRevenue = paidOrders.stream()
+                .map(Order::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal platformCommission = paidOrders.stream()
+                .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal sellerRevenue = paidOrders.stream()
+                .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        dashboard.setTotalRevenue(totalRevenue);
+        dashboard.setPlatformCommission(platformCommission);
+        dashboard.setSellerRevenue(sellerRevenue);
+
+        // Lấy top 10 sản phẩm bán chạy
+        List<ProductSalesStatisticsDTO> topProducts = getTopSellingProducts(seller, startDate, endDate, 10);
+        dashboard.setTopSellingProducts(topProducts);
+
+        log.info("Dashboard statistics calculated successfully");
+        return dashboard;
     }
 }

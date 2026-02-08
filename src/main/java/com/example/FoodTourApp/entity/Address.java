@@ -46,7 +46,7 @@ public class Address {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "address_type", nullable = false)
-    private AddressType addressType = AddressType.home;
+    private AddressType addressType = AddressType.other;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

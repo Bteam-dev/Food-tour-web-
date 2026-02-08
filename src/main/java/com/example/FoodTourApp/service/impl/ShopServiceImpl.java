@@ -211,8 +211,7 @@ public class ShopServiceImpl implements ShopService {
         address.setPostalCode(dto.getPostalCode());
         address.setLatitude(dto.getLatitude());
         address.setLongitude(dto.getLongitude());
-        address.setIsDefault(false);
-        address.setAddressType(Address.AddressType.shop);
+
         address.setCreatedAt(LocalDateTime.now());
         return address;
     }

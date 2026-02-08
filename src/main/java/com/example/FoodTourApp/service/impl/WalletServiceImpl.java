@@ -171,6 +171,7 @@ public class WalletServiceImpl implements WalletService {
 
         // 5. Cập nhật trạng thái đơn hàng
         order.setPaymentStatus(Order.PaymentStatus.paid);
+        order.setOrderStatus(Order.OrderStatus.confirmed); // Chuyển sang trạng thái confirmed sau khi thanh toán
         order.setUpdatedAt(LocalDateTime.now());
 
         log.info("Order {} payment completed successfully via wallet. Buyer paid: {}, Seller received: {}, Platform commission: {}",

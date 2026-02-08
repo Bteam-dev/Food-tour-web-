@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.ProductDTO.CreateProductRequestDTO;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.DTO.ProductDTO.UpdateProductRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.CreateVariantRequestDTO;
+import com.example.FoodTourApp.DTO.ProductVariantDTO.ProductVariantUpdateDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.UpdateVariantRequestDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.*;
@@ -155,6 +156,80 @@ public class ProductServiceImpl implements ProductService {
 
         product.setUpdatedAt(LocalDateTime.now());
         product = productRepository.save(product);
+
+        // ✅ XỬ LÝ CẬP NHẬT VARIANTS (THÊM MỚI, CẬP NHẬT, XÓA)
+        if (request.getVariants() != null) {
+            log.info("Processing {} variants for product: {}", request.getVariants().size(), productId);
+
+            for (ProductVariantUpdateDTO varUpdate : request.getVariants()) {
+                // Nếu có flag shouldDelete = true, xóa variant
+                if (varUpdate.getShouldDelete() != null && varUpdate.getShouldDelete()) {
+                    if (varUpdate.getId() != null) {
+                        ProductVariant variant = variantRepository.findById(varUpdate.getId())
+                                .orElseThrow(() -> new RuntimeException("Variant not found with id: " + varUpdate.getId()));
+
+                        // Kiểm tra quyền hạn
+                        if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
+                            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+                                throw new RuntimeException("You do not have permission to delete this variant");
+                            }
+                        }
+
+                        // Soft delete
+                        variant.setIsActive(false);
+                        variantRepository.save(variant);
+                        log.info("Variant {} marked as deleted", varUpdate.getId());
+                    }
+                    continue;
+                }
+
+                // Nếu có ID = cập nhật variant đã tồn tại
+                if (varUpdate.getId() != null) {
+                    ProductVariant variant = variantRepository.findById(varUpdate.getId())
+                            .orElseThrow(() -> new RuntimeException("Variant not found with id: " + varUpdate.getId()));
+
+                    // Kiểm tra quyền hạn
+                    if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
+                        if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+                            throw new RuntimeException("You do not have permission to update this variant");
+                        }
+                    }
+
+                    // Cập nhật thông tin variant
+                    if (varUpdate.getVariantTypeId() != null) {
+                        VariantType variantType = variantTypeRepository.findById(varUpdate.getVariantTypeId())
+                                .orElseThrow(() -> new RuntimeException("Variant type not found"));
+                        variant.setVariantType(variantType);
+                    }
+                    if (varUpdate.getVariantValue() != null) variant.setVariantValue(varUpdate.getVariantValue());
+                    if (varUpdate.getPriceAdjustment() != null) variant.setPriceAdjustment(varUpdate.getPriceAdjustment());
+                    if (varUpdate.getIsActive() != null) variant.setIsActive(varUpdate.getIsActive());
+
+                    variantRepository.save(variant);
+                    log.info("Variant {} updated successfully", varUpdate.getId());
+                }
+                // Nếu không có ID = thêm mới variant
+                else {
+                    if (varUpdate.getVariantTypeId() == null || varUpdate.getVariantValue() == null) {
+                        throw new RuntimeException("VariantTypeId and VariantValue are required for new variant");
+                    }
+
+                    VariantType variantType = variantTypeRepository.findById(varUpdate.getVariantTypeId())
+                            .orElseThrow(() -> new RuntimeException("Variant type not found"));
+
+                    ProductVariant newVariant = new ProductVariant();
+                    newVariant.setProduct(product);
+                    newVariant.setVariantType(variantType);
+                    newVariant.setVariantValue(varUpdate.getVariantValue());
+                    newVariant.setPriceAdjustment(varUpdate.getPriceAdjustment() != null ?
+                            varUpdate.getPriceAdjustment() : java.math.BigDecimal.ZERO);
+                    newVariant.setIsActive(varUpdate.getIsActive() != null ? varUpdate.getIsActive() : true);
+
+                    variantRepository.save(newVariant);
+                    log.info("New variant added: {}", newVariant.getId());
+                }
+            }
+        }
 
         log.info("Product updated successfully: {}", productId);
         return mapToProductResponseDTO(product);

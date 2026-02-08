@@ -1,18 +1,15 @@
 package com.example.FoodTourApp.DTO.ShopDTO;
 
-import com.example.FoodTourApp.entity.Address;
 import lombok.Data;
 
 import javax.validation.constraints.NotBlank;
 
 /**
- * DTO cho địa chỉ khi tạo/cập nhật Shop
+ * DTO cho địa chỉ khi tạo/cập nhật Shop hoặc Order
  */
 @Data
 public class AddressRequestDTO {
 
-    // Bỏ @NotBlank vì khi chọn locality từ HERE API (ví dụ: "Quận Cầu Giấy")
-    // thì không có addressLine (số nhà/đường), chỉ có district + city
     private String addressLine;
 
     private String ward;
@@ -29,6 +26,4 @@ public class AddressRequestDTO {
     private Double latitude;
 
     private Double longitude;
-
-    private Address.AddressType addressType = Address.AddressType.shop;
 }

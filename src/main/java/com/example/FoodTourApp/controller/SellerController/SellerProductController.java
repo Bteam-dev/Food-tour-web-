@@ -218,6 +218,7 @@ public class SellerProductController {
             @AuthenticationPrincipal User user) {
 
         logger.info("User {} is updating product {} in shop {}", user.getEmail(), productId, shopId);
+        logger.info("Received dataJson: {}", dataJson); // ✅ LOG ĐỂ DEBUG
 
         try {
             validateShopOwnership(shopId, user);
@@ -228,6 +229,16 @@ public class SellerProductController {
             }
 
             UpdateProductRequestDTO request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
+
+            // ✅ LOG ĐỂ KIỂM TRA VARIANTS CÓ ĐƯỢC PARSE KHÔNG
+            logger.info("Parsed request - variants count: {}",
+                    request.getVariants() != null ? request.getVariants().size() : "null");
+            if (request.getVariants() != null) {
+                request.getVariants().forEach(v ->
+                    logger.info("Variant: id={}, variantTypeId={}, value={}, shouldDelete={}",
+                            v.getId(), v.getVariantTypeId(), v.getVariantValue(), v.getShouldDelete())
+                );
+            }
 
             // Kiểm tra sản phẩm có thuộc shop này không
             ProductResponseDTO product = productService.getProductById(productId);

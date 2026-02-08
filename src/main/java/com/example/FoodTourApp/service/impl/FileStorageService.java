@@ -62,13 +62,10 @@ public class FileStorageService {
             return null;
         }
 
-        // Validate file type
+        // Validate file type - chấp nhận tất cả các loại ảnh
         String contentType = file.getContentType();
-        if (contentType == null || (!contentType.equals("image/jpeg") &&
-            !contentType.equals("image/jpg") &&
-            !contentType.equals("image/png") &&
-            !contentType.equals("application/pdf"))) {
-            throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG) hoặc PDF");
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, etc.)");
         }
 
         // Validate file size (tối đa 5MB)

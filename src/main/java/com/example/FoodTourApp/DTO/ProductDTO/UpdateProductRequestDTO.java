@@ -1,5 +1,6 @@
 package com.example.FoodTourApp.DTO.ProductDTO;
 
+import com.example.FoodTourApp.DTO.ProductVariantDTO.ProductVariantUpdateDTO;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -21,4 +22,7 @@ public class UpdateProductRequestDTO {
     private Integer maxOrderQuantity;
     private List<String> tags;
     private Integer categoryId;
+
+    // Thêm trường để quản lý variants
+    private List<ProductVariantUpdateDTO> variants;
 }

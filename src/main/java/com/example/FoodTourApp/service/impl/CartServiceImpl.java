@@ -80,7 +80,6 @@ public class CartServiceImpl implements CartService {
         if (cartItem.getId() == null) {
             cartItem.setAddedAt(LocalDateTime.now());
         }
-        cartItem.setUpdatedAt(LocalDateTime.now());
 
         cartItem = cartItemRepository.save(cartItem);
 
@@ -133,7 +132,6 @@ public class CartServiceImpl implements CartService {
             cartItem.setSpecialInstructions(request.getSpecialInstructions());
         }
 
-        cartItem.setUpdatedAt(LocalDateTime.now());
         cartItem = cartItemRepository.save(cartItem);
 
         log.info("Cart item updated successfully: {}", cartItemId);
@@ -214,7 +212,6 @@ public class CartServiceImpl implements CartService {
         dto.setSelectedVariants(selectedVariants.stream().map(this::mapToVariantResponseDTO).collect(Collectors.toList()));
         dto.setSpecialInstructions(cartItem.getSpecialInstructions());
         dto.setAddedAt(cartItem.getAddedAt());
-        dto.setUpdatedAt(cartItem.getUpdatedAt());
 
         return dto;
     }
