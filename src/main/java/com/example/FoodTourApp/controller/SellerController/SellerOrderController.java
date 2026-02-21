@@ -141,6 +141,112 @@ public class SellerOrderController {
     }
 
     /**
+     * Seller xác nhận đơn hàng (chuyển từ pending sang confirmed)
+     * POST /api/seller/orders/{orderId}/confirm
+     */
+    @PostMapping("/{orderId}/confirm")
+    public ResponseEntity<?> confirmOrder(
+            @PathVariable Integer orderId,
+            @AuthenticationPrincipal User seller) {
+        logger.info("Seller ID {} is confirming order {}", seller.getId(), orderId);
+        try {
+            OrderResponseDTO order = orderService.confirmOrder(orderId, seller);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Xác nhận đơn hàng thành công");
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error confirming order {} by seller ID {}: {}",
+                    orderId, seller.getId(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Seller đánh dấu đơn hàng đã giao (chuyển sang delivered)
+     * POST /api/seller/orders/{orderId}/deliver
+     */
+    @PostMapping("/{orderId}/deliver")
+    public ResponseEntity<?> markAsDelivered(
+            @PathVariable Integer orderId,
+            @AuthenticationPrincipal User seller) {
+        logger.info("Seller ID {} is marking order {} as delivered", seller.getId(), orderId);
+        try {
+            OrderResponseDTO order = orderService.markAsDelivered(orderId, seller);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Đánh dấu đã giao hàng thành công");
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error marking order {} as delivered by seller ID {}: {}",
+                    orderId, seller.getId(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Seller hoàn tiền cho đơn hàng
+     * POST /api/seller/orders/{orderId}/refund
+     */
+    @PostMapping("/{orderId}/refund")
+    public ResponseEntity<?> refundOrder(
+            @PathVariable Integer orderId,
+            @AuthenticationPrincipal User seller) {
+        logger.info("Seller ID {} is processing refund for order {}", seller.getId(), orderId);
+        try {
+            OrderResponseDTO order = orderService.refundOrder(orderId, seller);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Hoàn tiền thành công");
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error processing refund for order {} by seller ID {}: {}",
+                    orderId, seller.getId(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Seller hủy đơn hàng
+     * POST /api/seller/orders/{orderId}/cancel
+     */
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<?> cancelOrder(
+            @PathVariable Integer orderId,
+            @RequestBody(required = false) Map<String, String> requestBody,
+            @AuthenticationPrincipal User seller) {
+        logger.info("Seller ID {} is cancelling order {}", seller.getId(), orderId);
+        try {
+            String reason = requestBody != null ? requestBody.get("reason") : null;
+            OrderResponseDTO order = orderService.cancelOrderBySeller(orderId, seller, reason);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Hủy đơn hàng thành công");
+            result.put("data", order);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error cancelling order {} by seller ID {}: {}",
+                    orderId, seller.getId(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
      * Thống kê doanh thu theo ngày/tháng/năm
      * GET /api/seller/orders/statistics/revenue
      * Params: periodType (day/month/year), startDate, endDate

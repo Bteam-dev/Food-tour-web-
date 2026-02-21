@@ -6,6 +6,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.List;
+
 public interface ReviewService {
 
     // User: Tạo review mới
@@ -29,6 +31,15 @@ public interface ReviewService {
     // User: Lấy chi tiết 1 review
     ReviewResponse getReviewById(Integer reviewId);
 
-    // AI CŨNG REPLY ĐƯỢC - Giống Facebook comment
-    ReviewResponse replyReview(Integer reviewId, ReplyRequest request, User user);
+    // Reply review - CÓ ẢNH (shop owner hoặc user đều reply được)
+    ReviewResponse replyReview(Integer reviewId, ReplyRequest request, MultipartFile[] images, User user);
+
+    // Lấy danh sách reply của 1 review
+    List<ReviewReplyResponse> getRepliesByReviewId(Integer reviewId);
+
+    // Sửa reply của mình
+    ReviewReplyResponse updateReply(Integer replyId, ReplyRequest request, MultipartFile[] images, User user);
+
+    // Xóa reply của mình
+    void deleteReply(Integer replyId, User user);
 }

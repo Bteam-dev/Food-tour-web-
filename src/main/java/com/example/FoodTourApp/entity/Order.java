@@ -89,12 +89,19 @@ public class Order {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "confirmed_by")
+    private User confirmedBy;
+
+    @Column(name = "confirmed_at")
+    private LocalDateTime confirmedAt;
+
     public enum OrderStatus {
-        pending, confirmed, preparing, ready, delivering, delivered, cancelled, refunded
+        pending, confirmed, delivered, cancelled
     }
 
     public enum PaymentStatus {
-        pending, paid, failed, refunded
+        pending, paid, refunded
     }
 
     public enum PaymentMethod {

@@ -35,6 +35,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
     private final OrderItemRepository orderItemRepository;
+    private final ReviewReplyRepository reviewReplyRepository;
 
     @Override
     @Transactional
@@ -49,21 +50,31 @@ public class ReviewServiceImpl implements ReviewService {
             throw new IllegalArgumentException("Invalid reviewable type. Must be 'shop' or 'product'");
         }
 
-        // Kiểm tra đã review chưa
-        if (reviewRepository.existsByUserIdAndReviewableTypeAndReviewableId(
-                user.getId(), type, request.getReviewableId())) {
-            throw new IllegalArgumentException("Bạn đã đánh giá " + type + " này rồi");
-        }
-
         // Validate shop/product tồn tại
         validateReviewable(type, request.getReviewableId());
 
         // Nếu review product, phải có orderId và đã mua
+        // LOGIC MỚI: Review theo ORDER, không phải theo PRODUCT
         if (type == Review.ReviewableType.product) {
             if (request.getOrderId() == null) {
                 throw new IllegalArgumentException("Order ID is required for product review");
             }
+
+            // Validate order và product
             validateOrderForProductReview(request.getOrderId(), request.getReviewableId(), user.getId());
+
+            // Kiểm tra đã review ORDER này với PRODUCT này chưa
+            // Cho phép review cùng 1 product nhiều lần nếu là từ các order khác nhau
+            if (reviewRepository.existsByUserIdAndOrderIdAndReviewableTypeAndReviewableId(
+                    user.getId(), request.getOrderId(), type, request.getReviewableId())) {
+                throw new IllegalArgumentException("Bạn đã đánh giá sản phẩm này trong đơn hàng này rồi");
+            }
+        } else {
+            // Review shop thì check như cũ (không cần orderId)
+            if (reviewRepository.existsByUserIdAndReviewableTypeAndReviewableId(
+                    user.getId(), type, request.getReviewableId())) {
+                throw new IllegalArgumentException("Bạn đã đánh giá shop này rồi");
+            }
         }
 
         // Tạo review
@@ -228,24 +239,139 @@ public class ReviewServiceImpl implements ReviewService {
 
     @Override
     @Transactional
-    public ReviewResponse replyReview(Integer reviewId, ReplyRequest request, User user) {
-        log.info("User ID {} is replying to review ID {}", user.getId(), reviewId);
+    public ReviewResponse replyReview(Integer reviewId, ReplyRequest request, MultipartFile[] images, User user) {
+        log.info("User ID {} is replying to review ID {} with {} images", user.getId(), reviewId, images != null ? images.length : 0);
 
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new EntityNotFoundException("Review not found"));
 
-        // AI ĐĂNG NHẬP CŨNG REPLY ĐƯỢC - Giống Facebook!
-        // Không cần check quyền gì cả
+        // LOGIC MỚI: Conversation THREAD - cãi nhau bao nhiêu lần cũng được!
+        // Mỗi lần reply tạo 1 record mới trong review_replies
 
-        review.setReply(request.getReply());
-        review.setRepliedAt(LocalDateTime.now());
-        review.setRepliedBy(user);
+        boolean isShopOwner = isShopOwner(review, user);
+        boolean isReviewOwner = review.getUser().getId().equals(user.getId());
+
+        if (!isShopOwner && !isReviewOwner) {
+            throw new IllegalArgumentException("Bạn không có quyền reply review này. Chỉ chủ shop hoặc người đã review mới có thể reply.");
+        }
+
+        // Tạo reply mới trong thread
+        ReviewReply reviewReply = new ReviewReply();
+        reviewReply.setReview(review);
+        reviewReply.setUser(user);
+        reviewReply.setReplyText(request.getReply());
+        reviewReply.setReplyType(isShopOwner ? ReviewReply.ReplyType.SHOP_OWNER : ReviewReply.ReplyType.USER);
+
+        // Upload ảnh nếu có - lưu vào thư mục ReviewImage/user_X/
+        if (images != null && images.length > 0) {
+            try {
+                String subfolderId = "user_" + user.getId();
+                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
+                reviewReply.setImages(objectMapper.writeValueAsString(imagePaths));
+                log.info("Uploaded {} images for reply", imagePaths.size());
+            } catch (IOException e) {
+                log.error("Error uploading reply images: {}", e.getMessage());
+                throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());
+            }
+        }
+
+        reviewReply.setCreatedAt(LocalDateTime.now());
+        reviewReply.setUpdatedAt(LocalDateTime.now());
+
+        reviewReplyRepository.save(reviewReply);
+
+        // Update review timestamp
         review.setUpdatedAt(LocalDateTime.now());
 
+        // BACKWARD COMPATIBLE: Cập nhật fields cũ (reply/userReply) với reply mới nhất
+        if (isShopOwner) {
+            review.setReply(request.getReply());
+            review.setRepliedAt(LocalDateTime.now());
+            review.setRepliedBy(user);
+        } else {
+            review.setUserReply(request.getReply());
+            review.setUserRepliedAt(LocalDateTime.now());
+        }
+
         Review savedReview = reviewRepository.save(review);
-        log.info("User ID {} replied to review ID {} successfully", user.getId(), reviewId);
+        log.info("User ID {} replied to review ID {} successfully. Total replies: {}",
+                user.getId(), reviewId, reviewReplyRepository.countByReviewId(reviewId));
 
         return mapToResponse(savedReview);
+    }
+
+    @Override
+    public List<ReviewReplyResponse> getRepliesByReviewId(Integer reviewId) {
+        log.info("Getting all replies for review ID {}", reviewId);
+
+        // Kiểm tra review có tồn tại không
+        if (!reviewRepository.existsById(reviewId)) {
+            throw new EntityNotFoundException("Review not found with ID: " + reviewId);
+        }
+
+        List<ReviewReply> replies = reviewReplyRepository.findByReviewIdOrderByCreatedAtAsc(reviewId);
+        return replies.stream()
+                .map(this::mapReplyToResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public ReviewReplyResponse updateReply(Integer replyId, ReplyRequest request, MultipartFile[] images, User user) {
+        log.info("User ID {} is updating reply ID {}", user.getId(), replyId);
+
+        ReviewReply reply = reviewReplyRepository.findById(replyId)
+                .orElseThrow(() -> new EntityNotFoundException("Reply not found with ID: " + replyId));
+
+        // Chỉ owner của reply mới được update
+        if (!reply.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Bạn không có quyền sửa reply này");
+        }
+
+        // Update reply text
+        reply.setReplyText(request.getReply());
+
+        // Update images nếu có - lưu vào thư mục ReviewImage/user_X/
+        if (images != null && images.length > 0) {
+            // Xóa ảnh cũ
+            deleteOldImages(reply.getImages());
+
+            try {
+                String subfolderId = "user_" + user.getId();
+                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
+                reply.setImages(objectMapper.writeValueAsString(imagePaths));
+                log.info("Updated {} images for reply", imagePaths.size());
+            } catch (IOException e) {
+                log.error("Error uploading reply images: {}", e.getMessage());
+                throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());
+            }
+        }
+
+        reply.setUpdatedAt(LocalDateTime.now());
+        ReviewReply savedReply = reviewReplyRepository.save(reply);
+
+        log.info("Reply ID {} updated successfully", replyId);
+        return mapReplyToResponse(savedReply);
+    }
+
+    @Override
+    @Transactional
+    public void deleteReply(Integer replyId, User user) {
+        log.info("User ID {} is deleting reply ID {}", user.getId(), replyId);
+
+        ReviewReply reply = reviewReplyRepository.findById(replyId)
+                .orElseThrow(() -> new EntityNotFoundException("Reply not found with ID: " + replyId));
+
+        // Chỉ owner của reply mới được xóa
+        if (!reply.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Bạn không có quyền xóa reply này");
+        }
+
+        // Xóa ảnh nếu có
+        deleteOldImages(reply.getImages());
+
+        reviewReplyRepository.delete(reply);
+        log.info("Reply ID {} deleted successfully", replyId);
     }
 
     // ==================== HELPER METHODS ====================
@@ -335,16 +461,54 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         response.setIsAnonymous(review.getIsAnonymous());
-        response.setReply(review.getReply());
+        response.setReply(review.getReply()); // Shop owner reply
         response.setRepliedAt(review.getRepliedAt());
 
         if (review.getRepliedBy() != null) {
             response.setRepliedByName(review.getRepliedBy().getFullName());
         }
 
+        // User reply lại shop (phản bác) - DEPRECATED nhưng giữ lại
+        response.setUserReply(review.getUserReply());
+        response.setUserRepliedAt(review.getUserRepliedAt());
+
+        // NEW: Load conversation thread (tất cả replies)
+        List<ReviewReply> replies = reviewReplyRepository.findByReviewIdOrderByCreatedAtAsc(review.getId());
+        response.setReplies(replies.stream()
+                .map(this::mapReplyToResponse)
+                .toList());
+
         response.setCreatedAt(review.getCreatedAt());
         response.setUpdatedAt(review.getUpdatedAt());
 
+        return response;
+    }
+
+    private ReviewReplyResponse mapReplyToResponse(ReviewReply reply) {
+        ReviewReplyResponse response = new ReviewReplyResponse();
+        response.setId(reply.getId());
+        response.setReviewId(reply.getReview().getId());
+        response.setUserId(reply.getUser().getId());
+        response.setUserFullName(reply.getUser().getFullName());
+        response.setUserAvatarUrl(reply.getUser().getAvatarUrl());
+        response.setReplyText(reply.getReplyText());
+
+        // Parse images JSON
+        if (reply.getImages() != null && !reply.getImages().isEmpty()) {
+            try {
+                List<String> images = objectMapper.readValue(reply.getImages(), new TypeReference<List<String>>() {});
+                response.setImages(images);
+            } catch (JsonProcessingException e) {
+                log.error("Error parsing reply images JSON: {}", e.getMessage());
+                response.setImages(new ArrayList<>());
+            }
+        } else {
+            response.setImages(new ArrayList<>());
+        }
+
+        response.setReplyType(reply.getReplyType().toString());
+        response.setCreatedAt(reply.getCreatedAt());
+        response.setUpdatedAt(reply.getUpdatedAt());
         return response;
     }
 
@@ -388,6 +552,47 @@ public class ReviewServiceImpl implements ReviewService {
         } catch (Exception e) {
             log.error("Error getting reviewable image URLs: {}", e.getMessage());
             return List.of();
+        }
+    }
+
+    private void validateReplyPermission(Review review, User user) {
+        // Lấy thông tin shop từ reviewable
+        Shop shop = null;
+
+        if (review.getReviewableType() == Review.ReviewableType.shop) {
+            // Review shop -> check shop owner
+            shop = shopRepository.findById(review.getReviewableId())
+                    .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
+        } else if (review.getReviewableType() == Review.ReviewableType.product) {
+            // Review product -> check product's shop owner
+            Product product = productRepository.findById(review.getReviewableId())
+                    .orElseThrow(() -> new EntityNotFoundException("Product not found"));
+            shop = product.getShop();
+        }
+
+        // Kiểm tra user có phải là seller (owner) của shop không
+        if (shop == null || !shop.getSeller().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Bạn không có quyền reply review này. Chỉ chủ shop mới có thể reply.");
+        }
+    }
+
+    private boolean isShopOwner(Review review, User user) {
+        try {
+            Shop shop = null;
+
+            if (review.getReviewableType() == Review.ReviewableType.shop) {
+                shop = shopRepository.findById(review.getReviewableId()).orElse(null);
+            } else if (review.getReviewableType() == Review.ReviewableType.product) {
+                Product product = productRepository.findById(review.getReviewableId()).orElse(null);
+                if (product != null) {
+                    shop = product.getShop();
+                }
+            }
+
+            return shop != null && shop.getSeller().getId().equals(user.getId());
+        } catch (Exception e) {
+            log.error("Error checking shop owner: {}", e.getMessage());
+            return false;
         }
     }
 }

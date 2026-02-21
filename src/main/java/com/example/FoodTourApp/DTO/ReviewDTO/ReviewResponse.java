@@ -20,9 +20,12 @@ public class ReviewResponse {
     private String comment;
     private List<String> images;
     private Boolean isAnonymous;
-    private String reply;
+    private String reply; // Shop owner reply (DEPRECATED - giữ lại để backward compatible)
     private LocalDateTime repliedAt;
     private String repliedByName;
+    private String userReply; // User reply lại shop (DEPRECATED - giữ lại để backward compatible)
+    private LocalDateTime userRepliedAt;
+    private List<ReviewReplyResponse> replies; // NEW: Thread conversation (cãi nhau dài được!)
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -218,19 +218,21 @@ public class UserReviewController {
     }
 
     /**
-     * Trả lời review (ai cũng reply được - giống Facebook comment)
+     * Trả lời review - CÓ ẢNH (shop owner hoặc user đều reply được)
      * POST /api/user/reviews/{reviewId}/reply
      */
     @PostMapping("/{reviewId}/reply")
     public ResponseEntity<?> replyReview(
             @PathVariable Integer reviewId,
-            @Valid @RequestBody ReplyRequest request,
+            @Valid @RequestPart("data") ReplyRequest request,
+            @RequestPart(value = "images", required = false) MultipartFile[] images,
             @AuthenticationPrincipal User user) {
 
-        log.info("User ID {} is replying to review ID {}", user.getId(), reviewId);
+        log.info("User ID {} is replying to review ID {} with {} images",
+                user.getId(), reviewId, images != null ? images.length : 0);
 
         try {
-            ReviewResponse response = reviewService.replyReview(reviewId, request, user);
+            ReviewResponse response = reviewService.replyReview(reviewId, request, images, user);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -241,7 +243,65 @@ public class UserReviewController {
             log.error("Error replying to review: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", "Có lỗi xảy ra khi trả lời đánh giá");
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Sửa reply của mình - CÓ ẢNH
+     * PUT /api/user/reviews/replies/{replyId}
+     */
+    @PutMapping("/replies/{replyId}")
+    public ResponseEntity<?> updateReply(
+            @PathVariable Integer replyId,
+            @Valid @RequestPart("data") ReplyRequest request,
+            @RequestPart(value = "images", required = false) MultipartFile[] images,
+            @AuthenticationPrincipal User user) {
+
+        log.info("User ID {} is updating reply ID {} with {} images",
+                user.getId(), replyId, images != null ? images.length : 0);
+
+        try {
+            ReviewReplyResponse response = reviewService.updateReply(replyId, request, images, user);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Cập nhật reply thành công");
+            result.put("data", response);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error updating reply: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Xóa reply của mình
+     * DELETE /api/user/reviews/replies/{replyId}
+     */
+    @DeleteMapping("/replies/{replyId}")
+    public ResponseEntity<?> deleteReply(
+            @PathVariable Integer replyId,
+            @AuthenticationPrincipal User user) {
+
+        log.info("User ID {} is deleting reply ID {}", user.getId(), replyId);
+
+        try {
+            reviewService.deleteReply(replyId, user);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Xóa reply thành công");
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error deleting reply: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }

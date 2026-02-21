@@ -31,6 +31,14 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
             Integer reviewableId
     );
 
+    // Kiểm tra user đã review ORDER này với PRODUCT này chưa (cho phép review cùng product từ order khác)
+    boolean existsByUserIdAndOrderIdAndReviewableTypeAndReviewableId(
+            Integer userId,
+            Integer orderId,
+            Review.ReviewableType reviewableType,
+            Integer reviewableId
+    );
+
     // Tìm review của user cho một reviewable cụ thể
     Optional<Review> findByUserIdAndReviewableTypeAndReviewableId(
             Integer userId,
@@ -58,14 +66,4 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
             Review.ReviewableType reviewableType,
             Integer reviewableId
     );
-
-    // Admin: Lấy tất cả review (kể cả chưa approve)
-    Page<Review> findByReviewableTypeAndReviewableId(
-            Review.ReviewableType reviewableType,
-            Integer reviewableId,
-            Pageable pageable
-    );
-
-    // Admin: Lấy review chưa approve
-    Page<Review> findByIsApprovedFalse(Pageable pageable);
 }

@@ -52,6 +52,13 @@ public class Review {
     @JoinColumn(name = "admin_replied_by")
     private User repliedBy;
 
+    // User reply lại shop (phản bác)
+    @Column(name = "user_reply", columnDefinition = "TEXT")
+    private String userReply;
+
+    @Column(name = "user_replied_at")
+    private LocalDateTime userRepliedAt;
+
     @Column(name = "is_approved", nullable = false)
     private Boolean isApproved = true;
 

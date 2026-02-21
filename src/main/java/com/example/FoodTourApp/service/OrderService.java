@@ -31,6 +31,27 @@ public interface OrderService {
     OrderResponseDTO confirmCODPayment(Integer orderId, User seller);
 
     /**
+     * Seller xác nhận đơn hàng (chuyển từ pending sang confirmed)
+     */
+    OrderResponseDTO confirmOrder(Integer orderId, User seller);
+
+    /**
+     * Seller đánh dấu đơn hàng đã giao (chuyển sang delivered)
+     * Với COD: cũng xác nhận đã nhận tiền
+     */
+    OrderResponseDTO markAsDelivered(Integer orderId, User seller);
+
+    /**
+     * Seller hoàn tiền cho đơn hàng
+     */
+    OrderResponseDTO refundOrder(Integer orderId, User seller);
+
+    /**
+     * Shop hủy đơn hàng (khi cần thiết, ví dụ user yêu cầu)
+     */
+    OrderResponseDTO cancelOrderBySeller(Integer orderId, User seller, String reason);
+
+    /**
      * Seller lấy danh sách đơn hàng của shop với lọc
      */
     Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable);

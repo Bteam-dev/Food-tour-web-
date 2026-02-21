@@ -1,5 +1,6 @@
 package com.example.FoodTourApp.controller.PublicController;
 
+import com.example.FoodTourApp.DTO.ReviewDTO.ReviewReplyResponse;
 import com.example.FoodTourApp.DTO.ReviewDTO.ReviewResponse;
 import com.example.FoodTourApp.DTO.ReviewDTO.ReviewStatistics;
 import com.example.FoodTourApp.service.ReviewService;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -194,6 +196,33 @@ public class PublicReviewController {
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "Không tìm thấy đánh giá");
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
+     * Lấy danh sách tất cả reply của 1 review (PUBLIC - ai cũng xem được)
+     * GET /api/public/reviews/{reviewId}/replies
+     */
+    @GetMapping("/{reviewId}/replies")
+    public ResponseEntity<?> getRepliesByReviewId(
+            @PathVariable Integer reviewId) {
+
+        log.info("Getting all replies for review ID {}", reviewId);
+
+        try {
+            List<ReviewReplyResponse> replies = reviewService.getRepliesByReviewId(reviewId);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", replies);
+            result.put("totalReplies", replies.size());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error getting replies: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }
