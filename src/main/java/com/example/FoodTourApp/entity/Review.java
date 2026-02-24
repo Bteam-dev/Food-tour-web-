@@ -62,6 +62,10 @@ public class Review {
     @Column(name = "is_approved", nullable = false)
     private Boolean isApproved = true;
 
+    // YÊU CẦU HOÀN TIỀN - User yêu cầu refund khi review (thường khi rating thấp)
+    @Column(name = "has_refund_request", nullable = false)
+    private Boolean hasRefundRequest = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

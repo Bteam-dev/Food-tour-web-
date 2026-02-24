@@ -66,4 +66,16 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
             Review.ReviewableType reviewableType,
             Integer reviewableId
     );
+
+    // TÌM TẤT CẢ REVIEWS CÓ YÊU CẦU HOÀN TIỀN (PRODUCT REVIEW)
+    @Query("SELECT r FROM Review r WHERE r.hasRefundRequest = true AND r.reviewableType = 'product' " +
+           "AND r.order.shop.id = :shopId ORDER BY r.createdAt DESC")
+    List<Review> findRefundRequestsByShopId(@Param("shopId") Integer shopId);
+
+    @Query("SELECT r FROM Review r WHERE r.hasRefundRequest = true AND r.reviewableType = 'product' " +
+           "AND r.order.shop.id = :shopId ORDER BY r.createdAt DESC")
+    Page<Review> findRefundRequestsByShopId(@Param("shopId") Integer shopId, Pageable pageable);
+
+    // CHECK XEM ORDER CÓ REVIEW YÊU CẦU REFUND KHÔNG
+    boolean existsByOrderIdAndHasRefundRequestTrue(Integer orderId);
 }

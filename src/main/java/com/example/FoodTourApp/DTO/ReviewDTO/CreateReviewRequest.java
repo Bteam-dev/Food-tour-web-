@@ -24,4 +24,7 @@ public class CreateReviewRequest {
     private String comment;
 
     private Boolean isAnonymous = false;
+
+    // YÊU CẦU HOÀN TIỀN khi review (user có thể tick vào nếu muốn)
+    private Boolean hasRefundRequest = false;
 }

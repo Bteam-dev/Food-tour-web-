@@ -192,7 +192,10 @@ public class CartServiceImpl implements CartService {
         dto.setUnitPrice(cartItem.getProduct().getPrice());
         dto.setQuantity(cartItem.getQuantity());
 
-        BigDecimal totalPrice = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+        // TÍNH THEO GIÁ HIỆU LỰC (ưu tiên discountPrice nếu có)
+        BigDecimal effectivePrice = cartItem.getProduct().getEffectivePrice();
+        BigDecimal totalPrice = effectivePrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+
         List<ProductVariant> selectedVariants = List.of();
         try {
             Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);

@@ -27,7 +27,7 @@ public class ProductResponseDTO {
     private Integer minOrderQuantity;
     private Integer maxOrderQuantity;
     private Double rating;
-    private Integer totalReviews;
+    private Long totalReviews;
     private List<String> tags;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -87,6 +87,9 @@ public class ReviewServiceImpl implements ReviewService {
         review.setIsAnonymous(request.getIsAnonymous() != null ? request.getIsAnonymous() : false);
         review.setIsApproved(true); // TỰ ĐỘNG APPROVE - Review là quyền con người!
 
+        // YÊU CẦU HOÀN TIỀN
+        review.setHasRefundRequest(request.getHasRefundRequest() != null ? request.getHasRefundRequest() : false);
+
         if (request.getOrderId() != null) {
             Order order = orderRepository.findById(request.getOrderId())
                     .orElseThrow(() -> new EntityNotFoundException("Order not found"));
@@ -112,6 +115,16 @@ public class ReviewServiceImpl implements ReviewService {
         Review savedReview = reviewRepository.save(review);
         log.info("Review created successfully with ID {}", savedReview.getId());
 
+        if (review.getHasRefundRequest() && review.getOrder() != null) {
+            Order order = review.getOrder();
+            order.setHasRefundRequest(true);
+            order.setUpdatedAt(LocalDateTime.now());
+            orderRepository.save(order);
+            log.info("Order {} flagged with refund request from review {}", order.getId(), savedReview.getId());
+        }
+
+        updateReviewableRating(type, request.getReviewableId());
+
         return mapToResponse(savedReview);
     }
 
@@ -135,6 +148,16 @@ public class ReviewServiceImpl implements ReviewService {
             review.setIsAnonymous(request.getIsAnonymous());
         }
 
+        // CẬP NHẬT yêu cầu hoàn tiền - CHỈ CHO PRODUCT REVIEW
+        if (request.getHasRefundRequest() != null) {
+            if (review.getReviewableType() == Review.ReviewableType.product) {
+                review.setHasRefundRequest(request.getHasRefundRequest());
+            } else {
+                // Shop review không được phép có refund request
+                log.warn("Attempted to set refund request on shop review ID {}", reviewId);
+            }
+        }
+
         // Upload images mới nếu có - lưu vào thư mục ReviewImage/user_X/
         if (images != null && images.length > 0) {
             // Xóa ảnh cũ
@@ -154,6 +177,20 @@ public class ReviewServiceImpl implements ReviewService {
         review.setUpdatedAt(LocalDateTime.now());
         Review savedReview = reviewRepository.save(review);
 
+        // ✅ CẬP NHẬT FLAG hasRefundRequest CHO ORDER KHI UPDATE REVIEW
+        if (review.getOrder() != null) {
+            Order order = review.getOrder();
+            // Check xem còn review nào khác yêu cầu refund không
+            boolean hasAnyRefundRequest = reviewRepository.existsByOrderIdAndHasRefundRequestTrue(order.getId());
+            order.setHasRefundRequest(hasAnyRefundRequest);
+            order.setUpdatedAt(LocalDateTime.now());
+            orderRepository.save(order);
+            log.info("Order {} refund request flag updated to: {}", order.getId(), hasAnyRefundRequest);
+        }
+
+        // TỰ ĐỘNG CẬP NHẬT RATING VÀ TOTAL_REVIEWS CHO SHOP/PRODUCT
+        updateReviewableRating(review.getReviewableType(), review.getReviewableId());
+
         log.info("Review ID {} updated successfully", reviewId);
         return mapToResponse(savedReview);
     }
@@ -171,10 +208,18 @@ public class ReviewServiceImpl implements ReviewService {
             throw new IllegalArgumentException("Bạn không có quyền xóa review này");
         }
 
+        // Lưu lại thông tin trước khi xóa
+        Review.ReviewableType type = review.getReviewableType();
+        Integer reviewableId = review.getReviewableId();
+
         // Xóa ảnh
         deleteOldImages(review.getImages());
 
         reviewRepository.delete(review);
+
+        // TỰ ĐỘNG CẬP NHẬT RATING VÀ TOTAL_REVIEWS CHO SHOP/PRODUCT SAU KHI XÓA
+        updateReviewableRating(type, reviewableId);
+
         log.info("Review ID {} deleted successfully", reviewId);
     }
 
@@ -478,6 +523,9 @@ public class ReviewServiceImpl implements ReviewService {
                 .map(this::mapReplyToResponse)
                 .toList());
 
+        // YÊU CẦU HOÀN TIỀN
+        response.setHasRefundRequest(review.getHasRefundRequest());
+
         response.setCreatedAt(review.getCreatedAt());
         response.setUpdatedAt(review.getUpdatedAt());
 
@@ -593,6 +641,38 @@ public class ReviewServiceImpl implements ReviewService {
         } catch (Exception e) {
             log.error("Error checking shop owner: {}", e.getMessage());
             return false;
+        }
+    }
+
+    private void updateReviewableRating(Review.ReviewableType type, Integer reviewableId) {
+        try {
+            if (type == Review.ReviewableType.shop) {
+                // Cập nhật cho shop
+                Shop shop = shopRepository.findById(reviewableId)
+                        .orElseThrow(() -> new EntityNotFoundException("Shop not found"));
+
+                // Tính toán lại rating và totalReviews
+                ReviewStatistics stats = getReviewStatistics("shop", reviewableId);
+                shop.setRating(stats.getAverageRating());
+                shop.setTotalReviews(stats.getTotalReviews());
+
+                shopRepository.save(shop);
+                log.info("Updated rating for shop ID {}", reviewableId);
+            } else if (type == Review.ReviewableType.product) {
+                // Cập nhật cho product
+                Product product = productRepository.findById(reviewableId)
+                        .orElseThrow(() -> new EntityNotFoundException("Product not found"));
+
+                // Tính toán lại rating và totalReviews
+                ReviewStatistics stats = getReviewStatistics("product", reviewableId);
+                product.setRating(stats.getAverageRating());
+                product.setTotalReviews(stats.getTotalReviews());
+
+                productRepository.save(product);
+                log.info("Updated rating for product ID {}", reviewableId);
+            }
+        } catch (Exception e) {
+            log.error("Error updating reviewable rating: {}", e.getMessage());
         }
     }
 }

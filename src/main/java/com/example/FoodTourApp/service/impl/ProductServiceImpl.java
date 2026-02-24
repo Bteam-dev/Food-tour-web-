@@ -56,6 +56,16 @@ public class ProductServiceImpl implements ProductService {
         product.setName(request.getName());
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
+
+        // VALIDATION: Giá giảm phải nhỏ hơn giá gốc
+        if (request.getDiscountPrice() != null) {
+            if (request.getDiscountPrice().compareTo(request.getPrice()) >= 0) {
+                throw new RuntimeException("Giá giảm phải nhỏ hơn giá gốc");
+            }
+            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0) {
+                throw new RuntimeException("Giá giảm không thể âm");
+            }
+        }
         product.setDiscountPrice(request.getDiscountPrice());
 
         // Fix: Xử lý imageUrls - chỉ set khi có giá trị
@@ -120,7 +130,18 @@ public class ProductServiceImpl implements ProductService {
         if (request.getName() != null) product.setName(request.getName());
         if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (request.getPrice() != null) product.setPrice(request.getPrice());
-        if (request.getDiscountPrice() != null) product.setDiscountPrice(request.getDiscountPrice());
+
+        // VALIDATION: Giá giảm phải nhỏ hơn giá gốc
+        if (request.getDiscountPrice() != null) {
+            java.math.BigDecimal priceToCompare = request.getPrice() != null ? request.getPrice() : product.getPrice();
+            if (request.getDiscountPrice().compareTo(priceToCompare) >= 0) {
+                throw new RuntimeException("Giá giảm phải nhỏ hơn giá gốc");
+            }
+            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0) {
+                throw new RuntimeException("Giá giảm không thể âm");
+            }
+            product.setDiscountPrice(request.getDiscountPrice());
+        }
 
         // Fix: Xử lý imageUrls - chỉ set khi có giá trị
         if (request.getImageUrls() != null) {

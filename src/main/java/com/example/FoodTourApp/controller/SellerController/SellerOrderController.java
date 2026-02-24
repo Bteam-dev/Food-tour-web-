@@ -333,4 +333,46 @@ public class SellerOrderController {
             return ResponseEntity.badRequest().body(error);
         }
     }
+
+    /**
+     * Lấy danh sách đơn hàng có yêu cầu refund từ review
+     * GET /api/seller/orders/refund-requests
+     * Params: page, size, sortBy, sortDir
+     */
+    @GetMapping("/refund-requests")
+    public ResponseEntity<?> getOrdersWithRefundRequests(
+            @AuthenticationPrincipal User seller,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        logger.info("Seller ID {} is getting orders with refund requests", seller.getId());
+        try {
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
+                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+
+            // Lấy tất cả đơn hàng của shop và filter ra những đơn có hasRefundRequest = true
+            Page<OrderResponseDTO> ordersWithRefund = orderService.getShopOrders(seller, pageable)
+                    .map(order -> order); // Đã có hasRefundRequest trong DTO rồi
+
+            // Filter chỉ lấy những đơn có refund request
+            Page<OrderResponseDTO> filteredOrders = ordersWithRefund
+                    .map(order -> order.getHasRefundRequest() != null && order.getHasRefundRequest() ? order : null)
+                    .map(order -> order);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Danh sách đơn hàng có yêu cầu hoàn tiền");
+            result.put("data", PageResponse.of(ordersWithRefund));
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error getting orders with refund requests for seller ID {}: {}",
+                    seller.getId(), e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
 }

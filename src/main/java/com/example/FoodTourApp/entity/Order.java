@@ -96,6 +96,10 @@ public class Order {
     @Column(name = "confirmed_at")
     private LocalDateTime confirmedAt;
 
+    // YÊU CẦU HOÀN TIỀN - Flag đánh dấu order có review yêu cầu refund
+    @Column(name = "has_refund_request", nullable = false)
+    private Boolean hasRefundRequest = false;
+
     public enum OrderStatus {
         pending, confirmed, delivered, cancelled
     }

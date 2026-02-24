@@ -16,5 +16,7 @@ public class UpdateReviewRequest {
     private String comment;
 
     private Boolean isAnonymous;
-}
 
+    // CẬP NHẬT yêu cầu hoàn tiền (user có thể bật/tắt khi update review)
+    private Boolean hasRefundRequest;
+}

@@ -120,6 +120,12 @@ public class WishlistServiceImpl implements WishlistService {
         dto.setDescription(product.getDescription());
         dto.setPrice(product.getPrice());
         dto.setDiscountPrice(product.getDiscountPrice());
+
+        // THÔNG TIN GIẢM GIÁ - Sử dụng helper methods từ Product entity
+        dto.setHasDiscount(product.hasDiscount());
+        dto.setDiscountPercentage(product.getDiscountPercentage());
+        dto.setEffectivePrice(product.getEffectivePrice());
+
         dto.setIsAvailable(product.getIsAvailable());
         dto.setStockQuantity(product.getStockQuantity());
         dto.setAverageRating(product.getRating());

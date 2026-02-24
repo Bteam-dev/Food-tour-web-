@@ -41,7 +41,7 @@ public class ShopResponseDTO {
 
     private Double rating;
 
-    private Integer totalReviews;
+    private Long totalReviews;
 
     private Boolean isVerified;
 

@@ -42,6 +42,7 @@ public class OrderServiceImpl implements OrderService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ShopRepository shopRepository;
+    private final ReviewRepository reviewRepository;
     private final WalletService walletService;
     private final ObjectMapper objectMapper;
 
@@ -128,7 +129,9 @@ public class OrderServiceImpl implements OrderService {
                 throw new RuntimeException("Invalid quantity for product " + cartItem.getProduct().getName());
             }
 
-            BigDecimal itemTotal = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+            // TÍNH THEO GIÁ HIỆU LỰC (ưu tiên discountPrice nếu có)
+            BigDecimal effectivePrice = cartItem.getProduct().getEffectivePrice();
+            BigDecimal itemTotal = effectivePrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             try {
                 Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
                 List<Integer> variantIds = variantMap.getOrDefault("variantIds", List.of());
@@ -163,8 +166,11 @@ public class OrderServiceImpl implements OrderService {
             orderItem.setOrder(order);
             orderItem.setProduct(cartItem.getProduct());
             orderItem.setQuantity(cartItem.getQuantity());
-            orderItem.setUnitPrice(cartItem.getProduct().getPrice());
-            BigDecimal itemTotal = cartItem.getProduct().getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+
+            // LƯU GIÁ HIỆU LỰC VÀO ORDER ITEM (để sau này vẫn đúng nếu giá thay đổi)
+            BigDecimal effectivePrice = cartItem.getProduct().getEffectivePrice();
+            orderItem.setUnitPrice(effectivePrice);
+            BigDecimal itemTotal = effectivePrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             try {
                 Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
                 List<Integer> variantIds = variantMap.getOrDefault("variantIds", List.of());
@@ -329,6 +335,8 @@ public class OrderServiceImpl implements OrderService {
         }
         dto.setCreatedAt(order.getCreatedAt());
         dto.setUpdatedAt(order.getUpdatedAt());
+
+        dto.setHasRefundRequest(order.getHasRefundRequest());
 
         List<OrderItem> orderItems = orderItemRepository.findByOrder(order);
         dto.setOrderItems(orderItems.stream().map(this::mapToOrderItemResponseDTO).collect(Collectors.toList()));

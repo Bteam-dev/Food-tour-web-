@@ -22,7 +22,12 @@ public class WishlistItemDTO {
     private Boolean isAvailable;
     private Integer stockQuantity;
     private Double averageRating;
-    private Integer totalReviews;
+    private Long totalReviews;  // Sửa từ Integer sang Long
+
+    // Thông tin giảm giá
+    private Boolean hasDiscount;           // Có đang giảm giá không
+    private BigDecimal discountPercentage; // % giảm giá (để hiển thị badge)
+    private BigDecimal effectivePrice;     // Giá hiệu lực (price hoặc discountPrice)
 
     // Thông tin shop
     private Integer shopId;
@@ -37,4 +42,3 @@ public class WishlistItemDTO {
     // Thông tin wishlist
     private LocalDateTime addedAt;
 }
-

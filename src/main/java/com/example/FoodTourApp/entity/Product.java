@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.math.RoundingMode;
 
 @Entity
 @Table(name = "products")
@@ -61,7 +62,7 @@ public class Product {
     private Double rating = 0.0;
 
     @Column(name = "total_reviews")
-    private Integer totalReviews = 0;
+    private Long totalReviews = 0L;
 
     @Column(name = "tags", columnDefinition = "TEXT")
     private String tags; // Lưu dạng: "spicy,vegetarian,bestseller"
@@ -71,4 +72,43 @@ public class Product {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
+
+    /**
+     * Lấy giá hiệu lực của sản phẩm
+     * Nếu có giá giảm (discountPrice) thì ưu tiên giá giảm
+     * Nếu không có giá giảm thì dùng giá gốc (price)
+     *
+     * @return Giá hiệu lực để tính toán đơn hàng, cart, commission
+     */
+    public BigDecimal getEffectivePrice() {
+        return (discountPrice != null && discountPrice.compareTo(BigDecimal.ZERO) > 0)
+                ? discountPrice
+                : price;
+    }
+
+    /**
+     * Kiểm tra xem sản phẩm có đang giảm giá không
+     *
+     * @return true nếu có giá giảm hợp lệ
+     */
+    public boolean hasDiscount() {
+        return discountPrice != null
+                && discountPrice.compareTo(BigDecimal.ZERO) > 0
+                && discountPrice.compareTo(price) < 0;
+    }
+
+    /**
+     * Tính % giảm giá
+     *
+     * @return Phần trăm giảm giá (0-100)
+     */
+    public BigDecimal getDiscountPercentage() {
+        if (!hasDiscount()) {
+            return BigDecimal.ZERO;
+        }
+        return price.subtract(discountPrice)
+                .divide(price, 4, RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100"))
+                .setScale(2, RoundingMode.HALF_UP);
+    }
 }

@@ -40,5 +40,8 @@ public class OrderResponseDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    // YÊU CẦU HOÀN TIỀN - Đơn hàng có review yêu cầu refund
+    private Boolean hasRefundRequest;
+
     private List<OrderItemResponseDTO> orderItems;
 }

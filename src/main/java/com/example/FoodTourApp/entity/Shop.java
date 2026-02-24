@@ -54,7 +54,7 @@ public class Shop {
     private Double rating = 0.0;
 
     @Column(name = "total_reviews")
-    private Integer totalReviews = 0;
+    private Long totalReviews = 0L;
 
     @Column(name = "is_verified", nullable = false)
     private Boolean isVerified = false;

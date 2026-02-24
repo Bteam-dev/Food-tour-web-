@@ -26,6 +26,10 @@ public class ReviewResponse {
     private String userReply; // User reply lại shop (DEPRECATED - giữ lại để backward compatible)
     private LocalDateTime userRepliedAt;
     private List<ReviewReplyResponse> replies; // NEW: Thread conversation (cãi nhau dài được!)
+
+    // YÊU CẦU HOÀN TIỀN
+    private Boolean hasRefundRequest;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
