@@ -8,6 +8,7 @@ import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.entity.WalletTransaction;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.repository.WalletTransactionRepository;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.WalletService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class WalletServiceImpl implements WalletService {
 
     private final UserRepository userRepository;
     private final WalletTransactionRepository walletTransactionRepository;
+    private final FCMService fcmService;
 
     @Override
     public WalletResponseDTO getWalletInfo(User user) {
@@ -83,7 +85,6 @@ public class WalletServiceImpl implements WalletService {
         dbBuyer.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbBuyer);
 
-        // Tạo transaction record cho người mua
         WalletTransaction buyerTransaction = new WalletTransaction();
         buyerTransaction.setUser(dbBuyer);
         buyerTransaction.setTransactionType(WalletTransaction.TransactionType.payment);
@@ -94,6 +95,15 @@ public class WalletServiceImpl implements WalletService {
         buyerTransaction.setDescription("Thanh toán đơn hàng #" + order.getOrderNumber());
         buyerTransaction.setCreatedAt(LocalDateTime.now());
         walletTransactionRepository.save(buyerTransaction);
+
+        // 🔔 Push: người mua bị trừ tiền
+        fcmService.sendWalletTransactionNotification(
+                dbBuyer,
+                order.getTotalAmount().negate(),
+                buyerBalanceAfter,
+                "payment",
+                "Thanh toán đơn hàng #" + order.getOrderNumber()
+        );
 
         log.info("Deducted {} from buyer {}. Balance: {} -> {}",
                 order.getTotalAmount(), dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
@@ -126,7 +136,6 @@ public class WalletServiceImpl implements WalletService {
         dbSeller.setUpdatedAt(LocalDateTime.now());
         userRepository.save(dbSeller);
 
-        // Tạo transaction record cho người bán
         WalletTransaction sellerTransaction = new WalletTransaction();
         sellerTransaction.setUser(dbSeller);
         sellerTransaction.setTransactionType(WalletTransaction.TransactionType.received_payment);
@@ -138,6 +147,15 @@ public class WalletServiceImpl implements WalletService {
                 + " (đã trừ hoa hồng " + commissionRate + "%)");
         sellerTransaction.setCreatedAt(LocalDateTime.now());
         walletTransactionRepository.save(sellerTransaction);
+
+        // 🔔 Push: seller nhận tiền
+        fcmService.sendWalletTransactionNotification(
+                dbSeller,
+                sellerReceiveAmount,
+                sellerBalanceAfter,
+                "received_payment",
+                "Nhận tiền đơn hàng #" + order.getOrderNumber()
+        );
 
         log.info("Added {} to seller {}. Balance: {} -> {}",
                 sellerReceiveAmount, dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);
@@ -153,7 +171,6 @@ public class WalletServiceImpl implements WalletService {
         admin.setUpdatedAt(LocalDateTime.now());
         userRepository.save(admin);
 
-        // Tạo transaction record cho admin (hoa hồng nền tảng)
         WalletTransaction adminTransaction = new WalletTransaction();
         adminTransaction.setUser(admin);
         adminTransaction.setTransactionType(WalletTransaction.TransactionType.platform_commission);
@@ -217,6 +234,15 @@ public class WalletServiceImpl implements WalletService {
         buyerTransaction.setCreatedAt(LocalDateTime.now());
         walletTransactionRepository.save(buyerTransaction);
 
+        // 🔔 Push: người mua được hoàn tiền
+        fcmService.sendWalletTransactionNotification(
+                dbBuyer,
+                order.getTotalAmount(),
+                buyerBalanceAfter,
+                "refund",
+                "Hoàn tiền đơn hàng #" + order.getOrderNumber()
+        );
+
         log.info("Refunded {} to buyer {}. Balance: {} -> {}",
                 order.getTotalAmount(), dbBuyer.getId(), buyerBalanceBefore, buyerBalanceAfter);
 
@@ -247,6 +273,15 @@ public class WalletServiceImpl implements WalletService {
         sellerTransaction.setDescription("Hoàn tiền đơn hàng #" + order.getOrderNumber());
         sellerTransaction.setCreatedAt(LocalDateTime.now());
         walletTransactionRepository.save(sellerTransaction);
+
+        // 🔔 Push: seller bị trừ tiền do hoàn
+        fcmService.sendWalletTransactionNotification(
+                dbSeller,
+                order.getTotalAmount().negate(),
+                sellerBalanceAfter,
+                "refund",
+                "Hoàn tiền đơn hàng #" + order.getOrderNumber()
+        );
 
         log.info("Deducted {} from seller {}. Balance: {} -> {}",
                 order.getTotalAmount(), dbSeller.getId(), sellerBalanceBefore, sellerBalanceAfter);

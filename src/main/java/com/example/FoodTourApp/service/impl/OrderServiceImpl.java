@@ -11,6 +11,7 @@ import com.example.FoodTourApp.DTO.ShopDTO.AddressRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.AddressResponseDTO;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.OrderService;
 import com.example.FoodTourApp.service.WalletService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,6 +45,7 @@ public class OrderServiceImpl implements OrderService {
     private final ShopRepository shopRepository;
     private final ReviewRepository reviewRepository;
     private final WalletService walletService;
+    private final FCMService fcmService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -197,6 +199,23 @@ public class OrderServiceImpl implements OrderService {
 
         log.info("Order created successfully: orderId: {}, paymentStatus: {}",
                 order.getId(), order.getPaymentStatus());
+
+        // 🔔 Push: thông báo đặt hàng thành công cho người mua
+        fcmService.sendOrderCreatedNotification(
+                user,
+                order.getOrderNumber(),
+                order.getShop().getShopName(),
+                order.getTotalAmount()
+        );
+
+        // 🔔 Push: thông báo có đơn mới cho seller
+        fcmService.sendNewOrderToSeller(
+                order.getShop().getSeller(),
+                order.getOrderNumber(),
+                user.getFullName(),
+                order.getTotalAmount()
+        );
+
         return mapToOrderResponseDTO(order);
     }
 
@@ -230,12 +249,28 @@ public class OrderServiceImpl implements OrderService {
                 walletService.processOrderPayment(order);
                 orderRepository.save(order);
                 log.info("Wallet payment successful for order {}", order.getId());
+
+                // 🔔 Push: thanh toán thành công (wallet notification gửi từ WalletServiceImpl,
+                // đây gửi thêm order-level notification cho người mua)
+                fcmService.sendOrderPaidNotification(
+                        user,
+                        order.getOrderNumber(),
+                        order.getShop().getShopName(),
+                        order.getTotalAmount()
+                );
+
+                // 🔔 Push: seller nhận đơn mới đã thanh toán
+                fcmService.sendNewOrderToSeller(
+                        order.getShop().getSeller(),
+                        order.getOrderNumber(),
+                        user.getFullName(),
+                        order.getTotalAmount()
+                );
             } catch (Exception e) {
                 log.error("Wallet payment failed for order {}: {}", order.getId(), e.getMessage());
                 throw new RuntimeException("Thanh toán thất bại: " + e.getMessage());
             }
         } else if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod) {
-            // COD không cần thanh toán ngay, chỉ cập nhật trạng thái
             log.info("Order {} is COD, no immediate payment required", order.getId());
             throw new RuntimeException("Đơn hàng COD sẽ thanh toán khi nhận hàng");
         } else {
@@ -301,7 +336,301 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdatedAt(LocalDateTime.now());
 
         orderRepository.save(order);
+
+        // 🔔 Push: thông báo hủy đơn cho seller
+        fcmService.sendOrderStatusChangedToSeller(
+                order.getShop().getSeller(),
+                order.getOrderNumber(),
+                user.getFullName(),
+                "cancelled",
+                "Cancelled by user"
+        );
+
         log.info("Order deleted (soft delete) successfully: {}", orderId);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO confirmOrder(Integer orderId, User seller) {
+        log.info("Seller {} is confirming order {}", seller.getId(), orderId);
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền xác nhận đơn hàng này");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getOrderStatus() != Order.OrderStatus.pending) {
+            throw new RuntimeException("Chỉ có thể xác nhận đơn hàng đang ở trạng thái pending");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Không thể xác nhận đơn hàng đã hủy");
+        }
+
+        // Chuyển trạng thái sang confirmed
+        order.setOrderStatus(Order.OrderStatus.confirmed);
+        order.setConfirmedBy(seller);
+        order.setConfirmedAt(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+
+        orderRepository.save(order);
+
+        // 🔔 Push: thông báo đơn đã được xác nhận cho người mua
+        fcmService.sendOrderStatusChangedToBuyer(
+                order.getUser(),
+                order.getOrderNumber(),
+                order.getShop().getShopName(),
+                "confirmed",
+                null
+        );
+
+        log.info("Order {} confirmed successfully by seller {}", orderId, seller.getId());
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO markAsDelivered(Integer orderId, User seller) {
+        log.info("Seller {} is marking order {} as delivered", seller.getId(), orderId);
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền cập nhật đơn hàng này");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getOrderStatus() != Order.OrderStatus.confirmed) {
+            throw new RuntimeException("Chỉ có thể đánh dấu đã giao hàng cho đơn hàng đang ở trạng thái confirmed");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Không thể cập nhật đơn hàng đã hủy");
+        }
+
+        // Chuyển trạng thái sang delivered
+        order.setOrderStatus(Order.OrderStatus.delivered);
+        order.setActualDeliveryTime(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+
+        // Nếu là COD và chưa thanh toán, tự động xác nhận thanh toán
+        if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod
+                && order.getPaymentStatus() != Order.PaymentStatus.paid) {
+
+            // Tính toán hoa hồng cho platform (12%)
+            BigDecimal commissionRate = order.getPlatformCommissionRate() != null
+                    ? order.getPlatformCommissionRate()
+                    : new BigDecimal("12.00");
+            BigDecimal commissionAmount = order.getTotalAmount()
+                    .multiply(commissionRate)
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
+
+            order.setPlatformCommissionRate(commissionRate);
+            order.setPlatformCommissionAmount(commissionAmount);
+            order.setSellerReceivedAmount(sellerReceiveAmount);
+            order.setPaymentStatus(Order.PaymentStatus.paid);
+
+            log.info("COD payment automatically confirmed for order {}. Total: {}, Commission: {}, Seller receives: {}",
+                    order.getId(), order.getTotalAmount(), commissionAmount, sellerReceiveAmount);
+        }
+
+        orderRepository.save(order);
+
+        // 🔔 Push: thông báo đã giao hàng cho người mua
+        fcmService.sendOrderStatusChangedToBuyer(
+                order.getUser(),
+                order.getOrderNumber(),
+                order.getShop().getShopName(),
+                "delivered",
+                null
+        );
+
+        log.info("Order {} marked as delivered successfully", orderId);
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO confirmCODPayment(Integer orderId, User seller) {
+        log.info("Seller {} is confirming COD payment for order {}", seller.getId(), orderId);
+
+        // Lấy đơn hàng
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu (phải là seller của shop)
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền xác nhận đơn hàng này");
+        }
+
+        // Kiểm tra phương thức thanh toán
+        if (order.getPaymentMethod() != Order.PaymentMethod.ship_cod) {
+            throw new RuntimeException("Chỉ đơn hàng COD mới cần xác nhận thanh toán");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getPaymentStatus() == Order.PaymentStatus.paid) {
+            throw new RuntimeException("Đơn hàng đã được thanh toán rồi");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Không thể xác nhận đơn hàng đã hủy");
+        }
+
+        // Xử lý COD: Không trừ tiền wallet, chỉ cập nhật trạng thái
+        // Tính toán hoa hồng cho platform (12%)
+        BigDecimal commissionRate = order.getPlatformCommissionRate() != null
+                ? order.getPlatformCommissionRate()
+                : new BigDecimal("12.00");
+        BigDecimal commissionAmount = order.getTotalAmount()
+                .multiply(commissionRate)
+                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
+
+        // Lưu thông tin hoa hồng vào đơn hàng
+        order.setPlatformCommissionRate(commissionRate);
+        order.setPlatformCommissionAmount(commissionAmount);
+        order.setSellerReceivedAmount(sellerReceiveAmount);
+
+        log.info("Order {} COD confirmed. Total: {}, Commission: {} ({}%), Seller receives: {}",
+                order.getId(), order.getTotalAmount(), commissionAmount, commissionRate, sellerReceiveAmount);
+
+        // Cập nhật trạng thái thanh toán
+        order.setPaymentStatus(Order.PaymentStatus.paid);
+        order.setOrderStatus(Order.OrderStatus.delivered); // Tự động chuyển sang đã giao hàng
+        order.setActualDeliveryTime(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+
+        orderRepository.save(order);
+
+        // 🔔 Push: thông báo đã giao COD cho người mua
+        fcmService.sendOrderStatusChangedToBuyer(
+                order.getUser(),
+                order.getOrderNumber(),
+                order.getShop().getShopName(),
+                "delivered",
+                null
+        );
+
+        log.info("COD payment confirmed successfully for order {}.", order.getId());
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO refundOrder(Integer orderId, User seller) {
+        log.info("Seller {} is processing refund for order {}", seller.getId(), orderId);
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền hoàn tiền đơn hàng này");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Đơn hàng đã bị hủy");
+        }
+
+        if (order.getPaymentStatus() != Order.PaymentStatus.paid) {
+            throw new RuntimeException("Chỉ có thể hoàn tiền cho đơn hàng đã thanh toán");
+        }
+
+        if (order.getPaymentStatus() == Order.PaymentStatus.refunded) {
+            throw new RuntimeException("Đơn hàng đã được hoàn tiền rồi");
+        }
+
+        // Xử lý hoàn tiền qua WalletService
+        try {
+            walletService.refundOrder(order);
+
+            // Cập nhật trạng thái
+            order.setPaymentStatus(Order.PaymentStatus.refunded);
+            order.setUpdatedAt(LocalDateTime.now());
+
+            orderRepository.save(order);
+
+            // 🔔 Push: thông báo hoàn tiền cho người mua (wallet notification đã gửi từ WalletServiceImpl)
+            fcmService.sendOrderStatusChangedToBuyer(
+                    order.getUser(),
+                    order.getOrderNumber(),
+                    order.getShop().getShopName(),
+                    "refunded",
+                    null
+            );
+
+            log.info("Order {} refunded successfully by seller {}", orderId, seller.getId());
+        } catch (Exception e) {
+            log.error("Failed to refund order {}: {}", orderId, e.getMessage());
+            throw new RuntimeException("Không thể hoàn tiền: " + e.getMessage());
+        }
+
+        return mapToOrderResponseDTO(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponseDTO cancelOrderBySeller(Integer orderId, User seller, String reason) {
+        log.info("Seller {} is cancelling order {}", seller.getId(), orderId);
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
+
+        // Kiểm tra quyền sở hữu
+        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
+            throw new RuntimeException("Bạn không có quyền hủy đơn hàng này");
+        }
+
+        // Kiểm tra trạng thái đơn hàng
+        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
+            throw new RuntimeException("Đơn hàng đã bị hủy rồi");
+        }
+
+        if (order.getOrderStatus() == Order.OrderStatus.delivered) {
+            throw new RuntimeException("Không thể hủy đơn hàng đã giao");
+        }
+
+        // Hoàn tiền nếu đơn hàng đã thanh toán
+        if (order.getPaymentStatus() == Order.PaymentStatus.paid
+                && order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
+            try {
+                log.info("Refunding wallet payment for cancelled order {}", orderId);
+                walletService.refundOrder(order);
+            } catch (Exception e) {
+                log.error("Failed to refund order {}: {}", orderId, e.getMessage());
+                throw new RuntimeException("Không thể hoàn tiền: " + e.getMessage());
+            }
+        }
+
+        // Hủy đơn hàng
+        order.setOrderStatus(Order.OrderStatus.cancelled);
+        order.setCancelledAt(LocalDateTime.now());
+        order.setCancelledBy(seller);
+        order.setCancelledReason(reason != null ? reason : "Cancelled by seller");
+        order.setUpdatedAt(LocalDateTime.now());
+
+        orderRepository.save(order);
+
+        // 🔔 Push: thông báo đơn bị hủy cho người mua
+        fcmService.sendOrderStatusChangedToBuyer(
+                order.getUser(),
+                order.getOrderNumber(),
+                order.getShop().getShopName(),
+                "cancelled",
+                reason
+        );
+
+        log.info("Order {} cancelled successfully by seller {}", orderId, seller.getId());
+        return mapToOrderResponseDTO(order);
     }
 
     private OrderResponseDTO mapToOrderResponseDTO(Order order) {
@@ -430,62 +759,53 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional
-    public OrderResponseDTO confirmCODPayment(Integer orderId, User seller) {
-        log.info("Seller {} is confirming COD payment for order {}", seller.getId(), orderId);
+    public DashboardStatisticsDTO getDashboardStatistics(User seller, LocalDateTime startDate, LocalDateTime endDate) {
+        log.info("Getting dashboard statistics for seller: {}, startDate: {}, endDate: {}",
+                seller.getId(), startDate, endDate);
 
-        // Lấy đơn hàng
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
-
-        // Kiểm tra quyền sở hữu (phải là seller của shop)
-        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
-            throw new RuntimeException("Bạn không có quyền xác nhận đơn hàng này");
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
         }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
 
-        // Kiểm tra phương thức thanh toán
-        if (order.getPaymentMethod() != Order.PaymentMethod.ship_cod) {
-            throw new RuntimeException("Chỉ đơn hàng COD mới cần xác nhận thanh toán");
-        }
+        DashboardStatisticsDTO dashboard = new DashboardStatisticsDTO();
 
-        // Kiểm tra trạng thái đơn hàng
-        if (order.getPaymentStatus() == Order.PaymentStatus.paid) {
-            throw new RuntimeException("Đơn hàng đã được thanh toán rồi");
-        }
+        // Đếm đơn hàng theo trạng thái
+        Long totalOrders = orderRepository.countByShop(shop);
+        Long pendingOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.pending);
+        Long completedOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.delivered);
+        Long cancelledOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.cancelled);
 
-        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
-            throw new RuntimeException("Không thể xác nhận đơn hàng đã hủy");
-        }
+        dashboard.setTotalOrders(totalOrders);
+        dashboard.setPendingOrders(pendingOrders);
+        dashboard.setCompletedOrders(completedOrders);
+        dashboard.setCancelledOrders(cancelledOrders);
 
-        // Xử lý COD: Không trừ tiền wallet, chỉ cập nhật trạng thái
-        // Tính toán hoa hồng cho platform (12%)
-        BigDecimal commissionRate = order.getPlatformCommissionRate() != null
-                ? order.getPlatformCommissionRate()
-                : new BigDecimal("12.00");
-        BigDecimal commissionAmount = order.getTotalAmount()
-                .multiply(commissionRate)
-                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-        BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
+        // Tính doanh thu trong khoảng thời gian
+        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
 
-        // Lưu thông tin hoa hồng vào đơn hàng
-        order.setPlatformCommissionRate(commissionRate);
-        order.setPlatformCommissionAmount(commissionAmount);
-        order.setSellerReceivedAmount(sellerReceiveAmount);
+        BigDecimal totalRevenue = paidOrders.stream()
+                .map(Order::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal platformCommission = paidOrders.stream()
+                .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal sellerRevenue = paidOrders.stream()
+                .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        log.info("Order {} COD confirmed. Total: {}, Commission: {} ({}%), Seller receives: {}",
-                order.getId(), order.getTotalAmount(), commissionAmount, commissionRate, sellerReceiveAmount);
+        dashboard.setTotalRevenue(totalRevenue);
+        dashboard.setPlatformCommission(platformCommission);
+        dashboard.setSellerRevenue(sellerRevenue);
 
-        // Cập nhật trạng thái thanh toán
-        order.setPaymentStatus(Order.PaymentStatus.paid);
-        order.setOrderStatus(Order.OrderStatus.delivered); // Tự động chuyển sang đã giao hàng
-        order.setActualDeliveryTime(LocalDateTime.now());
-        order.setUpdatedAt(LocalDateTime.now());
+        // Lấy top 10 sản phẩm bán chạy
+        List<ProductSalesStatisticsDTO> topProducts = getTopSellingProducts(seller, startDate, endDate, 10);
+        dashboard.setTopSellingProducts(topProducts);
 
-        orderRepository.save(order);
-
-        log.info("COD payment confirmed successfully for order {}. Seller confirmed receiving cash from shipper.", order.getId());
-
-        return mapToOrderResponseDTO(order);
+        log.info("Dashboard statistics calculated successfully");
+        return dashboard;
     }
 
     @Override
@@ -663,236 +983,5 @@ public class OrderServiceImpl implements OrderService {
 
         log.info("Top selling products: {} products", statistics.size());
         return statistics;
-    }
-
-    @Override
-    public DashboardStatisticsDTO getDashboardStatistics(User seller, LocalDateTime startDate, LocalDateTime endDate) {
-        log.info("Getting dashboard statistics for seller: {}, startDate: {}, endDate: {}",
-                seller.getId(), startDate, endDate);
-
-        // Tìm shop của seller
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) {
-            throw new RuntimeException("Bạn chưa có shop nào");
-        }
-        Shop shop = shops.get(0); // Lấy shop đầu tiên
-
-        DashboardStatisticsDTO dashboard = new DashboardStatisticsDTO();
-
-        // Đếm đơn hàng theo trạng thái
-        Long totalOrders = orderRepository.countByShop(shop);
-        Long pendingOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.pending);
-        Long completedOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.delivered);
-        Long cancelledOrders = orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.cancelled);
-
-        dashboard.setTotalOrders(totalOrders);
-        dashboard.setPendingOrders(pendingOrders);
-        dashboard.setCompletedOrders(completedOrders);
-        dashboard.setCancelledOrders(cancelledOrders);
-
-        // Tính doanh thu trong khoảng thời gian
-        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
-
-        BigDecimal totalRevenue = paidOrders.stream()
-                .map(Order::getTotalAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal platformCommission = paidOrders.stream()
-                .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal sellerRevenue = paidOrders.stream()
-                .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        dashboard.setTotalRevenue(totalRevenue);
-        dashboard.setPlatformCommission(platformCommission);
-        dashboard.setSellerRevenue(sellerRevenue);
-
-        // Lấy top 10 sản phẩm bán chạy
-        List<ProductSalesStatisticsDTO> topProducts = getTopSellingProducts(seller, startDate, endDate, 10);
-        dashboard.setTopSellingProducts(topProducts);
-
-        log.info("Dashboard statistics calculated successfully");
-        return dashboard;
-    }
-
-    @Override
-    @Transactional
-    public OrderResponseDTO confirmOrder(Integer orderId, User seller) {
-        log.info("Seller {} is confirming order {}", seller.getId(), orderId);
-
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
-
-        // Kiểm tra quyền sở hữu
-        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
-            throw new RuntimeException("Bạn không có quyền xác nhận đơn hàng này");
-        }
-
-        // Kiểm tra trạng thái đơn hàng
-        if (order.getOrderStatus() != Order.OrderStatus.pending) {
-            throw new RuntimeException("Chỉ có thể xác nhận đơn hàng đang ở trạng thái pending");
-        }
-
-        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
-            throw new RuntimeException("Không thể xác nhận đơn hàng đã hủy");
-        }
-
-        // Chuyển trạng thái sang confirmed
-        order.setOrderStatus(Order.OrderStatus.confirmed);
-        order.setConfirmedBy(seller);
-        order.setConfirmedAt(LocalDateTime.now());
-        order.setUpdatedAt(LocalDateTime.now());
-
-        orderRepository.save(order);
-
-        log.info("Order {} confirmed successfully by seller {}", orderId, seller.getId());
-        return mapToOrderResponseDTO(order);
-    }
-
-    @Override
-    @Transactional
-    public OrderResponseDTO markAsDelivered(Integer orderId, User seller) {
-        log.info("Seller {} is marking order {} as delivered", seller.getId(), orderId);
-
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
-
-        // Kiểm tra quyền sở hữu
-        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
-            throw new RuntimeException("Bạn không có quyền cập nhật đơn hàng này");
-        }
-
-        // Kiểm tra trạng thái đơn hàng
-        if (order.getOrderStatus() != Order.OrderStatus.confirmed) {
-            throw new RuntimeException("Chỉ có thể đánh dấu đã giao hàng cho đơn hàng đang ở trạng thái confirmed");
-        }
-
-        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
-            throw new RuntimeException("Không thể cập nhật đơn hàng đã hủy");
-        }
-
-        // Chuyển trạng thái sang delivered
-        order.setOrderStatus(Order.OrderStatus.delivered);
-        order.setActualDeliveryTime(LocalDateTime.now());
-        order.setUpdatedAt(LocalDateTime.now());
-
-        // Nếu là COD và chưa thanh toán, tự động xác nhận thanh toán
-        if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod
-                && order.getPaymentStatus() != Order.PaymentStatus.paid) {
-
-            // Tính toán hoa hồng cho platform (12%)
-            BigDecimal commissionRate = order.getPlatformCommissionRate() != null
-                    ? order.getPlatformCommissionRate()
-                    : new BigDecimal("12.00");
-            BigDecimal commissionAmount = order.getTotalAmount()
-                    .multiply(commissionRate)
-                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-            BigDecimal sellerReceiveAmount = order.getTotalAmount().subtract(commissionAmount);
-
-            order.setPlatformCommissionRate(commissionRate);
-            order.setPlatformCommissionAmount(commissionAmount);
-            order.setSellerReceivedAmount(sellerReceiveAmount);
-            order.setPaymentStatus(Order.PaymentStatus.paid);
-
-            log.info("COD payment automatically confirmed for order {}. Total: {}, Commission: {}, Seller receives: {}",
-                    order.getId(), order.getTotalAmount(), commissionAmount, sellerReceiveAmount);
-        }
-
-        orderRepository.save(order);
-
-        log.info("Order {} marked as delivered successfully", orderId);
-        return mapToOrderResponseDTO(order);
-    }
-
-    @Override
-    @Transactional
-    public OrderResponseDTO refundOrder(Integer orderId, User seller) {
-        log.info("Seller {} is processing refund for order {}", seller.getId(), orderId);
-
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
-
-        // Kiểm tra quyền sở hữu
-        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
-            throw new RuntimeException("Bạn không có quyền hoàn tiền đơn hàng này");
-        }
-
-        // Kiểm tra trạng thái đơn hàng
-        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
-            throw new RuntimeException("Đơn hàng đã bị hủy");
-        }
-
-        if (order.getPaymentStatus() != Order.PaymentStatus.paid) {
-            throw new RuntimeException("Chỉ có thể hoàn tiền cho đơn hàng đã thanh toán");
-        }
-
-        if (order.getPaymentStatus() == Order.PaymentStatus.refunded) {
-            throw new RuntimeException("Đơn hàng đã được hoàn tiền rồi");
-        }
-
-        // Xử lý hoàn tiền qua WalletService
-        try {
-            walletService.refundOrder(order);
-
-            // Cập nhật trạng thái
-            order.setPaymentStatus(Order.PaymentStatus.refunded);
-            order.setUpdatedAt(LocalDateTime.now());
-
-            orderRepository.save(order);
-
-            log.info("Order {} refunded successfully by seller {}", orderId, seller.getId());
-        } catch (Exception e) {
-            log.error("Failed to refund order {}: {}", orderId, e.getMessage());
-            throw new RuntimeException("Không thể hoàn tiền: " + e.getMessage());
-        }
-
-        return mapToOrderResponseDTO(order);
-    }
-
-    @Override
-    @Transactional
-    public OrderResponseDTO cancelOrderBySeller(Integer orderId, User seller, String reason) {
-        log.info("Seller {} is cancelling order {}", seller.getId(), orderId);
-
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng"));
-
-        // Kiểm tra quyền sở hữu
-        if (!order.getShop().getSeller().getId().equals(seller.getId())) {
-            throw new RuntimeException("Bạn không có quyền hủy đơn hàng này");
-        }
-
-        // Kiểm tra trạng thái đơn hàng
-        if (order.getOrderStatus() == Order.OrderStatus.cancelled) {
-            throw new RuntimeException("Đơn hàng đã bị hủy rồi");
-        }
-
-        if (order.getOrderStatus() == Order.OrderStatus.delivered) {
-            throw new RuntimeException("Không thể hủy đơn hàng đã giao");
-        }
-
-        // Hoàn tiền nếu đơn hàng đã thanh toán
-        if (order.getPaymentStatus() == Order.PaymentStatus.paid
-                && order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
-            try {
-                log.info("Refunding wallet payment for cancelled order {}", orderId);
-                walletService.refundOrder(order);
-            } catch (Exception e) {
-                log.error("Failed to refund order {}: {}", orderId, e.getMessage());
-                throw new RuntimeException("Không thể hoàn tiền: " + e.getMessage());
-            }
-        }
-
-        // Hủy đơn hàng
-        order.setOrderStatus(Order.OrderStatus.cancelled);
-        order.setCancelledAt(LocalDateTime.now());
-        order.setCancelledBy(seller);
-        order.setCancelledReason(reason != null ? reason : "Cancelled by seller");
-        order.setUpdatedAt(LocalDateTime.now());
-
-        orderRepository.save(order);
-
-        log.info("Order {} cancelled successfully by seller {}", orderId, seller.getId());
-        return mapToOrderResponseDTO(order);
     }
 }

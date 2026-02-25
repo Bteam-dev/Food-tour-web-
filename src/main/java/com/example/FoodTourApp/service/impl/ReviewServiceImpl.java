@@ -3,6 +3,7 @@ package com.example.FoodTourApp.service.impl;
 import com.example.FoodTourApp.DTO.ReviewDTO.*;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.ReviewService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -36,6 +37,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final ObjectMapper objectMapper;
     private final OrderItemRepository orderItemRepository;
     private final ReviewReplyRepository reviewReplyRepository;
+    private final FCMService fcmService;
 
     @Override
     @Transactional
@@ -124,6 +126,33 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         updateReviewableRating(type, request.getReviewableId());
+
+        // 🔔 Push: thông báo review mới cho seller (chủ shop)
+        try {
+            String targetName = getReviewableName(type, request.getReviewableId());
+            String reviewerName = Boolean.TRUE.equals(review.getIsAnonymous()) ? "Người dùng ẩn danh" : user.getFullName();
+            String orderNumber = review.getOrder() != null ? review.getOrder().getOrderNumber() : null;
+
+            // Tìm shop để lấy seller
+            Shop shopForNotify = null;
+            if (type == Review.ReviewableType.shop) {
+                shopForNotify = shopRepository.findById(request.getReviewableId()).orElse(null);
+            } else if (type == Review.ReviewableType.product) {
+                Product product = productRepository.findById(request.getReviewableId()).orElse(null);
+                if (product != null) shopForNotify = product.getShop();
+            }
+            if (shopForNotify != null) {
+                fcmService.sendNewReviewToSeller(
+                        shopForNotify.getSeller(),
+                        reviewerName,
+                        targetName,
+                        review.getRating(),
+                        orderNumber
+                );
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send review notification: {}", e.getMessage());
+        }
 
         return mapToResponse(savedReview);
     }
@@ -341,6 +370,55 @@ public class ReviewServiceImpl implements ReviewService {
         Review savedReview = reviewRepository.save(review);
         log.info("User ID {} replied to review ID {} successfully. Total replies: {}",
                 user.getId(), reviewId, reviewReplyRepository.countByReviewId(reviewId));
+
+        // 🔔 Push: thông báo reply cho các bên liên quan (KHÔNG gửi cho người vừa reply)
+        try {
+            String targetName = getReviewableName(review.getReviewableType(), review.getReviewableId());
+            String replierName = user.getFullName();
+            String replierRole = isShopOwner ? "SHOP_OWNER" : "USER";
+
+            if (isShopOwner) {
+                // Shop reply -> thông báo cho người viết review gốc
+                User reviewAuthor = review.getUser();
+                if (!reviewAuthor.getId().equals(user.getId())) {
+                    fcmService.sendReviewReplyNotification(reviewAuthor, replierName, replierRole, targetName, reviewId);
+                }
+            } else {
+                // User reply -> thông báo cho shop owner
+                Shop shopToNotify = null;
+                if (review.getReviewableType() == Review.ReviewableType.shop) {
+                    shopToNotify = shopRepository.findById(review.getReviewableId()).orElse(null);
+                } else if (review.getReviewableType() == Review.ReviewableType.product) {
+                    Product product = productRepository.findById(review.getReviewableId()).orElse(null);
+                    if (product != null) shopToNotify = product.getShop();
+                }
+                final Shop finalShop = shopToNotify;
+                if (finalShop != null && !finalShop.getSeller().getId().equals(user.getId())) {
+                    fcmService.sendReviewReplyNotification(finalShop.getSeller(), replierName, replierRole, targetName, reviewId);
+                }
+
+                // Thông báo cho tất cả người đã reply trước đó trong thread (trừ người vừa reply, trừ shop đã thông báo)
+                List<ReviewReply> previousReplies = reviewReplyRepository.findByReviewIdOrderByCreatedAtAsc(reviewId);
+                previousReplies.stream()
+                        .map(rr -> rr.getUser().getId())
+                        .filter(uid -> !uid.equals(user.getId()))
+                        .filter(uid -> finalShop == null || !uid.equals(finalShop.getSeller().getId()))
+                        .filter(uid -> !uid.equals(review.getUser().getId()))
+                        .distinct()
+                        .forEach(uid ->
+                            userRepository.findById(uid).ifPresent(recipient ->
+                                    fcmService.sendReviewReplyNotification(recipient, replierName, replierRole, targetName, reviewId)
+                            )
+                        );
+
+                // Thông báo cho chủ review gốc nếu người reply không phải chủ review
+                if (!review.getUser().getId().equals(user.getId())) {
+                    fcmService.sendReviewReplyNotification(review.getUser(), replierName, replierRole, targetName, reviewId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send reply notification: {}", e.getMessage());
+        }
 
         return mapToResponse(savedReview);
     }

@@ -61,6 +61,9 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(name = "fcm_token", length = 512)
+    private String fcmToken;
+
     public enum Gender {
         male, female, other
     }

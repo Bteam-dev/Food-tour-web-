@@ -62,7 +62,7 @@ public class ShopServiceImpl implements ShopService {
         shop.setTaxCode(request.getTaxCode());
         shop.setOpeningHours(request.getOpeningHours());
         shop.setRating(0.0);
-        shop.setTotalReviews(0);
+        shop.setTotalReviews(0L);
         shop.setIsVerified(false);
         shop.setIsActive(true);
         shop.setCreatedAt(LocalDateTime.now());

@@ -36,3 +36,8 @@ build/
 .env
 .env.local
 .env.*.local
+
+### Firebase ###
+firebase-adminsdk-57qi4-1e18cf1a46.json
+*-service-account.json
+firebase-adminsdk-*.json
