@@ -1,16 +1,9 @@
 package com.example.FoodTourApp.service.impl;
 
-import com.example.FoodTourApp.DTO.CartDTO.CartItemResponseDTO;
-import com.example.FoodTourApp.DTO.CartDTO.CreateCartItemRequestDTO;
-import com.example.FoodTourApp.DTO.CartDTO.UpdateCartItemRequestDTO;
+import com.example.FoodTourApp.DTO.CartDTO.*;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
-import com.example.FoodTourApp.entity.CartItem;
-import com.example.FoodTourApp.entity.Product;
-import com.example.FoodTourApp.entity.ProductVariant;
-import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.CartItemRepository;
-import com.example.FoodTourApp.repository.ProductRepository;
-import com.example.FoodTourApp.repository.ProductVariantRepository;
+import com.example.FoodTourApp.entity.*;
+import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.CartService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
@@ -19,11 +12,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,195 +23,282 @@ import java.util.stream.Collectors;
 @Slf4j
 public class CartServiceImpl implements CartService {
 
+    private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ObjectMapper objectMapper;
 
+    // ─────────────────────────────────────────────
+    // Helper: lấy hoặc tạo cart cho user
+    // ─────────────────────────────────────────────
+    @Override
+    @Transactional
+    public Cart getOrCreateCart(User user) {
+        return cartRepository.findByUser(user).orElseGet(() -> {
+            Cart cart = new Cart();
+            cart.setUser(user);
+            cart.setCreatedAt(LocalDateTime.now());
+            cart.setUpdatedAt(LocalDateTime.now());
+            return cartRepository.save(cart);
+        });
+    }
+
+    // ─────────────────────────────────────────────
+    // Helper: build SHA-256 hash từ sorted variantIds
+    // ─────────────────────────────────────────────
+    private String buildVariantHash(List<Integer> variantIds) {
+        if (variantIds == null || variantIds.isEmpty()) return "none";
+        String joined = variantIds.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(joined.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) sb.append('0');
+                sb.append(hex);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return joined;
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // GET CART
+    // ─────────────────────────────────────────────
+    @Override
+    @Transactional
+    public CartResponseDTO getCart(User user) {
+        Cart cart = getOrCreateCart(user);
+        return mapToCartResponseDTO(cart);
+    }
+
+    // ─────────────────────────────────────────────
+    // ADD TO CART
+    // ─────────────────────────────────────────────
     @Override
     @Transactional
     public CartItemResponseDTO addToCart(CreateCartItemRequestDTO request, User user) {
-        log.info("Adding product to cart for user: {}, productId: {}", user.getId(), request.getProductId());
+        log.info("addToCart: user={}, productId={}", user.getId(), request.getProductId());
 
         Product product = productRepository.findById(request.getProductId())
                 .orElseThrow(() -> new RuntimeException("Product not found"));
 
-        if (!product.getIsAvailable()) {
+        if (!product.getIsAvailable())
             throw new RuntimeException("Product is not available");
-        }
 
-        if (request.getQuantity() < product.getMinOrderQuantity() || request.getQuantity() > product.getMaxOrderQuantity()) {
+        if (request.getQuantity() < product.getMinOrderQuantity() || request.getQuantity() > product.getMaxOrderQuantity())
             throw new RuntimeException("Quantity must be between " + product.getMinOrderQuantity() + " and " + product.getMaxOrderQuantity());
-        }
 
-        List<ProductVariant> selectedVariants = request.getVariantIds() != null ?
-                variantRepository.findAllById(request.getVariantIds()).stream()
-                        .filter(v -> v.getProduct().getId().equals(product.getId()) && v.getIsActive())
-                        .collect(Collectors.toList()) : List.of();
+        // Validate variants
+        List<ProductVariant> selectedVariants = validateVariants(request.getVariantIds(), product);
 
-        if (request.getVariantIds() != null && selectedVariants.size() != request.getVariantIds().size()) {
-            throw new RuntimeException("One or more variants are invalid or not active");
-        }
+        Cart cart = getOrCreateCart(user);
+        String variantHash = buildVariantHash(request.getVariantIds());
 
-        CartItem cartItem = cartItemRepository.findByUserAndProduct(user, product)
-                .orElse(new CartItem());
+        // Nếu đã có item cùng product + variant combination → cộng thêm SL
+        CartItem cartItem = cartItemRepository
+                .findByCartAndProductAndVariantHash(cart, product, variantHash)
+                .orElse(null);
 
-        cartItem.setUser(user);
-        cartItem.setProduct(product);
-        cartItem.setQuantity(request.getQuantity());
-        cartItem.setSpecialInstructions(request.getSpecialInstructions());
-
-        try {
-            Map<String, List<Integer>> variantMap = new HashMap<>();
-            variantMap.put("variantIds", request.getVariantIds() != null ? request.getVariantIds() : List.of());
-            cartItem.setSelectedVariants(objectMapper.writeValueAsString(variantMap));
-        } catch (Exception e) {
-            throw new RuntimeException("Error serializing variants: " + e.getMessage());
-        }
-
-        if (cartItem.getId() == null) {
+        if (cartItem == null) {
+            cartItem = new CartItem();
+            cartItem.setCart(cart);
+            cartItem.setProduct(product);
             cartItem.setAddedAt(LocalDateTime.now());
+            cartItem.setQuantity(request.getQuantity());
+        } else {
+            int newQty = cartItem.getQuantity() + request.getQuantity();
+            cartItem.setQuantity(Math.min(newQty, product.getMaxOrderQuantity()));
         }
+
+        cartItem.setVariantHash(variantHash);
+        cartItem.setSelectedVariants(serializeVariants(request.getVariantIds()));
+        cartItem.setSpecialInstructions(request.getSpecialInstructions());
+        cartItem.setUpdatedAt(LocalDateTime.now());
 
         cartItem = cartItemRepository.save(cartItem);
 
-        log.info("Product added to cart successfully: cartItemId: {}", cartItem.getId());
-        return mapToCartItemResponseDTO(cartItem);
+        // Cập nhật updatedAt của cart
+        cart.setUpdatedAt(LocalDateTime.now());
+        cartRepository.save(cart);
+
+        log.info("addToCart done: cartItemId={}", cartItem.getId());
+        return mapToCartItemResponseDTO(cartItem, selectedVariants);
     }
 
+    // ─────────────────────────────────────────────
+    // UPDATE CART ITEM
+    // ─────────────────────────────────────────────
     @Override
     @Transactional
     public CartItemResponseDTO updateCartItem(Integer cartItemId, UpdateCartItemRequestDTO request, User user) {
-        log.info("Updating cart item: {} for user: {}", cartItemId, user.getId());
+        log.info("updateCartItem: cartItemId={}, user={}", cartItemId, user.getId());
 
         CartItem cartItem = cartItemRepository.findById(cartItemId)
                 .orElseThrow(() -> new RuntimeException("Cart item not found"));
 
-        if (!cartItem.getUser().getId().equals(user.getId())) {
+        if (!cartItem.getCart().getUser().getId().equals(user.getId()))
             throw new RuntimeException("You do not have permission to update this cart item");
-        }
 
         Product product = cartItem.getProduct();
+
+        // Quantity = 0 → xóa item
         if (request.getQuantity() != null) {
             if (request.getQuantity() == 0) {
                 cartItemRepository.delete(cartItem);
-                log.info("Cart item deleted due to quantity 0: {}", cartItemId);
+                updateCartTimestamp(cartItem.getCart());
                 return null;
             }
-            if (request.getQuantity() < product.getMinOrderQuantity() || request.getQuantity() > product.getMaxOrderQuantity()) {
+            if (request.getQuantity() < product.getMinOrderQuantity() || request.getQuantity() > product.getMaxOrderQuantity())
                 throw new RuntimeException("Quantity must be between " + product.getMinOrderQuantity() + " and " + product.getMaxOrderQuantity());
-            }
             cartItem.setQuantity(request.getQuantity());
         }
 
+        List<ProductVariant> selectedVariants;
         if (request.getVariantIds() != null) {
-            List<ProductVariant> selectedVariants = variantRepository.findAllById(request.getVariantIds()).stream()
-                    .filter(v -> v.getProduct().getId().equals(product.getId()) && v.getIsActive())
-                    .collect(Collectors.toList());
-            if (selectedVariants.size() != request.getVariantIds().size()) {
-                throw new RuntimeException("One or more variants are invalid or not active");
-            }
-            try {
-                Map<String, List<Integer>> variantMap = new HashMap<>();
-                variantMap.put("variantIds", request.getVariantIds());
-                cartItem.setSelectedVariants(objectMapper.writeValueAsString(variantMap));
-            } catch (Exception e) {
-                throw new RuntimeException("Error serializing variants: " + e.getMessage());
-            }
+            selectedVariants = validateVariants(request.getVariantIds(), product);
+            String newHash = buildVariantHash(request.getVariantIds());
+            cartItem.setVariantHash(newHash);
+            cartItem.setSelectedVariants(serializeVariants(request.getVariantIds()));
+        } else {
+            selectedVariants = deserializeVariants(cartItem.getSelectedVariants(), product);
         }
 
-        if (request.getSpecialInstructions() != null) {
+        if (request.getSpecialInstructions() != null)
             cartItem.setSpecialInstructions(request.getSpecialInstructions());
-        }
 
+        cartItem.setUpdatedAt(LocalDateTime.now());
         cartItem = cartItemRepository.save(cartItem);
+        updateCartTimestamp(cartItem.getCart());
 
-        log.info("Cart item updated successfully: {}", cartItemId);
-        return mapToCartItemResponseDTO(cartItem);
+        return mapToCartItemResponseDTO(cartItem, selectedVariants);
     }
 
+    // ─────────────────────────────────────────────
+    // REMOVE CART ITEM
+    // ─────────────────────────────────────────────
     @Override
     @Transactional
-    public void removeFromCart(Integer cartItemId, User user) {
-        log.info("Removing cart item: {} for user: {}", cartItemId, user.getId());
-
+    public void removeCartItem(Integer cartItemId, User user) {
         CartItem cartItem = cartItemRepository.findById(cartItemId)
                 .orElseThrow(() -> new RuntimeException("Cart item not found"));
 
-        if (!cartItem.getUser().getId().equals(user.getId())) {
+        if (!cartItem.getCart().getUser().getId().equals(user.getId()))
             throw new RuntimeException("You do not have permission to remove this cart item");
-        }
 
+        Cart cart = cartItem.getCart();
         cartItemRepository.delete(cartItem);
-        log.info("Cart item removed successfully: {}", cartItemId);
+        updateCartTimestamp(cart);
+        log.info("removeCartItem: cartItemId={} removed", cartItemId);
     }
 
+    // ─────────────────────────────────────────────
+    // CLEAR CART
+    // ─────────────────────────────────────────────
     @Override
     @Transactional
     public void clearCart(User user) {
-        log.info("Clearing cart for user: {}", user.getId());
-
-        List<CartItem> cartItems = cartItemRepository.findByUser(user);
-        cartItemRepository.deleteAll(cartItems);
-        log.info("Cart cleared successfully for user: {}", user.getId());
+        Cart cart = getOrCreateCart(user);
+        cartItemRepository.deleteAll(cartItemRepository.findByCart(cart));
+        cart.setUpdatedAt(LocalDateTime.now());
+        cartRepository.save(cart);
+        log.info("clearCart: cartId={} cleared", cart.getId());
     }
 
-    @Override
-    public List<CartItemResponseDTO> getCartItems(User user) {
-        log.info("Getting cart items for user: {}", user.getId());
+    // ═══════════════════════════════════════════════
+    // MAPPING
+    // ═══════════════════════════════════════════════
 
-        List<CartItem> cartItems = cartItemRepository.findByUser(user);
-        return cartItems.stream().map(this::mapToCartItemResponseDTO).collect(Collectors.toList());
-    }
+    private CartResponseDTO mapToCartResponseDTO(Cart cart) {
+        List<CartItem> items = cartItemRepository.findByCart(cart);
 
-    private CartItemResponseDTO mapToCartItemResponseDTO(CartItem cartItem) {
-        CartItemResponseDTO dto = new CartItemResponseDTO();
-        dto.setId(cartItem.getId());
-        dto.setProductId(cartItem.getProduct().getId());
-        dto.setProductName(cartItem.getProduct().getName());
+        // Group items theo shop
+        Map<Integer, List<CartItem>> byShop = items.stream()
+                .collect(Collectors.groupingBy(i -> i.getProduct().getShop().getId()));
 
-        // Map imageUrls from Product
-        if (cartItem.getProduct().getImageUrls() != null && !cartItem.getProduct().getImageUrls().isEmpty()) {
-            List<String> imageUrls = Arrays.stream(cartItem.getProduct().getImageUrls().split(","))
-                    .map(String::trim)
-                    .filter(url -> !url.isEmpty())
-                    .collect(Collectors.toList());
-            dto.setImageUrls(imageUrls.isEmpty() ? List.of() : imageUrls);
-        } else {
-            dto.setImageUrls(List.of());
-        }
+        List<CartShopGroupDTO> shopGroups = byShop.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> {
+                    List<CartItem> shopItems = entry.getValue();
+                    Shop shop = shopItems.get(0).getProduct().getShop();
 
-        dto.setUnitPrice(cartItem.getProduct().getPrice());
-        dto.setQuantity(cartItem.getQuantity());
+                    List<CartItemResponseDTO> itemDTOs = shopItems.stream()
+                            .map(item -> mapToCartItemResponseDTO(item, deserializeVariants(item.getSelectedVariants(), item.getProduct())))
+                            .collect(Collectors.toList());
 
-        // TÍNH THEO GIÁ HIỆU LỰC (ưu tiên discountPrice nếu có)
-        BigDecimal effectivePrice = cartItem.getProduct().getEffectivePrice();
-        BigDecimal totalPrice = effectivePrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+                    BigDecimal shopSubtotal = itemDTOs.stream()
+                            .map(CartItemResponseDTO::getTotalPrice)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        List<ProductVariant> selectedVariants = List.of();
-        try {
-            Map<String, List<Integer>> variantMap = objectMapper.readValue(cartItem.getSelectedVariants(), Map.class);
-            List<Integer> variantIds = variantMap.getOrDefault("variantIds", List.of());
-            selectedVariants = variantRepository.findAllById(variantIds).stream()
-                    .filter(v -> v.getProduct().getId().equals(cartItem.getProduct().getId()) && v.getIsActive())
-                    .collect(Collectors.toList());
-            for (ProductVariant variant : selectedVariants) {
-                BigDecimal priceAdjustment = variant.getPriceAdjustment() != null ? variant.getPriceAdjustment() : BigDecimal.ZERO;
-                totalPrice = totalPrice.add(priceAdjustment.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
-            }
-        } catch (Exception e) {
-            log.error("Error deserializing variants for cartItem: {}: {}", cartItem.getId(), e.getMessage());
-        }
-        dto.setTotalPrice(totalPrice);
+                    int shopTotalQty = shopItems.stream().mapToInt(CartItem::getQuantity).sum();
 
-        dto.setSelectedVariants(selectedVariants.stream().map(this::mapToVariantResponseDTO).collect(Collectors.toList()));
-        dto.setSpecialInstructions(cartItem.getSpecialInstructions());
-        dto.setAddedAt(cartItem.getAddedAt());
+                    CartShopGroupDTO group = new CartShopGroupDTO();
+                    group.setShopId(shop.getId());
+                    group.setShopName(shop.getShopName());
+                    group.setShopLogoUrl(shop.getLogoUrl());
+                    group.setItems(itemDTOs);
+                    group.setItemCount(shopItems.size());
+                    group.setTotalQuantity(shopTotalQty);
+                    group.setShopSubtotal(shopSubtotal);
+                    return group;
+                })
+                .collect(Collectors.toList());
 
+        BigDecimal grandTotal = shopGroups.stream()
+                .map(CartShopGroupDTO::getShopSubtotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        int totalItems = items.size();
+        int totalQuantity = items.stream().mapToInt(CartItem::getQuantity).sum();
+
+        CartResponseDTO dto = new CartResponseDTO();
+        dto.setCartId(cart.getId());
+        dto.setUserId(cart.getUser().getId());
+        dto.setShopGroups(shopGroups);
+        dto.setTotalItems(totalItems);
+        dto.setTotalQuantity(totalQuantity);
+        dto.setGrandTotal(grandTotal);
+        dto.setUpdatedAt(cart.getUpdatedAt());
         return dto;
     }
 
-    private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
+    private CartItemResponseDTO mapToCartItemResponseDTO(CartItem cartItem, List<ProductVariant> selectedVariants) {
+        Product product = cartItem.getProduct();
+
+        BigDecimal variantAdjustment = selectedVariants.stream()
+                .map(v -> v.getPriceAdjustment() != null ? v.getPriceAdjustment() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal effectivePrice = product.getEffectivePrice();
+        BigDecimal unitPrice = effectivePrice.add(variantAdjustment);
+        BigDecimal totalPrice = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQuantity()));
+
+        List<String> imageUrls = List.of();
+        if (product.getImageUrls() != null && !product.getImageUrls().isBlank()) {
+            imageUrls = Arrays.stream(product.getImageUrls().split(","))
+                    .map(String::trim).filter(u -> !u.isEmpty()).collect(Collectors.toList());
+        }
+
+        CartItemResponseDTO dto = new CartItemResponseDTO();
+        dto.setId(cartItem.getId());
+        dto.setProductId(product.getId());
+        dto.setProductName(product.getName());
+        dto.setImageUrls(imageUrls);
+        dto.setOriginalPrice(product.getPrice());
+        dto.setUnitPrice(unitPrice);
+        dto.setQuantity(cartItem.getQuantity());
+        dto.setTotalPrice(totalPrice);
+        dto.setSelectedVariants(selectedVariants.stream().map(this::mapToVariantDTO).collect(Collectors.toList()));
+        dto.setSpecialInstructions(cartItem.getSpecialInstructions());
+        dto.setAddedAt(cartItem.getAddedAt());
+        dto.setUpdatedAt(cartItem.getUpdatedAt());
+        return dto;
+    }
+
+    private VariantResponseDTO mapToVariantDTO(ProductVariant variant) {
         VariantResponseDTO dto = new VariantResponseDTO();
         dto.setId(variant.getId());
         dto.setVariantTypeId(variant.getVariantType().getId());
@@ -228,5 +307,49 @@ public class CartServiceImpl implements CartService {
         dto.setPriceAdjustment(variant.getPriceAdjustment());
         dto.setIsActive(variant.getIsActive());
         return dto;
+    }
+
+    // ═══════════════════════════════════════════════
+    // PRIVATE HELPERS
+    // ═══════════════════════════════════════════════
+
+    private List<ProductVariant> validateVariants(List<Integer> variantIds, Product product) {
+        if (variantIds == null || variantIds.isEmpty()) return List.of();
+        List<ProductVariant> variants = variantRepository.findAllById(variantIds).stream()
+                .filter(v -> v.getProduct().getId().equals(product.getId()) && v.getIsActive())
+                .collect(Collectors.toList());
+        if (variants.size() != variantIds.size())
+            throw new RuntimeException("One or more variants are invalid or not active");
+        return variants;
+    }
+
+    private List<ProductVariant> deserializeVariants(String selectedVariantsJson, Product product) {
+        if (selectedVariantsJson == null) return List.of();
+        try {
+            Map<String, List<Integer>> map = objectMapper.readValue(selectedVariantsJson, Map.class);
+            List<Integer> ids = map.getOrDefault("variantIds", List.of());
+            if (ids.isEmpty()) return List.of();
+            return variantRepository.findAllById(ids).stream()
+                    .filter(v -> v.getProduct().getId().equals(product.getId()) && v.getIsActive())
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("deserializeVariants error: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String serializeVariants(List<Integer> variantIds) {
+        try {
+            Map<String, List<Integer>> map = new HashMap<>();
+            map.put("variantIds", variantIds != null ? variantIds : List.of());
+            return objectMapper.writeValueAsString(map);
+        } catch (Exception e) {
+            throw new RuntimeException("Error serializing variants: " + e.getMessage());
+        }
+    }
+
+    private void updateCartTimestamp(Cart cart) {
+        cart.setUpdatedAt(LocalDateTime.now());
+        cartRepository.save(cart);
     }
 }

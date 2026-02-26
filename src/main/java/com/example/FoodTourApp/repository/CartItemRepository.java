@@ -1,9 +1,9 @@
 package com.example.FoodTourApp.repository;
 
 
+import com.example.FoodTourApp.entity.Cart;
 import com.example.FoodTourApp.entity.CartItem;
 import com.example.FoodTourApp.entity.Product;
-import com.example.FoodTourApp.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -13,8 +13,10 @@ import java.util.List;
 import java.util.Optional;
 
 public interface CartItemRepository extends JpaRepository<CartItem, Integer> {
-    List<CartItem> findByUser(User user);
-    Optional<CartItem> findByUserAndProduct(User user, Product product);
+
+    List<CartItem> findByCart(Cart cart);
+
+    Optional<CartItem> findByCartAndProductAndVariantHash(Cart cart, Product product, String variantHash);
 
     // Xóa tất cả cart items của một product
     @Modifying

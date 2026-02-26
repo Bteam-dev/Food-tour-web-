@@ -28,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -39,6 +40,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CartItemRepository cartItemRepository;
+    private final CartRepository cartRepository;
     private final AddressRepository addressRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
@@ -54,9 +56,13 @@ public class OrderServiceImpl implements OrderService {
         log.info("Creating order for user: {}, cartItemIds: {}, paymentMethod: {}",
                 user.getId(), request.getCartItemIds(), request.getPaymentMethod());
 
-        // Kiểm tra cartItemIds
+        // Lấy cart của user
+        Cart cart = cartRepository.findByUser(user)
+                .orElseThrow(() -> new RuntimeException("Cart not found"));
+
+        // Lấy các cart item thuộc cart của user
         List<CartItem> cartItems = cartItemRepository.findAllById(request.getCartItemIds()).stream()
-                .filter(cartItem -> cartItem.getUser().getId().equals(user.getId()))
+                .filter(item -> item.getCart().getId().equals(cart.getId()))
                 .collect(Collectors.toList());
 
         if (cartItems.isEmpty()) {
@@ -69,10 +75,19 @@ public class OrderServiceImpl implements OrderService {
 
         // Kiểm tra tất cả CartItem thuộc cùng shop
         Integer shopId = cartItems.get(0).getProduct().getShop().getId();
-        boolean allSameShop = cartItems.stream()
-                .allMatch(cartItem -> cartItem.getProduct().getShop().getId().equals(shopId));
-        if (!allSameShop) {
-            throw new RuntimeException("Selected cart items must belong to the same shop");
+        String shopName = cartItems.get(0).getProduct().getShop().getShopName();
+
+        Set<String> distinctShopNames = cartItems.stream()
+                .map(item -> item.getProduct().getShop().getShopName())
+                .collect(Collectors.toSet());
+
+        if (distinctShopNames.size() > 1) {
+            throw new RuntimeException(
+                "Chỉ được đặt hàng từ 1 shop trong 1 đơn hàng. " +
+                "Các món bạn chọn thuộc " + distinctShopNames.size() + " shop khác nhau: " +
+                String.join(", ", distinctShopNames) + ". " +
+                "Vui lòng chọn lại chỉ các món cùng 1 shop."
+            );
         }
 
         // Kiểm tra payment method và normalize

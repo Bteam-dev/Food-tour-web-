@@ -16,9 +16,10 @@ public class CartItemResponseDTO {
     private Integer productId;
     private String productName;
     private List<String> imageUrls;
-    private BigDecimal unitPrice;
+    private BigDecimal unitPrice;       // effectivePrice + sum(priceAdjustment)
+    private BigDecimal originalPrice;   // giá gốc product.price (để client biết có giảm không)
     private Integer quantity;
-    private BigDecimal totalPrice;
+    private BigDecimal totalPrice;      // unitPrice * quantity
     private List<VariantResponseDTO> selectedVariants;
     private String specialInstructions;
     private LocalDateTime addedAt;
