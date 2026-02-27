@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.text.NumberFormat;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -75,6 +74,39 @@ public class FCMService {
                 log.error("Failed to send push notification to user {}: {}", user.getId(), e.getMessage());
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CHAT NOTIFICATIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Gửi push notification khi có tin nhắn mới trong chat.
+     * Chỉ gọi khi người nhận KHÔNG đang active trong conversation (offline / background).
+     * Giống Messenger/Zalo: realtime qua WebSocket khi online, FCM khi offline/background.
+     */
+    @Async
+    public void sendChatMessageNotification(User recipient, String senderName, String senderAvatar,
+                                            Long conversationId, String content, String messageType) {
+        String title = "💬 " + senderName;
+        String body;
+        switch (messageType == null ? "TEXT" : messageType.toUpperCase()) {
+            case "IMAGE" -> body = "📷 Đã gửi một ảnh";
+            case "VIDEO" -> body = "🎥 Đã gửi một video";
+            case "AUDIO" -> body = "🎵 Đã gửi một tin nhắn thoại";
+            case "FILE"  -> body = "📎 Đã gửi một tệp đính kèm";
+            default      -> body = (content != null && content.length() > 100)
+                    ? content.substring(0, 100) + "…"
+                    : (content != null ? content : "");
+        }
+
+        sendToUser(recipient, title, body, Map.of(
+                "type", "NEW_CHAT_MESSAGE",
+                "conversationId", conversationId.toString(),
+                "senderName", senderName != null ? senderName : "",
+                "senderAvatar", senderAvatar != null ? senderAvatar : "",
+                "messageType", messageType != null ? messageType : "TEXT"
+        ));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -295,4 +327,3 @@ public class FCMService {
                 : orderNumber.toUpperCase();
     }
 }
-

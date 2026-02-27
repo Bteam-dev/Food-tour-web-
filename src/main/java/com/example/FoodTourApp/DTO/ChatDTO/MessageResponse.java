@@ -19,7 +19,13 @@ public class MessageResponse {
     private String senderAvatar;
     private String content;
     private Boolean isRead;
+    /** TEXT | IMAGE | VIDEO | AUDIO | FILE */
     private String messageType;
+    /** Tên file gốc */
+    private String fileName;
+    /** MIME type (image/jpeg, video/mp4, audio/mpeg, application/pdf, ...) */
+    private String mimeType;
+    /** Kích thước file tính bằng bytes */
+    private Long fileSize;
     private LocalDateTime createdAt;
 }
-

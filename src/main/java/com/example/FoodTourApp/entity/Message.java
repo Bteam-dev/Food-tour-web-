@@ -33,8 +33,23 @@ public class Message {
     @Column(name = "message_type", nullable = false)
     private MessageType messageType = MessageType.TEXT;
 
+    /** Tên file gốc (chỉ dùng khi messageType != TEXT) */
+    @Column(name = "file_name")
+    private String fileName;
+
+    /** MIME type của file (vd: image/jpeg, video/mp4, audio/mpeg) */
+    @Column(name = "mime_type")
+    private String mimeType;
+
+    /** Kích thước file tính bằng bytes */
+    @Column(name = "file_size")
+    private Long fileSize;
+
     public enum MessageType {
-        TEXT, IMAGE, FILE
+        TEXT,
+        IMAGE,   // ảnh – hiển thị inline
+        VIDEO,   // video – hiển thị player inline
+        AUDIO,   // âm thanh – hiển thị player inline
+        FILE     // file khác (PDF, docx, zip…) – hiển thị download
     }
 }
-

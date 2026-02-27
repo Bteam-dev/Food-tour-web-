@@ -7,28 +7,19 @@ import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ConversationRepository;
 import com.example.FoodTourApp.repository.MessageRepository;
 import com.example.FoodTourApp.repository.UserRepository;
+import com.example.FoodTourApp.service.ChatPresenceService;
 import com.example.FoodTourApp.service.ChatService;
+import com.example.FoodTourApp.service.FCMService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -40,25 +31,26 @@ public class ChatServiceImpl implements ChatService {
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final FileStorageService fileStorageService;
+    private final FCMService fcmService;
+    private final ChatPresenceService chatPresenceService;
 
-    @Value("${file.upload-dir:uploads/chat}")
-    private String uploadDir;
+    private static final int DEFAULT_PAGE_SIZE = 30;
 
     @Override
     @Transactional
-    public ConversationResponse createOrGetConversation(Integer currentUserId, Integer otherUserId) {
-        if (currentUserId.equals(otherUserId)) {
+    public ConversationResponse createOrGetConversation(Integer currentUserId, Integer targetUserId) {
+        if (currentUserId.equals(targetUserId)) {
             throw new IllegalArgumentException("Không thể tạo cuộc trò chuyện với chính mình");
         }
 
-        // Tìm conversation đã tồn tại
+        User otherUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng với ID: " + targetUserId));
+
         Conversation conversation = conversationRepository
-                .findByTwoParticipants(currentUserId, otherUserId)
+                .findByTwoParticipants(currentUserId, otherUser.getId())
                 .orElseGet(() -> {
-                    // Tạo conversation mới
                     User currentUser = userRepository.findById(currentUserId)
-                            .orElseThrow(() -> new RuntimeException("User không tồn tại"));
-                    User otherUser = userRepository.findById(otherUserId)
                             .orElseThrow(() -> new RuntimeException("User không tồn tại"));
 
                     Conversation newConv = new Conversation();
@@ -89,17 +81,16 @@ public class ChatServiceImpl implements ChatService {
     public MessageResponse sendMessage(Integer senderId, SendMessageRequest request) {
         log.info("Sending message - SenderId: {}, ConversationId: {}", senderId, request.getConversationId());
 
+        // Validate: phải có nội dung (text hoặc URL file)
+        if (request.getContent() == null || request.getContent().trim().isEmpty()) {
+            throw new IllegalArgumentException("Nội dung tin nhắn không được để trống");
+        }
+
         Conversation conversation = conversationRepository.findByIdWithParticipants(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Conversation không tồn tại"));
 
-        log.info("Conversation found - ID: {}, Participants count: {}", conversation.getId(), conversation.getParticipants().size());
-        conversation.getParticipants().forEach(p -> log.info("Participant: ID={}, Email={}", p.getId(), p.getEmail()));
-
-        // Kiểm tra xem sender có phải là participant không
         boolean isParticipant = conversation.getParticipants().stream()
                 .anyMatch(user -> user.getId().equals(senderId));
-
-        log.info("Is sender {} a participant? {}", senderId, isParticipant);
 
         if (!isParticipant) {
             throw new RuntimeException("Bạn không phải là thành viên của cuộc trò chuyện này");
@@ -108,65 +99,134 @@ public class ChatServiceImpl implements ChatService {
         User sender = userRepository.findById(senderId)
                 .orElseThrow(() -> new RuntimeException("User không tồn tại"));
 
-        // Tạo message
+        // Xác định messageType (tự động nếu không truyền hoặc truyền sai)
+        String rawType = request.getMessageType() == null ? "TEXT" : request.getMessageType().toUpperCase();
+        Message.MessageType messageType;
+        try {
+            messageType = Message.MessageType.valueOf(rawType);
+        } catch (IllegalArgumentException e) {
+            messageType = Message.MessageType.TEXT;
+        }
+
         Message message = new Message();
         message.setConversation(conversation);
         message.setSender(sender);
         message.setContent(request.getContent());
-        message.setMessageType(Message.MessageType.valueOf(request.getMessageType()));
+        message.setMessageType(messageType);
+        message.setFileName(request.getFileName());
+        message.setMimeType(request.getMimeType());
+        message.setFileSize(request.getFileSize());
         message.setIsRead(false);
         message.setCreatedAt(LocalDateTime.now());
 
         message = messageRepository.save(message);
 
-        // Cập nhật conversation
-        conversation.setLastMessage(request.getContent());
+        // Cập nhật snapshot cuộc trò chuyện
+        String snippet = messageType == Message.MessageType.TEXT
+                ? request.getContent()
+                : "[" + messageType.name().toLowerCase() + "] " + (request.getFileName() != null ? request.getFileName() : "file");
+        conversation.setLastMessage(snippet);
         conversation.setLastMessageAt(LocalDateTime.now());
         conversation.setUpdatedAt(LocalDateTime.now());
         conversationRepository.save(conversation);
 
         MessageResponse response = mapToMessageResponse(message);
+        final MessageResponse finalResponse = response;
 
-        // Gửi notification đến các user khác trong conversation qua WebSocket
-        final Message savedMessage = message; // Tạo final reference cho lambda
+        // 1. Broadcast realtime tới tất cả participant đang subscribe topic conversation
+        messagingTemplate.convertAndSend(
+                "/topic/conversation/" + request.getConversationId(),
+                response
+        );
+
+        // 2. Với từng người nhận: gửi WS notification riêng + FCM nếu không active
         conversation.getParticipants().stream()
                 .filter(user -> !user.getId().equals(senderId))
-                .forEach(user -> {
-                    ChatNotification notification = new ChatNotification();
-                    notification.setMessageId(savedMessage.getId());
-                    notification.setConversationId(conversation.getId());
-                    notification.setSenderId(senderId);
-                    notification.setSenderName(sender.getFullName());
-                    notification.setContent(request.getContent());
-                    notification.setMessageType(request.getMessageType());
+                .forEach(recipient -> {
+                    // 2a. WS queue notification (hiển thị badge, update conversation list)
+                    ChatNotification notification = ChatNotification.builder()
+                            .messageId(finalResponse.getId())
+                            .conversationId(conversation.getId())
+                            .senderId(senderId)
+                            .senderName(sender.getFullName())
+                            .senderAvatar(sender.getAvatarUrl())
+                            .content(request.getContent())
+                            .messageType(rawType)
+                            .fileName(request.getFileName())
+                            .mimeType(request.getMimeType())
+                            .fileSize(request.getFileSize())
+                            .createdAt(finalResponse.getCreatedAt())
+                            .build();
 
                     messagingTemplate.convertAndSendToUser(
-                            user.getId().toString(),
+                            recipient.getId().toString(),
                             "/queue/messages",
                             notification
                     );
+
+                    // 2b. FCM push: chỉ gửi nếu người nhận KHÔNG đang mở màn hình chat này
+                    // Giống Messenger/Zalo: online + đang xem chat → không cần push
+                    boolean isActiveInConversation = chatPresenceService
+                            .isUserActiveInConversation(recipient.getId(), conversation.getId());
+
+                    if (!isActiveInConversation) {
+                        log.debug("Recipient {} is not active in conversation {} → sending FCM push",
+                                recipient.getId(), conversation.getId());
+                        fcmService.sendChatMessageNotification(
+                                recipient,
+                                sender.getFullName(),
+                                sender.getAvatarUrl(),
+                                conversation.getId(),
+                                request.getContent(),
+                                rawType
+                        );
+                    } else {
+                        log.debug("Recipient {} is active in conversation {} → skipping FCM push",
+                                recipient.getId(), conversation.getId());
+                    }
                 });
 
         return response;
     }
 
+    /**
+     * Cursor-based – KHÔNG dùng Page/COUNT.
+     * Lấy N tin mới nhất, reverse thành ASC trả về client.
+     */
     @Override
     @Transactional(readOnly = true)
-    public Page<MessageResponse> getMessages(Long conversationId, Integer userId, int page, int size) {
+    public List<MessageResponse> getLatestMessages(Long conversationId, Integer userId, int size) {
+        checkParticipant(conversationId, userId);
+        int limit = size > 0 ? size : DEFAULT_PAGE_SIZE;
+        List<Message> messages = messageRepository.findLatestMessages(
+                conversationId, PageRequest.of(0, limit));
+        Collections.reverse(messages); // DESC → ASC
+        return messages.stream().map(this::mapToMessageResponse).collect(Collectors.toList());
+    }
+
+    /**
+     * Cursor-based – kéo lên load thêm tin cũ hơn.
+     * Lấy N tin có id < beforeMessageId, reverse thành ASC.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<MessageResponse> getMessagesBefore(Long conversationId, Integer userId,
+                                                    Long beforeMessageId, int size) {
+        checkParticipant(conversationId, userId);
+        int limit = size > 0 ? size : DEFAULT_PAGE_SIZE;
+        List<Message> messages = messageRepository.findByConversationIdBeforeId(
+                conversationId, beforeMessageId, PageRequest.of(0, limit));
+        Collections.reverse(messages); // DESC → ASC
+        return messages.stream().map(this::mapToMessageResponse).collect(Collectors.toList());
+    }
+
+    /** Kiểm tra participant, ném exception nếu không hợp lệ */
+    private void checkParticipant(Long conversationId, Integer userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation không tồn tại"));
-
-        // Kiểm tra xem user có phải là participant không
         boolean isParticipant = conversation.getParticipants().stream()
-                .anyMatch(user -> user.getId().equals(userId));
-        if (!isParticipant) {
-            throw new RuntimeException("Bạn không phải là thành viên của cuộc trò chuyện này");
-        }
-
-        Pageable pageable = PageRequest.of(page, size);
-        Page<Message> messages = messageRepository.findByConversationIdOrderByCreatedAtDesc(conversationId, pageable);
-
-        return messages.map(this::mapToMessageResponse);
+                .anyMatch(u -> u.getId().equals(userId));
+        if (!isParticipant) throw new RuntimeException("Bạn không phải là thành viên của cuộc trò chuyện này");
     }
 
     @Override
@@ -186,20 +246,18 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional(readOnly = true)
     public List<UserListResponse> searchUsers(Integer currentUserId, String keyword) {
-        List<User> users = userRepository.findAll();
-
         if (keyword == null || keyword.trim().isEmpty()) {
-            return List.of(); // Trả về list rỗng nếu không có keyword
+            return List.of();
         }
 
         String searchTerm = keyword.toLowerCase().trim();
 
-        return users.stream()
+        return userRepository.findAll().stream()
                 .filter(user -> !user.getId().equals(currentUserId) && user.getIsActive())
                 .filter(user ->
-                    user.getEmail().toLowerCase().contains(searchTerm) ||
-                    user.getFullName().toLowerCase().contains(searchTerm) ||
-                    user.getUsername().toLowerCase().contains(searchTerm)
+                        user.getEmail().toLowerCase().contains(searchTerm) ||
+                        user.getFullName().toLowerCase().contains(searchTerm) ||
+                        user.getUsername().toLowerCase().contains(searchTerm)
                 )
                 .map(user -> UserListResponse.builder()
                         .id(user.getId())
@@ -209,36 +267,13 @@ public class ChatServiceImpl implements ChatService {
                         .email(user.getEmail())
                         .isActive(user.getIsActive())
                         .build())
-                .limit(10) // Giới hạn 10 kết quả
+                .limit(10)
                 .collect(Collectors.toList());
     }
 
     @Override
     public String uploadChatFile(MultipartFile file) throws Exception {
-        if (file.isEmpty()) {
-            throw new IllegalArgumentException("File không được để trống");
-        }
-
-        // Tạo thư mục nếu chưa tồn tại
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-
-        // Tạo tên file unique
-        String originalFilename = file.getOriginalFilename();
-        String extension = "";
-        if (originalFilename != null && originalFilename.contains(".")) {
-            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
-        }
-        String uniqueFilename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
-
-        // Lưu file
-        Path filePath = uploadPath.resolve(uniqueFilename);
-        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
-
-        // Trả về URL
-        return "/uploads/chat/" + uniqueFilename;
+        return fileStorageService.storeChatFile(file, null);
     }
 
     @Override
@@ -247,7 +282,6 @@ public class ChatServiceImpl implements ChatService {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation không tồn tại"));
 
-        // Kiểm tra xem user có phải là participant không
         boolean isParticipant = conversation.getParticipants().stream()
                 .anyMatch(user -> user.getId().equals(userId));
 
@@ -255,12 +289,12 @@ public class ChatServiceImpl implements ChatService {
             throw new RuntimeException("Bạn không có quyền xóa cuộc trò chuyện này");
         }
 
-        // Xóa conversation (cascade sẽ tự động xóa messages và participants)
         conversationRepository.delete(conversation);
         log.info("User {} deleted conversation {}", userId, conversationId);
     }
 
-    // Helper methods
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
     private ConversationResponse mapToConversationResponse(Conversation conversation, Integer currentUserId) {
         List<ConversationResponse.ParticipantInfo> participants = conversation.getParticipants().stream()
                 .map(user -> ConversationResponse.ParticipantInfo.builder()
@@ -271,7 +305,6 @@ public class ChatServiceImpl implements ChatService {
                         .build())
                 .collect(Collectors.toList());
 
-        // Đếm tin nhắn chưa đọc
         Long unreadCount = (long) messageRepository.findUnreadMessages(conversation.getId(), currentUserId).size();
 
         return ConversationResponse.builder()
@@ -295,6 +328,9 @@ public class ChatServiceImpl implements ChatService {
                 .content(message.getContent())
                 .isRead(message.getIsRead())
                 .messageType(message.getMessageType().name())
+                .fileName(message.getFileName())
+                .mimeType(message.getMimeType())
+                .fileSize(message.getFileSize())
                 .createdAt(message.getCreatedAt())
                 .build();
     }

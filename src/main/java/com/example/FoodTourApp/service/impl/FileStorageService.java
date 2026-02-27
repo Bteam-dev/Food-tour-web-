@@ -62,7 +62,12 @@ public class FileStorageService {
             return null;
         }
 
-        // Validate file type - chấp nhận tất cả các loại ảnh
+        // FILE_MESSAGE cho phép tất cả loại file (ảnh, video, audio, pdf, zip...)
+        if (category == FileCategory.FILE_MESSAGE) {
+            return storeChatFile(file, subfolderId);
+        }
+
+        // Validate file type - chỉ chấp nhận ảnh cho các category khác
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
             throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, etc.)");
@@ -191,6 +196,99 @@ public class FileStorageService {
         } catch (IOException e) {
             log.error("Could not delete file {}: {}", filePathOrUrl, e.getMessage());
         }
+    }
+
+    /**
+     * Lưu file chat – chấp nhận mọi loại file (image, video, audio, PDF, v.v.)
+     * Đường dẫn: FileMessage/user_{userId}\conversation_{conversationId}\
+     * Giới hạn 50MB.
+     *
+     * @param file        file cần lưu
+     * @param userId      ID của người gửi
+     * @param conversationId  ID của cuộc trò chuyện
+     */
+    public String storeChatFile(MultipartFile file, Integer userId, Long conversationId) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File không được để trống");
+        }
+
+        long maxSize = 50L * 1024 * 1024; // 50 MB
+        if (file.getSize() > maxSize) {
+            throw new IOException("Kích thước file không được vượt quá 50MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.isEmpty()) {
+            throw new IOException("Tên file không hợp lệ");
+        }
+
+        originalFilename = StringUtils.cleanPath(originalFilename);
+        String extension = "";
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = originalFilename.substring(dotIndex).toLowerCase();
+        }
+
+        String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
+
+        // D:\...\FileMessage/user_{userId}\conversation_{conversationId}\
+        String targetDir = FILE_MESSAGE_DIR
+                + "\\user_" + userId
+                + "\\conversation_" + conversationId;
+
+        Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
+        Files.createDirectories(targetFolder);
+
+        Path targetPath = targetFolder.resolve(filename);
+        try {
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("Chat file saved to {}: {}", targetDir, targetPath);
+        } catch (IOException e) {
+            log.error("Could not store chat file {}: {}", originalFilename, e.getMessage());
+            throw new IOException("Không thể lưu file " + originalFilename, e);
+        }
+
+        String relativePath = convertToRelativeUrl(targetPath.toString());
+        log.info("Chat file URL: {}", relativePath);
+        return relativePath;
+    }
+
+    /**
+     * @deprecated Dùng storeChatFile(file, userId, conversationId) thay thế
+     */
+    @Deprecated
+    public String storeChatFile(MultipartFile file, String subfolderId) throws IOException {
+        // fallback không biết userId/conversationId → lưu thẳng vào FileMessage\subfolderId\
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File không được để trống");
+        }
+        long maxSize = 50L * 1024 * 1024;
+        if (file.getSize() > maxSize) throw new IOException("Kích thước file không được vượt quá 50MB");
+
+        String originalFilename = StringUtils.cleanPath(
+                file.getOriginalFilename() != null ? file.getOriginalFilename() : "file");
+        String extension = "";
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex > 0) extension = originalFilename.substring(dotIndex).toLowerCase();
+
+        String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
+        String targetDir = FILE_MESSAGE_DIR + (subfolderId != null ? "\\" + subfolderId : "");
+        Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
+        Files.createDirectories(targetFolder);
+        Path targetPath = targetFolder.resolve(filename);
+        Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        return convertToRelativeUrl(targetPath.toString());
+    }
+
+    /**
+     * Xác định MessageType dựa trên MIME type của file
+     */
+    public static String detectMessageType(String contentType) {
+        if (contentType == null) return "FILE";
+        if (contentType.startsWith("image/")) return "IMAGE";
+        if (contentType.startsWith("video/")) return "VIDEO";
+        if (contentType.startsWith("audio/")) return "AUDIO";
+        return "FILE";
     }
 
     /**

@@ -1,7 +1,6 @@
 package com.example.FoodTourApp.service;
 
 import com.example.FoodTourApp.DTO.ChatDTO.*;
-import org.springframework.data.domain.Page;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -9,9 +8,9 @@ import java.util.List;
 public interface ChatService {
 
     /**
-     * Tạo hoặc lấy conversation giữa 2 user
+     * Tạo hoặc lấy conversation – nhận thẳng targetUserId (flow giống Facebook/Zalo)
      */
-    ConversationResponse createOrGetConversation(Integer currentUserId, Integer otherUserId);
+    ConversationResponse createOrGetConversation(Integer currentUserId, Integer targetUserId);
 
     /**
      * Lấy danh sách conversation của user
@@ -24,9 +23,21 @@ public interface ChatService {
     MessageResponse sendMessage(Integer senderId, SendMessageRequest request);
 
     /**
-     * Lấy lịch sử tin nhắn
+     * Load tin nhắn mới nhất khi mở chat (cursor-based, không dùng Page).
+     * Trả về list ASC (cũ → mới).
+     *
+     * @param size số lượng, mặc định 30
      */
-    Page<MessageResponse> getMessages(Long conversationId, Integer userId, int page, int size);
+    List<MessageResponse> getLatestMessages(Long conversationId, Integer userId, int size);
+
+    /**
+     * Load thêm tin nhắn cũ hơn khi kéo lên (cursor-based).
+     * Trả về list ASC (cũ → mới) để client prepend.
+     *
+     * @param beforeMessageId ID tin nhắn cũ nhất đang hiển thị
+     * @param size            số lượng, mặc định 30
+     */
+    List<MessageResponse> getMessagesBefore(Long conversationId, Integer userId, Long beforeMessageId, int size);
 
     /**
      * Đánh dấu tin nhắn đã đọc
