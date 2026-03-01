@@ -15,6 +15,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,28 +27,59 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
     private final JwtUtils jwtUtils;
     private final UserRepository userRepository;
 
+    /**
+     * Custom token that returns userId as name so that Spring's STOMP CONNECTED frame
+     * sends a plain "user-name: 3" header instead of the full User.toString(),
+     * which would break the STOMP frame parser on the Android client.
+     */
+    private static class UserIdAuthenticationToken extends UsernamePasswordAuthenticationToken {
+        private final String name;
+
+        public UserIdAuthenticationToken(Object principal, Object credentials,
+                                         Collection<? extends org.springframework.security.core.GrantedAuthority> authorities,
+                                         String name) {
+            super(principal, credentials, authorities);
+            this.name = name;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+    }
+
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
         if (accessor != null) {
             log.info("WebSocket message - Command: {}, Destination: {}",
-                accessor.getCommand(), accessor.getDestination());
+                    accessor.getCommand(), accessor.getDestination());
 
-            // Authenticate cho CONNECT và mọi message khác
-            if (StompCommand.CONNECT.equals(accessor.getCommand()) || accessor.getUser() == null) {
+            if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                 String token = extractToken(accessor);
-
                 if (token != null && jwtUtils.validateToken(token)) {
                     authenticateUser(token, accessor);
                 } else {
-                    log.warn("WebSocket message - Invalid or missing token");
+                    log.warn("WebSocket CONNECT - Invalid or missing token");
+                }
+            } else {
+                // Restore user từ session cho các frame SEND, SUBSCRIBE, DISCONNECT...
+                if (accessor.getUser() == null && accessor.getSessionAttributes() != null) {
+                    UsernamePasswordAuthenticationToken auth =
+                            (UsernamePasswordAuthenticationToken) accessor.getSessionAttributes()
+                                    .get("spring_security_auth");
+                    if (auth != null) {
+                        accessor.setUser(auth);
+                        log.debug("Restored auth from session for command: {}", accessor.getCommand());
+                    }
                 }
             }
         }
 
         return message;
     }
+
 
     private String extractToken(StompHeaderAccessor accessor) {
         // 1. Thử lấy từ Authorization header
@@ -87,13 +119,11 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
             log.info("WebSocket authentication - UserId: {}, Roles: {}", userId, roles);
 
-            // Load user from database bằng userId thay vì email
             User user = userRepository.findById(userId).orElse(null);
 
             if (user != null) {
                 log.info("WebSocket user authenticated: ID={}, Email={}", user.getId(), user.getEmail());
 
-                // ⚠️ KIỂM TRA USER BỊ KHÓA HOẶC KHÔNG ACTIVE
                 if (!user.getIsActive()) {
                     log.warn("❌ User {} is INACTIVE or BLOCKED - Rejecting WebSocket connection", userId);
                     return;
@@ -103,14 +133,13 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                         .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
                         .collect(Collectors.toList());
 
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(user, null, authorities);
+                UserIdAuthenticationToken authentication =
+                        new UserIdAuthenticationToken(user, null, authorities, userId.toString());
 
                 accessor.setUser(authentication);
 
-                // Lưu vào session để dùng cho các message tiếp theo
                 if (accessor.getSessionAttributes() != null) {
-                    accessor.getSessionAttributes().put("authenticated_user", user);
+                    accessor.getSessionAttributes().put("spring_security_auth", authentication);
                 }
             } else {
                 log.warn("WebSocket user not found in database for userId: {}", userId);
