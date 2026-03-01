@@ -1,6 +1,7 @@
 package com.example.FoodTourApp.service;
 
 import com.example.FoodTourApp.DTO.ChatDTO.*;
+import org.springframework.core.io.Resource;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -64,6 +65,21 @@ public interface ChatService {
      * Trả về Map chứa fileUrl, fileName, mimeType, fileSize, messageType.
      */
     java.util.Map<String, Object> uploadChatFileWithMeta(MultipartFile file, Integer userId, Long conversationId);
+
+    /**
+     * Kiểm tra user có phải participant của conversation không
+     */
+    boolean isParticipant(Long conversationId, Integer userId);
+
+    /**
+     * Serve file chat – kiểm tra JWT + participant, trả về Resource để stream
+     * @param relativePath  vd: user_3/conversation_1/filename.mp4
+     * @param userId        user đang request
+     * @return Resource của file
+     * @throws SecurityException nếu user không có quyền
+     * @throws java.io.FileNotFoundException nếu file không tồn tại
+     */
+    Resource serveChatFile(String relativePath, Integer userId) throws Exception;
 
     /**
      * Xóa conversation (soft delete hoặc hard delete)

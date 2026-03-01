@@ -10,14 +10,22 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // Serve file từ thư mục StorageFile
         String storageFilePath = "file:///D:/Project/BackEnd/FoodTourApp_BE/StorageFile/";
 
-        registry.addResourceHandler("/uploads/**")
-                .addResourceLocations(storageFilePath);
+        // Serve các file public (ảnh sản phẩm, avatar, logo shop, ...) - KHÔNG bao gồm FileMessage
+        registry.addResourceHandler("/uploads/ProductImage/**")
+                .addResourceLocations(storageFilePath + "ProductImage/");
+        registry.addResourceHandler("/uploads/ShopLogo/**")
+                .addResourceLocations(storageFilePath + "ShopLogo/");
+        registry.addResourceHandler("/uploads/ShopBanner/**")
+                .addResourceLocations(storageFilePath + "ShopBanner/");
+        registry.addResourceHandler("/uploads/ReviewImage/**")
+                .addResourceLocations(storageFilePath + "ReviewImage/");
+        registry.addResourceHandler("/uploads/UserAvatar/**")
+                .addResourceLocations(storageFilePath + "UserAvatar/");
 
-        // Log để debug
-        System.out.println("Static resource handler registered: /uploads/** -> " + storageFilePath);
+        // FileMessage KHÔNG được serve tĩnh ở đây nữa
+        // → phải đi qua GET /api/user/chat/files/** để kiểm tra JWT + participant
     }
 
     @Override

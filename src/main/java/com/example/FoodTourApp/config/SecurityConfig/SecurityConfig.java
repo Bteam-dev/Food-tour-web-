@@ -40,8 +40,15 @@ public class SecurityConfig {
                         // Public endpoints - không cần authentication
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
-                        .requestMatchers("/uploads/**").permitAll() // Allow public access to uploaded files
-                        .requestMatchers("/ws/**").permitAll() // Allow WebSocket connections
+                        // Chỉ cho phép public các file KHÔNG phải chat (product, shop, avatar, review)
+                        .requestMatchers("/uploads/ProductImage/**").permitAll()
+                        .requestMatchers("/uploads/ShopLogo/**").permitAll()
+                        .requestMatchers("/uploads/ShopBanner/**").permitAll()
+                        .requestMatchers("/uploads/ReviewImage/**").permitAll()
+                        .requestMatchers("/uploads/UserAvatar/**").permitAll()
+                        // FileMessage KHÔNG permitAll → phải có JWT + là participant
+                        // → đi qua /api/user/chat/files/**
+                        .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/user/**").hasAnyRole("USER", "SELLER", "ADMIN")

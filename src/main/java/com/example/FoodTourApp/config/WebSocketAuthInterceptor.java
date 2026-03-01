@@ -2,6 +2,7 @@ package com.example.FoodTourApp.config;
 
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.repository.ConversationRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private final JwtUtils jwtUtils;
     private final UserRepository userRepository;
+    private final ConversationRepository conversationRepository; // ✅ thêm để kiểm tra participant
 
     /**
      * Custom token that returns userId as name so that Spring's STOMP CONNECTED frame
@@ -74,12 +76,66 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                         log.debug("Restored auth from session for command: {}", accessor.getCommand());
                     }
                 }
+
+                // ✅ Kiểm tra SUBSCRIBE vào /topic/conversation/{id}
+                if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                    String destination = accessor.getDestination();
+                    if (destination != null && destination.startsWith("/topic/conversation/")) {
+                        if (!checkConversationSubscribeAccess(accessor, destination)) {
+                            log.warn("❌ Blocked SUBSCRIBE to {} – user is not a participant", destination);
+                            return null; // Block message – ngắt kết nối subscribe
+                        }
+                    }
+                }
             }
         }
 
         return message;
     }
 
+    /**
+     * Kiểm tra user có phải participant của conversation không trước khi cho SUBSCRIBE.
+     *
+     * @return true nếu được phép, false nếu bị chặn
+     */
+    private boolean checkConversationSubscribeAccess(StompHeaderAccessor accessor, String destination) {
+        try {
+            // Trích xuất conversationId từ "/topic/conversation/123"
+            String idStr = destination.substring("/topic/conversation/".length());
+            Long conversationId = Long.parseLong(idStr);
+
+            // Lấy user từ principal
+            if (accessor.getUser() == null) {
+                log.warn("SUBSCRIBE check – principal is null");
+                return false;
+            }
+
+            UsernamePasswordAuthenticationToken auth =
+                    (UsernamePasswordAuthenticationToken) accessor.getUser();
+            if (!(auth.getPrincipal() instanceof User user)) {
+                log.warn("SUBSCRIBE check – principal is not User");
+                return false;
+            }
+
+            boolean isParticipant = conversationRepository.findById(conversationId)
+                    .map(conv -> conv.getParticipants().stream()
+                            .anyMatch(u -> u.getId().equals(user.getId())))
+                    .orElse(false);
+
+            if (!isParticipant) {
+                log.warn("❌ User {} tried to SUBSCRIBE to conversation {} but is NOT a participant",
+                        user.getId(), conversationId);
+            }
+            return isParticipant;
+
+        } catch (NumberFormatException e) {
+            log.warn("SUBSCRIBE check – invalid conversationId in destination: {}", destination);
+            return false;
+        } catch (Exception e) {
+            log.error("SUBSCRIBE check error: {}", e.getMessage(), e);
+            return false;
+        }
+    }
 
     private String extractToken(StompHeaderAccessor accessor) {
         // 1. Thử lấy từ Authorization header

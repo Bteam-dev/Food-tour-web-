@@ -12,12 +12,17 @@ import com.example.FoodTourApp.service.ChatService;
 import com.example.FoodTourApp.service.FCMService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.FileNotFoundException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -36,6 +41,7 @@ public class ChatServiceImpl implements ChatService {
     private final ChatPresenceService chatPresenceService;
 
     private static final int DEFAULT_PAGE_SIZE = 30;
+    private static final String FILE_MESSAGE_BASE_DIR = "D:\\Project\\BackEnd\\FoodTourApp_BE\\StorageFile\\FileMessage";
 
     @Override
     @Transactional
@@ -232,6 +238,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional
     public void markMessagesAsRead(Long conversationId, Integer userId) {
+        checkParticipant(conversationId, userId); // ✅ thêm kiểm tra participant
         List<Message> unreadMessages = messageRepository.findUnreadMessages(conversationId, userId);
         unreadMessages.forEach(message -> message.setIsRead(true));
         messageRepository.saveAll(unreadMessages);
@@ -278,6 +285,7 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public java.util.Map<String, Object> uploadChatFileWithMeta(MultipartFile file, Integer userId, Long conversationId) {
+        checkParticipant(conversationId, userId); // ✅ thêm kiểm tra participant trước khi upload
         try {
             String fileUrl = fileStorageService.storeChatFile(file, userId, conversationId);
             String contentType = file.getContentType();
@@ -294,6 +302,58 @@ public class ChatServiceImpl implements ChatService {
         } catch (java.io.IOException e) {
             throw new RuntimeException("Không thể upload file: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Resource serveChatFile(String relativePath, Integer userId) throws Exception {
+        // Trích xuất conversationId từ path: user_{x}/conversation_{id}/filename
+        Long conversationId = extractConversationIdFromPath(relativePath);
+        if (conversationId == null) {
+            throw new IllegalArgumentException("Path không hợp lệ: " + relativePath);
+        }
+
+        // Kiểm tra user có phải participant không
+        if (!isParticipant(conversationId, userId)) {
+            throw new SecurityException("Bạn không có quyền truy cập file này");
+        }
+
+        // Resolve đường dẫn vật lý, chống path traversal
+        Path filePath = Paths.get(FILE_MESSAGE_BASE_DIR)
+                .resolve(relativePath.replace("/", "\\"))
+                .normalize();
+
+        if (!filePath.toAbsolutePath().startsWith(Paths.get(FILE_MESSAGE_BASE_DIR).toAbsolutePath())) {
+            throw new SecurityException("Truy cập không hợp lệ");
+        }
+
+        Resource resource = new UrlResource(filePath.toUri());
+        if (!resource.exists() || !resource.isReadable()) {
+            throw new FileNotFoundException("File không tồn tại: " + relativePath);
+        }
+
+        return resource;
+    }
+
+    private Long extractConversationIdFromPath(String relativePath) {
+        if (relativePath == null) return null;
+        try {
+            for (String part : relativePath.split("/")) {
+                if (part.startsWith("conversation_")) {
+                    return Long.parseLong(part.substring("conversation_".length()));
+                }
+            }
+        } catch (NumberFormatException ignored) {}
+        return null;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean isParticipant(Long conversationId, Integer userId) {
+        return conversationRepository.findById(conversationId)
+                .map(conv -> conv.getParticipants().stream()
+                        .anyMatch(u -> u.getId().equals(userId)))
+                .orElse(false);
     }
 
     @Override
