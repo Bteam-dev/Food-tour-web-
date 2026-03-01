@@ -8,12 +8,14 @@ import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.AddressRepository;
 import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.ShopService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -26,6 +28,8 @@ public class ShopServiceImpl implements ShopService {
 
     private final ShopRepository shopRepository;
     private final AddressRepository addressRepository;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -195,6 +199,101 @@ public class ShopServiceImpl implements ShopService {
         shopRepository.save(shop);
 
         log.info("Shop deleted (soft delete) successfully: {}", shopId);
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO createShopWithImages(CreateShopRequestDTO request, User seller,
+                                                MultipartFile logo, MultipartFile banner) {
+        ShopResponseDTO shop = createShop(request, seller);
+        Integer shopId = shop.getId();
+        String subfolderId = "shop_" + shopId;
+
+        UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
+        boolean needUpdate = false;
+
+        if (logo != null && !logo.isEmpty()) {
+            try {
+                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
+                updateRequest.setLogoUrl(logoUrl);
+                needUpdate = true;
+                log.info("Logo uploaded to ShopLogo/{}/", subfolderId);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
+            }
+        }
+
+        if (banner != null && !banner.isEmpty()) {
+            try {
+                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
+                updateRequest.setBannerUrl(bannerUrl);
+                needUpdate = true;
+                log.info("Banner uploaded to ShopBanner/{}/", subfolderId);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
+            }
+        }
+
+        return needUpdate ? updateShop(shopId, updateRequest, seller) : shop;
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
+                                                MultipartFile logo, MultipartFile banner) {
+        String subfolderId = "shop_" + shopId;
+
+        if (logo != null && !logo.isEmpty()) {
+            try {
+                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
+                request.setLogoUrl(logoUrl);
+                log.info("Logo uploaded: {}", logoUrl);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
+            }
+        }
+
+        if (banner != null && !banner.isEmpty()) {
+            try {
+                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
+                request.setBannerUrl(bannerUrl);
+                log.info("Banner uploaded: {}", bannerUrl);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
+            }
+        }
+
+        return updateShop(shopId, request, seller);
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO createShopFromJson(String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
+        if (dataJson == null || dataJson.isEmpty()) {
+            throw new RuntimeException("Thiếu dữ liệu shop");
+        }
+        CreateShopRequestDTO request;
+        try {
+            request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Dữ liệu shop không hợp lệ: " + e.getMessage(), e);
+        }
+        return createShopWithImages(request, seller, logo, banner);
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
+        if (dataJson == null || dataJson.isEmpty()) {
+            throw new RuntimeException("Thiếu dữ liệu cập nhật");
+        }
+        UpdateShopRequestDTO request;
+        try {
+            request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
+        }
+        return updateShopWithImages(shopId, request, seller, logo, banner);
     }
 
     /**

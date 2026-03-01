@@ -88,17 +88,8 @@ public class SellerOrderController {
                     Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
 
-            Order.OrderStatus orderStatus = null;
-            if (status != null && !status.isEmpty()) {
-                try {
-                    orderStatus = Order.OrderStatus.valueOf(status.toLowerCase());
-                } catch (IllegalArgumentException e) {
-                    throw new RuntimeException("Invalid order status: " + status);
-                }
-            }
-
-            Page<OrderResponseDTO> orders = orderService.getShopOrdersWithFilter(
-                    seller, orderStatus, startDate, endDate, pageable);
+            Page<OrderResponseDTO> orders = orderService.getShopOrdersWithFilterByStatusString(
+                    seller, status, startDate, endDate, pageable);
             PageResponse<OrderResponseDTO> pageResponse = PageResponse.of(orders);
 
             Map<String, Object> result = new HashMap<>();
@@ -337,7 +328,6 @@ public class SellerOrderController {
     /**
      * Lấy danh sách đơn hàng có yêu cầu refund từ review
      * GET /api/seller/orders/refund-requests
-     * Params: page, size, sortBy, sortDir
      */
     @GetMapping("/refund-requests")
     public ResponseEntity<?> getOrdersWithRefundRequests(
@@ -352,14 +342,7 @@ public class SellerOrderController {
                     Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
 
-            // Lấy tất cả đơn hàng của shop và filter ra những đơn có hasRefundRequest = true
-            Page<OrderResponseDTO> ordersWithRefund = orderService.getShopOrders(seller, pageable)
-                    .map(order -> order); // Đã có hasRefundRequest trong DTO rồi
-
-            // Filter chỉ lấy những đơn có refund request
-            Page<OrderResponseDTO> filteredOrders = ordersWithRefund
-                    .map(order -> order.getHasRefundRequest() != null && order.getHasRefundRequest() ? order : null)
-                    .map(order -> order);
+            Page<OrderResponseDTO> ordersWithRefund = orderService.getOrdersWithRefundRequests(seller, pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);

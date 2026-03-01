@@ -42,10 +42,8 @@ public class OrderServiceImpl implements OrderService {
     private final CartItemRepository cartItemRepository;
     private final CartRepository cartRepository;
     private final AddressRepository addressRepository;
-    private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ShopRepository shopRepository;
-    private final ReviewRepository reviewRepository;
     private final WalletService walletService;
     private final FCMService fcmService;
     private final ObjectMapper objectMapper;
@@ -648,6 +646,213 @@ public class OrderServiceImpl implements OrderService {
         return mapToOrderResponseDTO(order);
     }
 
+    @Override
+    public Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Pageable pageable) {
+        log.info("Getting orders with refund requests for seller: {}", seller.getId());
+
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0);
+
+        Page<Order> orders = orderRepository.findByShop(shop, pageable);
+        return orders
+                .map(this::mapToOrderResponseDTO)
+                .map(dto -> (dto.getHasRefundRequest() != null && dto.getHasRefundRequest()) ? dto : null);
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable) {
+        log.info("Getting orders for seller: {} with pagination", seller.getId());
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        Page<Order> orders = orderRepository.findByShop(shop, pageable);
+        return orders.map(this::mapToOrderResponseDTO);
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getShopOrdersWithFilter(
+            User seller,
+            Order.OrderStatus status,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Pageable pageable) {
+        log.info("Getting filtered orders for seller: {}, status: {}, startDate: {}, endDate: {}",
+                seller.getId(), status, startDate, endDate);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        Page<Order> orders;
+
+        // Lọc theo các điều kiện
+        if (status != null && startDate != null && endDate != null) {
+            // Lọc cả trạng thái và thời gian
+            orders = orderRepository.findByShopAndOrderStatusAndCreatedAtBetween(shop, status, startDate, endDate, pageable);
+        } else if (status != null) {
+            // Chỉ lọc theo trạng thái
+            orders = orderRepository.findByShopAndOrderStatus(shop, status, pageable);
+        } else if (startDate != null && endDate != null) {
+            // Chỉ lọc theo thời gian
+            orders = orderRepository.findByShopAndCreatedAtBetween(shop, startDate, endDate, pageable);
+        } else {
+            // Không lọc gì, lấy tất cả
+            orders = orderRepository.findByShop(shop, pageable);
+        }
+
+        return orders.map(this::mapToOrderResponseDTO);
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getShopOrdersWithFilterByStatusString(
+            User seller, String status, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
+        Order.OrderStatus orderStatus = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                orderStatus = Order.OrderStatus.valueOf(status.toLowerCase());
+            } catch (IllegalArgumentException e) {
+                throw new RuntimeException("Trạng thái đơn hàng không hợp lệ: " + status);
+            }
+        }
+        return getShopOrdersWithFilter(seller, orderStatus, startDate, endDate, pageable);
+    }
+
+    @Override
+    public List<RevenueStatisticsDTO> getRevenueStatistics(
+            User seller,
+            String periodType,
+            LocalDateTime startDate,
+            LocalDateTime endDate) {
+        log.info("Getting revenue statistics for seller: {}, periodType: {}, startDate: {}, endDate: {}",
+                seller.getId(), periodType, startDate, endDate);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        // Lấy đơn hàng đã thanh toán trong khoảng thời gian
+        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
+
+        // Nhóm theo period type
+        Map<String, List<Order>> groupedOrders = new java.util.HashMap<>();
+
+        for (Order order : paidOrders) {
+            String period;
+            if ("day".equalsIgnoreCase(periodType)) {
+                period = order.getCreatedAt().toLocalDate().toString(); // "2024-01-15"
+            } else if ("month".equalsIgnoreCase(periodType)) {
+                period = order.getCreatedAt().getYear() + "-" +
+                         String.format("%02d", order.getCreatedAt().getMonthValue()); // "2024-01"
+            } else if ("year".equalsIgnoreCase(periodType)) {
+                period = String.valueOf(order.getCreatedAt().getYear()); // "2024"
+            } else {
+                throw new RuntimeException("Invalid period type. Allowed: day, month, year");
+            }
+
+            groupedOrders.computeIfAbsent(period, k -> new java.util.ArrayList<>()).add(order);
+        }
+
+        // Tính toán thống kê cho từng period
+        List<RevenueStatisticsDTO> statistics = new java.util.ArrayList<>();
+
+        for (Map.Entry<String, List<Order>> entry : groupedOrders.entrySet()) {
+            String period = entry.getKey();
+            List<Order> orders = entry.getValue();
+
+            long totalOrders = orders.size();
+            BigDecimal totalRevenue = orders.stream()
+                    .map(Order::getTotalAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal platformCommission = orders.stream()
+                    .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal sellerRevenue = orders.stream()
+                    .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            statistics.add(new RevenueStatisticsDTO(period, totalOrders, totalRevenue, platformCommission, sellerRevenue));
+        }
+
+        // Sắp xếp theo period (tăng dần)
+        statistics.sort((a, b) -> a.getPeriod().compareTo(b.getPeriod()));
+
+        log.info("Revenue statistics calculated: {} periods", statistics.size());
+        return statistics;
+    }
+
+    @Override
+    public List<ProductSalesStatisticsDTO> getTopSellingProducts(
+            User seller,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            int limit) {
+        log.info("Getting top selling products for seller: {}, startDate: {}, endDate: {}, limit: {}",
+                seller.getId(), startDate, endDate, limit);
+
+        // Tìm shop của seller
+        List<Shop> shops = shopRepository.findBySeller(seller);
+        if (shops.isEmpty()) {
+            throw new RuntimeException("Bạn chưa có shop nào");
+        }
+        Shop shop = shops.get(0); // Lấy shop đầu tiên
+
+        // Lấy danh sách sản phẩm bán chạy
+        List<Object[]> results = orderItemRepository.findTopSellingProductsByShopAndDateRange(shop, startDate, endDate);
+
+        // Lấy hoa hồng platform để tính seller revenue
+        BigDecimal commissionRate = new BigDecimal("12.00"); // 12%
+
+        List<ProductSalesStatisticsDTO> statistics = new java.util.ArrayList<>();
+
+        int count = 0;
+        for (Object[] row : results) {
+            if (count >= limit) break;
+
+            Integer productId = (Integer) row[0];
+            String productName = (String) row[1];
+            String imageUrls = (String) row[2];
+            Long totalQuantity = ((Number) row[3]).longValue();
+            Long totalOrders = ((Number) row[4]).longValue();
+            BigDecimal totalRevenue = (BigDecimal) row[5];
+
+            // Tính seller revenue (sau khi trừ hoa hồng)
+            BigDecimal sellerRevenue = totalRevenue
+                    .multiply(BigDecimal.ONE.subtract(commissionRate.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)))
+                    .setScale(2, RoundingMode.HALF_UP);
+
+            // Lấy ảnh đầu tiên
+            String firstImage = "";
+            if (imageUrls != null && !imageUrls.trim().isEmpty()) {
+                String[] images = imageUrls.split(",");
+                if (images.length > 0) {
+                    firstImage = images[0].trim();
+                }
+            }
+
+            ProductSalesStatisticsDTO dto = new ProductSalesStatisticsDTO(
+                    productId, productName, firstImage, totalQuantity, totalOrders, totalRevenue, sellerRevenue);
+            statistics.add(dto);
+            count++;
+        }
+
+        log.info("Top selling products: {} products", statistics.size());
+        return statistics;
+    }
+
     private OrderResponseDTO mapToOrderResponseDTO(Order order) {
         OrderResponseDTO dto = new OrderResponseDTO();
         dto.setId(order.getId());
@@ -821,182 +1026,5 @@ public class OrderServiceImpl implements OrderService {
 
         log.info("Dashboard statistics calculated successfully");
         return dashboard;
-    }
-
-    @Override
-    public Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable) {
-        log.info("Getting orders for seller: {} with pagination", seller.getId());
-
-        // Tìm shop của seller
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) {
-            throw new RuntimeException("Bạn chưa có shop nào");
-        }
-        Shop shop = shops.get(0); // Lấy shop đầu tiên
-
-        Page<Order> orders = orderRepository.findByShop(shop, pageable);
-        return orders.map(this::mapToOrderResponseDTO);
-    }
-
-    @Override
-    public Page<OrderResponseDTO> getShopOrdersWithFilter(
-            User seller,
-            Order.OrderStatus status,
-            LocalDateTime startDate,
-            LocalDateTime endDate,
-            Pageable pageable) {
-        log.info("Getting filtered orders for seller: {}, status: {}, startDate: {}, endDate: {}",
-                seller.getId(), status, startDate, endDate);
-
-        // Tìm shop của seller
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) {
-            throw new RuntimeException("Bạn chưa có shop nào");
-        }
-        Shop shop = shops.get(0); // Lấy shop đầu tiên
-
-        Page<Order> orders;
-
-        // Lọc theo các điều kiện
-        if (status != null && startDate != null && endDate != null) {
-            // Lọc cả trạng thái và thời gian
-            orders = orderRepository.findByShopAndOrderStatusAndCreatedAtBetween(shop, status, startDate, endDate, pageable);
-        } else if (status != null) {
-            // Chỉ lọc theo trạng thái
-            orders = orderRepository.findByShopAndOrderStatus(shop, status, pageable);
-        } else if (startDate != null && endDate != null) {
-            // Chỉ lọc theo thời gian
-            orders = orderRepository.findByShopAndCreatedAtBetween(shop, startDate, endDate, pageable);
-        } else {
-            // Không lọc gì, lấy tất cả
-            orders = orderRepository.findByShop(shop, pageable);
-        }
-
-        return orders.map(this::mapToOrderResponseDTO);
-    }
-
-    @Override
-    public List<RevenueStatisticsDTO> getRevenueStatistics(
-            User seller,
-            String periodType,
-            LocalDateTime startDate,
-            LocalDateTime endDate) {
-        log.info("Getting revenue statistics for seller: {}, periodType: {}, startDate: {}, endDate: {}",
-                seller.getId(), periodType, startDate, endDate);
-
-        // Tìm shop của seller
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) {
-            throw new RuntimeException("Bạn chưa có shop nào");
-        }
-        Shop shop = shops.get(0); // Lấy shop đầu tiên
-
-        // Lấy đơn hàng đã thanh toán trong khoảng thời gian
-        List<Order> paidOrders = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
-
-        // Nhóm theo period type
-        Map<String, List<Order>> groupedOrders = new java.util.HashMap<>();
-
-        for (Order order : paidOrders) {
-            String period;
-            if ("day".equalsIgnoreCase(periodType)) {
-                period = order.getCreatedAt().toLocalDate().toString(); // "2024-01-15"
-            } else if ("month".equalsIgnoreCase(periodType)) {
-                period = order.getCreatedAt().getYear() + "-" +
-                         String.format("%02d", order.getCreatedAt().getMonthValue()); // "2024-01"
-            } else if ("year".equalsIgnoreCase(periodType)) {
-                period = String.valueOf(order.getCreatedAt().getYear()); // "2024"
-            } else {
-                throw new RuntimeException("Invalid period type. Allowed: day, month, year");
-            }
-
-            groupedOrders.computeIfAbsent(period, k -> new java.util.ArrayList<>()).add(order);
-        }
-
-        // Tính toán thống kê cho từng period
-        List<RevenueStatisticsDTO> statistics = new java.util.ArrayList<>();
-
-        for (Map.Entry<String, List<Order>> entry : groupedOrders.entrySet()) {
-            String period = entry.getKey();
-            List<Order> orders = entry.getValue();
-
-            long totalOrders = orders.size();
-            BigDecimal totalRevenue = orders.stream()
-                    .map(Order::getTotalAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal platformCommission = orders.stream()
-                    .map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal sellerRevenue = orders.stream()
-                    .map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-            statistics.add(new RevenueStatisticsDTO(period, totalOrders, totalRevenue, platformCommission, sellerRevenue));
-        }
-
-        // Sắp xếp theo period (tăng dần)
-        statistics.sort((a, b) -> a.getPeriod().compareTo(b.getPeriod()));
-
-        log.info("Revenue statistics calculated: {} periods", statistics.size());
-        return statistics;
-    }
-
-    @Override
-    public List<ProductSalesStatisticsDTO> getTopSellingProducts(
-            User seller,
-            LocalDateTime startDate,
-            LocalDateTime endDate,
-            int limit) {
-        log.info("Getting top selling products for seller: {}, startDate: {}, endDate: {}, limit: {}",
-                seller.getId(), startDate, endDate, limit);
-
-        // Tìm shop của seller
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) {
-            throw new RuntimeException("Bạn chưa có shop nào");
-        }
-        Shop shop = shops.get(0); // Lấy shop đầu tiên
-
-        // Lấy danh sách sản phẩm bán chạy
-        List<Object[]> results = orderItemRepository.findTopSellingProductsByShopAndDateRange(shop, startDate, endDate);
-
-        // Lấy hoa hồng platform để tính seller revenue
-        BigDecimal commissionRate = new BigDecimal("12.00"); // 12%
-
-        List<ProductSalesStatisticsDTO> statistics = new java.util.ArrayList<>();
-
-        int count = 0;
-        for (Object[] row : results) {
-            if (count >= limit) break;
-
-            Integer productId = (Integer) row[0];
-            String productName = (String) row[1];
-            String imageUrls = (String) row[2];
-            Long totalQuantity = ((Number) row[3]).longValue();
-            Long totalOrders = ((Number) row[4]).longValue();
-            BigDecimal totalRevenue = (BigDecimal) row[5];
-
-            // Tính seller revenue (sau khi trừ hoa hồng)
-            BigDecimal sellerRevenue = totalRevenue
-                    .multiply(BigDecimal.ONE.subtract(commissionRate.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)))
-                    .setScale(2, RoundingMode.HALF_UP);
-
-            // Lấy ảnh đầu tiên
-            String firstImage = "";
-            if (imageUrls != null && !imageUrls.trim().isEmpty()) {
-                String[] images = imageUrls.split(",");
-                if (images.length > 0) {
-                    firstImage = images[0].trim();
-                }
-            }
-
-            ProductSalesStatisticsDTO dto = new ProductSalesStatisticsDTO(
-                    productId, productName, firstImage, totalQuantity, totalOrders, totalRevenue, sellerRevenue);
-            statistics.add(dto);
-            count++;
-        }
-
-        log.info("Top selling products: {} products", statistics.size());
-        return statistics;
     }
 }

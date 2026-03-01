@@ -10,6 +10,7 @@ import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -50,4 +51,27 @@ public interface ProductService {
 
     //Lấy toàn bộ product kể cả active và không active
     List<ProductResponseDTO> getAllProducts();
+
+    /**
+     * Validate quyền sở hữu shop: user phải là chủ shop hoặc ADMIN.
+     * Ném RuntimeException nếu không có quyền.
+     */
+    void validateShopOwnership(Integer shopId, User user);
+
+    /**
+     * Kiểm tra sản phẩm có thuộc shop không.
+     * Ném RuntimeException nếu không thuộc.
+     */
+    void validateProductBelongsToShop(Integer productId, Integer shopId);
+
+    /**
+     * Tạo product từ JSON string + upload ảnh.
+     * Controller chỉ cần truyền raw dataJson và files.
+     */
+    ProductResponseDTO createProductWithImages(Integer shopId, String dataJson, MultipartFile[] images, User user);
+
+    /**
+     * Cập nhật product từ JSON string + upload ảnh mới.
+     */
+    ProductResponseDTO updateProductWithImages(Integer shopId, Integer productId, String dataJson, MultipartFile[] images, User user);
 }

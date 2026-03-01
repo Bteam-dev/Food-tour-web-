@@ -11,8 +11,10 @@ import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.UserService;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -20,16 +22,22 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final FileStorageService fileStorageService;
 
-    public UserServiceImpl(UserRepository userRepository, RoleRepository roleRepository, PasswordEncoder passwordEncoder) {
+    public UserServiceImpl(UserRepository userRepository,
+                           RoleRepository roleRepository,
+                           PasswordEncoder passwordEncoder,
+                           FileStorageService fileStorageService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
+        this.fileStorageService = fileStorageService;
     }
 
     //  PHẦN DÀNH CHO USER
@@ -77,6 +85,22 @@ public class UserServiceImpl implements UserService {
         user.setUpdatedAt(LocalDateTime.now());
         user = userRepository.save(user);
         return mapToUserResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public UserResponse updateProfileWithAvatar(Integer userId, UpdateProfileRequest request, MultipartFile avatar) {
+        if (avatar != null && !avatar.isEmpty()) {
+            try {
+                String subfolderId = "user_" + userId;
+                String avatarUrl = fileStorageService.storeFile(avatar, FileStorageService.FileCategory.USER_AVATAR, subfolderId);
+                request.setAvatarUrl(avatarUrl);
+                log.info("Avatar uploaded for user {}: {}", userId, avatarUrl);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload avatar: " + e.getMessage(), e);
+            }
+        }
+        return updateProfile(userId, request);
     }
 
     @Override
@@ -211,6 +235,16 @@ public class UserServiceImpl implements UserService {
         return userRepository.findByEmail(email).isPresent();
     }
 
+    @Override
+    @Transactional
+    public void registerFcmToken(Integer userId, String fcmToken) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        user.setFcmToken(fcmToken);
+        user.setUpdatedAt(LocalDateTime.now());
+        userRepository.save(user);
+    }
+
     private UserResponse mapToUserResponse(User user) {
         UserResponse response = new UserResponse();
         response.setId(user.getId());
@@ -228,4 +262,3 @@ public class UserServiceImpl implements UserService {
         return response;
     }
 }
-

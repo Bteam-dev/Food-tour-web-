@@ -497,6 +497,23 @@ public class ReviewServiceImpl implements ReviewService {
         log.info("Reply ID {} deleted successfully", replyId);
     }
 
+    @Override
+    @Transactional
+    public ReviewResponse createShopReview(Integer shopId, CreateReviewRequest request, MultipartFile[] images, User user) {
+        request.setReviewableType("shop");
+        request.setReviewableId(shopId);
+        return createReview(request, images, user);
+    }
+
+    @Override
+    @Transactional
+    public ReviewResponse createProductReview(Integer productId, Integer orderId, CreateReviewRequest request, MultipartFile[] images, User user) {
+        request.setReviewableType("product");
+        request.setReviewableId(productId);
+        request.setOrderId(orderId);
+        return createReview(request, images, user);
+    }
+
     // ==================== HELPER METHODS ====================
 
     private void validateReviewable(Review.ReviewableType type, Integer id) {

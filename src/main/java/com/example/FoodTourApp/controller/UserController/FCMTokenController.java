@@ -1,14 +1,13 @@
 package com.example.FoodTourApp.controller.UserController;
 
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.UserRepository;
+import com.example.FoodTourApp.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.Map;
 
 @RestController
@@ -17,7 +16,7 @@ import java.util.Map;
 @Slf4j
 public class FCMTokenController {
 
-    private final UserRepository userRepository;
+    private final UserService userService;
 
     /**
      * Đăng ký / cập nhật FCM token cho thiết bị hiện tại.
@@ -46,11 +45,7 @@ public class FCMTokenController {
             ));
         }
 
-        User dbUser = userRepository.findById(user.getId())
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        dbUser.setFcmToken(token);
-        dbUser.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(dbUser);
+        userService.registerFcmToken(user.getId(), token);
 
         log.info("FCM token registered/updated for user {}", user.getId());
         return ResponseEntity.ok(Map.of(

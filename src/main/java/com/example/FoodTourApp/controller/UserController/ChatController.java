@@ -3,7 +3,6 @@ package com.example.FoodTourApp.controller.UserController;
 import com.example.FoodTourApp.DTO.ChatDTO.*;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.ChatService;
-import com.example.FoodTourApp.service.impl.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -12,7 +11,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +23,6 @@ import java.util.Map;
 public class ChatController {
 
     private final ChatService chatService;
-    private final FileStorageService fileStorageService;
 
     // ─── Conversations ────────────────────────────────────────────────────────
 
@@ -193,22 +190,9 @@ public class ChatController {
         log.info("User {} uploading file for conversation {}: {} ({})",
                 user.getId(), conversationId, file.getOriginalFilename(), file.getContentType());
         try {
-            // Lưu vào FileMessage/user_{userId}\conversation_{conversationId}\
-            String fileUrl = fileStorageService.storeChatFile(file, user.getId(), conversationId);
-
-            String contentType = file.getContentType();
-            String messageType = FileStorageService.detectMessageType(contentType);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("fileUrl", fileUrl);
-            result.put("fileName", file.getOriginalFilename());
-            result.put("mimeType", contentType);
-            result.put("fileSize", file.getSize());
-            result.put("messageType", messageType);
+            Map<String, Object> result = chatService.uploadChatFileWithMeta(file, user.getId(), conversationId);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Error uploading chat file: {}", e.getMessage(), e);
             return error(e);
         }
     }

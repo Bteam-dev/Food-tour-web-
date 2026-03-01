@@ -42,4 +42,16 @@ public interface ReviewService {
 
     // Xóa reply của mình
     void deleteReply(Integer replyId, User user);
+
+    /**
+     * Tạo review cho shop từ path variable shopId.
+     * Controller không cần set reviewableType/reviewableId.
+     */
+    ReviewResponse createShopReview(Integer shopId, CreateReviewRequest request, MultipartFile[] images, User user);
+
+    /**
+     * Tạo review cho product từ path variable productId + orderId.
+     * Controller không cần set reviewableType/reviewableId/orderId.
+     */
+    ReviewResponse createProductReview(Integer productId, Integer orderId, CreateReviewRequest request, MultipartFile[] images, User user);
 }

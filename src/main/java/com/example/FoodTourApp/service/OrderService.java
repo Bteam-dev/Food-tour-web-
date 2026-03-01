@@ -67,6 +67,17 @@ public interface OrderService {
             Pageable pageable);
 
     /**
+     * Lọc đơn hàng theo trạng thái (string) và thời gian - tự parse OrderStatus.
+     * Controller chỉ cần truyền string status, không cần tự parse enum.
+     */
+    Page<OrderResponseDTO> getShopOrdersWithFilterByStatusString(
+            User seller,
+            String status,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            Pageable pageable);
+
+    /**
      * Thống kê doanh thu theo ngày/tháng/năm
      */
     List<RevenueStatisticsDTO> getRevenueStatistics(
@@ -91,5 +102,9 @@ public interface OrderService {
             User seller,
             LocalDateTime startDate,
             LocalDateTime endDate);
-}
 
+    /**
+     * Lấy danh sách đơn hàng có yêu cầu hoàn tiền (hasRefundRequest = true)
+     */
+    Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Pageable pageable);
+}

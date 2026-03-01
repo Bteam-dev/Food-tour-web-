@@ -1,12 +1,8 @@
 package com.example.FoodTourApp.controller.SellerController;
 
-import com.example.FoodTourApp.DTO.ShopDTO.CreateShopRequestDTO;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
-import com.example.FoodTourApp.DTO.ShopDTO.UpdateShopRequestDTO;
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.example.FoodTourApp.service.ShopService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -30,8 +26,6 @@ import java.util.List;
 public class SellerShopController {
 
     private final ShopService shopService;
-    private final FileStorageService fileStorageService;
-    private final ObjectMapper objectMapper;
 
     /**
      * Tạo cửa hàng mới (upload ảnh logo và banner dưới dạng form-data)
@@ -53,48 +47,9 @@ public class SellerShopController {
             @AuthenticationPrincipal User seller) {
 
         log.info("Creating shop by seller: {}", seller.getId());
-
         try {
-            // Parse request từ JSON string
-            if (dataJson == null || dataJson.isEmpty()) {
-                throw new RuntimeException("Thiếu dữ liệu shop");
-            }
-
-            CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
-
-            // ✅ TẠO SHOP TRƯỚC để có shopId
-            ShopResponseDTO tempShop = shopService.createShop(request, seller);
-            Integer shopId = tempShop.getId();
-
-            // ✅ Upload logo vào thư mục: ShopLogo/shop_{shopId}/
-            if (logo != null && !logo.isEmpty()) {
-                String subfolderId = "shop_" + shopId;
-                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
-
-                // Cập nhật logo cho shop
-                UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
-                updateRequest.setLogoUrl(logoUrl);
-                tempShop = shopService.updateShop(shopId, updateRequest, seller);
-
-                log.info("Logo uploaded to ShopLogo/{}/", subfolderId);
-            }
-
-            // ✅ Upload banner vào thư mục: ShopBanner/shop_{shopId}/
-            if (banner != null && !banner.isEmpty()) {
-                String subfolderId = "shop_" + shopId;
-                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
-
-                // Cập nhật banner cho shop
-                UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
-                updateRequest.setBannerUrl(bannerUrl);
-                tempShop = shopService.updateShop(shopId, updateRequest, seller);
-
-                log.info("Banner uploaded to ShopBanner/{}/", subfolderId);
-            }
-
-            ShopResponseDTO response = tempShop;
+            ShopResponseDTO response = shopService.createShopFromJson(dataJson, seller, logo, banner);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
-
         } catch (Exception e) {
             log.error("Error creating shop: {}", e.getMessage(), e);
             throw new RuntimeException("Không thể tạo cửa hàng: " + e.getMessage());
@@ -120,36 +75,9 @@ public class SellerShopController {
             @AuthenticationPrincipal User seller) {
 
         log.info("Updating shop: {} by seller: {}", shopId, seller.getId());
-
         try {
-            // Parse request từ JSON string
-            if (dataJson == null || dataJson.isEmpty()) {
-                throw new RuntimeException("Thiếu dữ liệu cập nhật");
-            }
-
-            UpdateShopRequestDTO request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
-
-            // Tạo subfolder ID dựa trên shop ID - để phân biệt từng shop
-            String subfolderId = "shop_" + shopId;
-
-            // Upload logo mới nếu có - lưu vào thư mục ShopLogo/shop_X/
-            if (logo != null && !logo.isEmpty()) {
-                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
-                request.setLogoUrl(logoUrl);
-                log.info("Logo uploaded: {}", logoUrl);
-            }
-
-            // Upload banner mới nếu có - lưu vào thư mục ShopBanner/shop_X/
-            if (banner != null && !banner.isEmpty()) {
-                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
-                request.setBannerUrl(bannerUrl);
-                log.info("Banner uploaded: {}", bannerUrl);
-            }
-
-            // Lưu cập nhật vào database
-            ShopResponseDTO response = shopService.updateShop(shopId, request, seller);
+            ShopResponseDTO response = shopService.updateShopFromJson(shopId, dataJson, seller, logo, banner);
             return ResponseEntity.ok(response);
-
         } catch (Exception e) {
             log.error("Error updating shop: {}", e.getMessage(), e);
             throw new RuntimeException("Không thể cập nhật cửa hàng: " + e.getMessage());

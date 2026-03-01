@@ -60,6 +60,12 @@ public interface ChatService {
     String uploadChatFile(MultipartFile file) throws Exception;
 
     /**
+     * Upload file chat với userId và conversationId để lưu đúng thư mục.
+     * Trả về Map chứa fileUrl, fileName, mimeType, fileSize, messageType.
+     */
+    java.util.Map<String, Object> uploadChatFileWithMeta(MultipartFile file, Integer userId, Long conversationId);
+
+    /**
      * Xóa conversation (soft delete hoặc hard delete)
      */
     void deleteConversation(Long conversationId, Integer userId);

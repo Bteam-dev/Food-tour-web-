@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalRequest;
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.SellerApprovalService;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -22,35 +23,20 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/user/seller-approval")
 @PreAuthorize("hasAnyRole('USER','SELLER','ADMIN')")
+@RequiredArgsConstructor
 public class UserSellerApprovalController {
 
     private static final Logger logger = LoggerFactory.getLogger(UserSellerApprovalController.class);
     private final SellerApprovalService sellerApprovalService;
-
-    public UserSellerApprovalController(SellerApprovalService sellerApprovalService) {
-        this.sellerApprovalService = sellerApprovalService;
-    }
 
     @PostMapping("/submit")
     public ResponseEntity<?> submitApproval(@Valid @RequestBody SellerApprovalRequest request,
                                             Authentication authentication) {
         User user = (User) authentication.getPrincipal();
         Integer userId = user.getId();
-        logger.info("User ID {} is submitting seller approval request, authorities: {}", userId, authentication.getAuthorities());
+        logger.info("User ID {} is submitting seller approval request", userId);
 
         try {
-            // Kiểm tra nếu user đã là seller rồi
-            boolean isSeller = authentication.getAuthorities().stream()
-                    .anyMatch(auth -> auth.getAuthority().equals("SELLER"));
-
-            if (isSeller) {
-                logger.error("User ID {} is already a seller", userId);
-                Map<String, Object> error = new HashMap<>();
-                error.put("success", false);
-                error.put("message", "User is already a seller");
-                return ResponseEntity.badRequest().body(error);
-            }
-
             SellerApprovalResponse response = sellerApprovalService.submitApproval(userId, request);
             logger.info("Seller approval request submitted successfully by user ID {}", userId);
 
@@ -58,7 +44,6 @@ public class UserSellerApprovalController {
             result.put("success", true);
             result.put("message", "Seller approval request submitted successfully");
             result.put("data", response);
-
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
             logger.error("Failed to submit seller approval for user ID {}: {}", userId, e.getMessage());
@@ -103,7 +88,6 @@ public class UserSellerApprovalController {
             result.put("currentPage", approvals.getNumber());
             result.put("totalItems", approvals.getTotalElements());
             result.put("totalPages", approvals.getTotalPages());
-
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error fetching approvals for user ID {}: {}", userId, e.getMessage(), e);
@@ -121,13 +105,11 @@ public class UserSellerApprovalController {
         logger.info("User ID {} is fetching approval request with id {}", userId, id);
 
         try {
-            // Kiểm tra quyền sở hữu được xử lý trong service layer
             SellerApprovalResponse response = sellerApprovalService.getApprovalById(id, userId);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", response);
-
             return ResponseEntity.ok(result);
         } catch (SecurityException e) {
             logger.error("Permission denied for user ID {} to view approval {}: {}", userId, id, e.getMessage());

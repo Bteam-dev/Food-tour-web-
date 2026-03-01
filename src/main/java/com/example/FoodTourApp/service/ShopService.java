@@ -6,6 +6,7 @@ import com.example.FoodTourApp.DTO.ShopDTO.UpdateShopRequestDTO;
 import com.example.FoodTourApp.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -56,4 +57,28 @@ public interface ShopService {
      * @param seller User seller
      */
     void deleteShop(Integer shopId, User seller);
+
+    /**
+     * Tạo shop + upload logo/banner trong một lần gọi duy nhất.
+     * Controller không cần biết về FileStorageService.
+     */
+    ShopResponseDTO createShopWithImages(CreateShopRequestDTO request, User seller,
+                                         MultipartFile logo, MultipartFile banner);
+
+    /**
+     * Cập nhật shop + upload logo/banner mới nếu có.
+     */
+    ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
+                                         MultipartFile logo, MultipartFile banner);
+
+    /**
+     * Tạo shop từ JSON string + upload logo/banner.
+     * Controller chỉ truyền raw dataJson và files.
+     */
+    ShopResponseDTO createShopFromJson(String dataJson, User seller, MultipartFile logo, MultipartFile banner);
+
+    /**
+     * Cập nhật shop từ JSON string + upload logo/banner mới.
+     */
+    ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller, MultipartFile logo, MultipartFile banner);
 }

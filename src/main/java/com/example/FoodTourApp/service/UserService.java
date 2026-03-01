@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.UserDTO.CreateUserRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UpdateProfileRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UpdateUserByAdminRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -26,4 +27,11 @@ public interface UserService {
     // User - Đổi từ email sang userId
     UserResponse updateProfile(Integer userId, UpdateProfileRequest request);
     UserResponse getMyProfile(Integer userId);
+    void registerFcmToken(Integer userId, String fcmToken);
+
+    /**
+     * Cập nhật profile + upload avatar nếu có.
+     * Controller không cần biết về FileStorageService.
+     */
+    UserResponse updateProfileWithAvatar(Integer userId, UpdateProfileRequest request, MultipartFile avatar);
 }

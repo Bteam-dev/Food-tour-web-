@@ -4,7 +4,6 @@ import com.example.FoodTourApp.DTO.UserDTO.UpdateProfileRequest;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.UserService;
-import com.example.FoodTourApp.service.impl.FileStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,7 +13,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.validation.Valid;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -26,7 +24,6 @@ import java.util.Map;
 public class UserProfileController {
 
     private final UserService userService;
-    private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -46,10 +43,7 @@ public class UserProfileController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Error retrieving profile for user ID {}: {}", user.getId(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
         }
     }
 
@@ -78,15 +72,7 @@ public class UserProfileController {
                 request = new UpdateProfileRequest();
             }
 
-            // Upload avatar nếu có - lưu vào UserAvatar/user_X/
-            if (avatar != null && !avatar.isEmpty()) {
-                String subfolderId = "user_" + user.getId();
-                String avatarUrl = fileStorageService.storeFile(avatar, FileStorageService.FileCategory.USER_AVATAR, subfolderId);
-                request.setAvatarUrl(avatarUrl);
-                log.info("Avatar uploaded for user {}: {}", user.getId(), avatarUrl);
-            }
-
-            UserResponse response = userService.updateProfile(user.getId(), request);
+            UserResponse response = userService.updateProfileWithAvatar(user.getId(), request, avatar);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -95,10 +81,7 @@ public class UserProfileController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Error updating profile for user ID {}: {}", user.getId(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
         }
     }
 }

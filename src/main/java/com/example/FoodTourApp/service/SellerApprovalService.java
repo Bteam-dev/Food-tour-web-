@@ -7,6 +7,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface SellerApprovalService {
+    /**
+     * Nộp đơn xin trở thành seller.
+     * Ném IllegalStateException nếu user đã là SELLER rồi.
+     */
     SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request);
     SellerApprovalResponse reviewApproval(Integer adminId, ReviewApprovalRequest request);
     Page<SellerApprovalResponse> getAllPendingApprovals(Pageable pageable);

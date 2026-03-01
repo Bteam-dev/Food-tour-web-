@@ -10,12 +10,14 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.ProductService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -34,6 +36,8 @@ public class ProductServiceImpl implements ProductService {
     private final VariantTypeRepository variantTypeRepository;
     private final CartItemRepository cartItemRepository;
     private final WishlistRepository wishlistRepository;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -413,6 +417,25 @@ public class ProductServiceImpl implements ProductService {
         return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
     }
 
+    @Override
+    public void validateShopOwnership(Integer shopId, User user) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Shop không tồn tại"));
+        boolean isAdmin = user.getRole() != null &&
+                user.getRole().getRoleName() == Role.RoleName.ADMIN;
+        if (!isAdmin && !shop.getSeller().getId().equals(user.getId())) {
+            throw new RuntimeException("Bạn không có quyền truy cập shop này");
+        }
+    }
+
+    @Override
+    public void validateProductBelongsToShop(Integer productId, Integer shopId) {
+        ProductResponseDTO product = getProductById(productId);
+        if (!product.getShopId().equals(shopId)) {
+            throw new RuntimeException("Sản phẩm không thuộc shop này");
+        }
+    }
+
     private ProductResponseDTO mapToProductResponseDTO(Product product) {
         ProductResponseDTO dto = new ProductResponseDTO();
         dto.setId(product.getId());
@@ -472,5 +495,65 @@ public class ProductServiceImpl implements ProductService {
         dto.setPriceAdjustment(variant.getPriceAdjustment());
         dto.setIsActive(variant.getIsActive());
         return dto;
+    }
+
+    @Override
+    @Transactional
+    public ProductResponseDTO createProductWithImages(Integer shopId, String dataJson, MultipartFile[] images, User user) {
+        if (dataJson == null || dataJson.isEmpty()) {
+            throw new RuntimeException("Thiếu dữ liệu sản phẩm");
+        }
+        validateShopOwnership(shopId, user);
+
+        CreateProductRequestDTO request;
+        try {
+            request = objectMapper.readValue(dataJson, CreateProductRequestDTO.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Dữ liệu sản phẩm không hợp lệ: " + e.getMessage(), e);
+        }
+        request.setShopId(shopId);
+
+        if (images != null && images.length > 0) {
+            try {
+                String subfolderId = "shop_" + shopId;
+                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
+                request.setImageUrls(imageUrls);
+                log.info("Uploaded {} images to ProductImage/{}/", imageUrls.size(), subfolderId);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
+            }
+        }
+
+        return createProduct(request, user);
+    }
+
+    @Override
+    @Transactional
+    public ProductResponseDTO updateProductWithImages(Integer shopId, Integer productId, String dataJson, MultipartFile[] images, User user) {
+        if (dataJson == null || dataJson.isEmpty()) {
+            throw new RuntimeException("Thiếu dữ liệu cập nhật");
+        }
+        validateShopOwnership(shopId, user);
+        validateProductBelongsToShop(productId, shopId);
+
+        UpdateProductRequestDTO request;
+        try {
+            request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
+        }
+
+        if (images != null && images.length > 0) {
+            try {
+                String subfolderId = "shop_" + shopId + "/product_" + productId;
+                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
+                request.setImageUrls(imageUrls);
+                log.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), productId, subfolderId);
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
+            }
+        }
+
+        return updateProduct(productId, request, user);
     }
 }

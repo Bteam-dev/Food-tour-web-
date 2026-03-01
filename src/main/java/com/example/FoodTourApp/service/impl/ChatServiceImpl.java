@@ -277,6 +277,26 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
+    public java.util.Map<String, Object> uploadChatFileWithMeta(MultipartFile file, Integer userId, Long conversationId) {
+        try {
+            String fileUrl = fileStorageService.storeChatFile(file, userId, conversationId);
+            String contentType = file.getContentType();
+            String messageType = FileStorageService.detectMessageType(contentType);
+
+            java.util.Map<String, Object> result = new java.util.HashMap<>();
+            result.put("success", true);
+            result.put("fileUrl", fileUrl);
+            result.put("fileName", file.getOriginalFilename());
+            result.put("mimeType", contentType);
+            result.put("fileSize", file.getSize());
+            result.put("messageType", messageType);
+            return result;
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Không thể upload file: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     @Transactional
     public void deleteConversation(Long conversationId, Integer userId) {
         Conversation conversation = conversationRepository.findById(conversationId)

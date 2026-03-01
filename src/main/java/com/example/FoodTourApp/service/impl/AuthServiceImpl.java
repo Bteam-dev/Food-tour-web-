@@ -12,11 +12,18 @@ import com.example.FoodTourApp.repository.PasswordResetOtpRepository;
 import com.example.FoodTourApp.repository.RoleRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.AuthService;
+import com.example.FoodTourApp.service.UserService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +32,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -37,19 +50,26 @@ public class AuthServiceImpl implements AuthService {
     private final JwtUtils jwtUtil;
     private final JavaMailSender mailSender;
     private final PasswordResetOtpRepository otpRepository;
+    private final AuthenticationManager authenticationManager;
+    private final TokenBlacklistService tokenBlacklistService;
+    private final UserService userService;
 
     @Value("${app.base-url}")
     private String appBaseUrl;
 
     public AuthServiceImpl(UserRepository userRepository, RoleRepository roleRepository,
                            PasswordEncoder passwordEncoder, JwtUtils jwtUtil, JavaMailSender mailSender,
-                           PasswordResetOtpRepository otpRepository) {
+                           PasswordResetOtpRepository otpRepository, AuthenticationManager authenticationManager,
+                           TokenBlacklistService tokenBlacklistService, UserService userService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.mailSender = mailSender;
         this.otpRepository = otpRepository;
+        this.authenticationManager = authenticationManager;
+        this.tokenBlacklistService = tokenBlacklistService;
+        this.userService = userService;
     }
 
     @Override
@@ -110,39 +130,109 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthResponse login(LoginRequest request) {
-        User user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid username or password"));
+    public Map<String, Object> login(LoginRequest request) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new IllegalArgumentException("Invalid username or password");
+        UserResponse userResponse = userService.getUserByUsername(request.getUsername());
+
+        // Kiểm tra 2FA
+        if (userService.is2FAEnabled(userResponse.getEmail())) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("requires2FA", true);
+            response.put("username", request.getUsername());
+            response.put("email", userResponse.getEmail());
+            response.put("message", "Vui lòng nhập mã xác thực 2FA");
+            return response;
         }
 
-         if (!user.getEmailVerified()) {
-             throw new IllegalArgumentException("Email not verified. Please verify your email before logging in.");
-         }
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        List<String> roles = userDetails.getAuthorities().stream()
+                .map(a -> a.getAuthority()).collect(Collectors.toList());
 
-        user.setLastLogin(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(user);
+        String accessToken = jwtUtil.generateAccessToken(userResponse.getId(), userResponse.getEmail(), roles);
+        String refreshToken = jwtUtil.generateRefreshToken(userResponse.getId(), roles);
 
-        UserResponse userResponse = mapToUserResponse(user);
-        // Dùng userId thay vì email khi tạo token
-        String accessToken = jwtUtil.generateAccessToken(
-            user.getId(),
-            user.getEmail(),
-            java.util.List.of(user.getRole().getRoleName().toString())
-        );
-        String refreshToken = jwtUtil.generateRefreshToken(
-            user.getId(),
-            java.util.List.of(user.getRole().getRoleName().toString())  // ✅ Thêm roles
-        );
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Login successful");
+        response.put("user", userResponse);
+        response.put("accessToken", accessToken);
+        response.put("refreshToken", refreshToken);
+        response.put("tokenType", "Bearer");
 
-        AuthResponse response = new AuthResponse();
-        response.setSuccess(true);
-        response.setUser(userResponse);
-        response.setAccessToken(accessToken);
-        response.setRefreshToken(refreshToken);
+        logger.info("Login successful for username: {}", request.getUsername());
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> verify2FA(String email, String code, String password) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(email, password));
+
+        if (!userService.verify2FA(email, code)) {
+            throw new IllegalArgumentException("Mã 2FA không hợp lệ");
+        }
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+        List<String> roles = userDetails.getAuthorities().stream()
+                .map(a -> a.getAuthority()).collect(Collectors.toList());
+
+        UserResponse userResponse = userService.getUserByEmail(email);
+        String accessToken = jwtUtil.generateAccessToken(userResponse.getId(), email, roles);
+        String refreshToken = jwtUtil.generateRefreshToken(userResponse.getId(), roles);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "2FA verification successful");
+        response.put("user", userResponse);
+        response.put("accessToken", accessToken);
+        response.put("refreshToken", refreshToken);
+        response.put("tokenType", "Bearer");
+
+        logger.info("2FA verification successful for email: {}", email);
+        return response;
+    }
+
+    @Override
+    public Map<String, Object> logout(HttpServletRequest request, String refreshToken) {
+        String accessToken = jwtUtil.getJwtFromHeader(request);
+        if (accessToken == null) {
+            accessToken = jwtUtil.getJwtFromCookies(request);
+        }
+
+        boolean accessBlacklisted = false;
+        boolean refreshBlacklisted = false;
+
+        if (accessToken != null && jwtUtil.validateToken(accessToken)) {
+            Integer userId = jwtUtil.getUserIdFromToken(accessToken);
+            Date exp = jwtUtil.getExpirationDateFromToken(accessToken);
+            LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+            tokenBlacklistService.blacklistToken(accessToken, "user_" + userId, expiresAt);
+            accessBlacklisted = true;
+            logger.info("Access token blacklisted for userId: {}", userId);
+        }
+
+        if (refreshToken != null && jwtUtil.validateToken(refreshToken)) {
+            Integer userId = jwtUtil.getUserIdFromToken(refreshToken);
+            Date exp = jwtUtil.getExpirationDateFromToken(refreshToken);
+            LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+            tokenBlacklistService.blacklistToken(refreshToken, "user_" + userId + "_refresh", expiresAt);
+            refreshBlacklisted = true;
+            logger.info("Refresh token blacklisted for userId: {}", userId);
+        }
+
+        if (!accessBlacklisted && !refreshBlacklisted) {
+            throw new IllegalArgumentException("No valid token found");
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Logout successful. Tokens have been invalidated.");
+        response.put("accessTokenBlacklisted", accessBlacklisted);
+        response.put("refreshTokenBlacklisted", refreshBlacklisted);
         return response;
     }
 
@@ -305,13 +395,6 @@ public class AuthServiceImpl implements AuthService {
         return response;
     }
 
-    @Override
-    @Transactional
-    public void logout(String token) {
-        // Logout đơn giản - không cần blacklist token
-        // Client sẽ xóa token ở phía frontend
-        logger.info("User logged out successfully");
-    }
 
     private void sendVerificationEmail(String email, String verifyLink) throws MessagingException {
         MimeMessage message = mailSender.createMimeMessage();

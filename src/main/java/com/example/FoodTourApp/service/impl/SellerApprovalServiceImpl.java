@@ -39,6 +39,11 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
+        // Kiểm tra nếu user đã là SELLER rồi
+        if (user.getRole() != null && user.getRole().getRoleName() == Role.RoleName.SELLER) {
+            throw new IllegalArgumentException("User is already a seller");
+        }
+
         // Kiểm tra nếu đã có đơn PENDING
         if (sellerApprovalRepository.existsByUserAndStatus(user, SellerApproval.ApprovalStatus.PENDING)) {
             throw new IllegalArgumentException("You already have a pending approval request");
