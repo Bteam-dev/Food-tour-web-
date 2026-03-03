@@ -556,4 +556,14 @@ public class ProductServiceImpl implements ProductService {
 
         return updateProduct(productId, request, user);
     }
+
+    @Override
+    public Page<ProductResponseDTO> getProductsByNameContaining(String keyword, Pageable pageable) {
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return productRepository.findAllActive(pageable).map(this::mapToProductResponseDTO);
+        }
+
+        Page<Product> products = productRepository.findByNameContainingIgnoreCase(keyword, pageable);
+        return products.map(this::mapToProductResponseDTO);
+    }
 }

@@ -52,26 +52,23 @@ public interface ProductService {
     //Lấy toàn bộ product kể cả active và không active
     List<ProductResponseDTO> getAllProducts();
 
-    /**
-     * Validate quyền sở hữu shop: user phải là chủ shop hoặc ADMIN.
-     * Ném RuntimeException nếu không có quyền.
-     */
+
+    //Validate quyền sở hữu shop: user phải là chủ shop hoặc ADMIN.
+    //Ném RuntimeException nếu không có quyền.
     void validateShopOwnership(Integer shopId, User user);
 
-    /**
-     * Kiểm tra sản phẩm có thuộc shop không.
-     * Ném RuntimeException nếu không thuộc.
-     */
+
+    //Kiểm tra sản phẩm có thuộc shop không.
+    // Ném RuntimeException nếu không thuộc.
     void validateProductBelongsToShop(Integer productId, Integer shopId);
 
-    /**
-     * Tạo product từ JSON string + upload ảnh.
-     * Controller chỉ cần truyền raw dataJson và files.
-     */
+    //Tạo product từ JSON string + upload ảnh.
+    //Controller chỉ cần truyền raw dataJson và files.
     ProductResponseDTO createProductWithImages(Integer shopId, String dataJson, MultipartFile[] images, User user);
 
-    /**
-     * Cập nhật product từ JSON string + upload ảnh mới.
-     */
+    // Cập nhật product từ JSON string + upload ảnh mới.
     ProductResponseDTO updateProductWithImages(Integer shopId, Integer productId, String dataJson, MultipartFile[] images, User user);
+
+    //Tìm sản phẩm theo tên (LIKE %keyword%)
+    Page<ProductResponseDTO> getProductsByNameContaining(String keyword, Pageable pageable);
 }

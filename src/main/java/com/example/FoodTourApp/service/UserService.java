@@ -29,9 +29,5 @@ public interface UserService {
     UserResponse getMyProfile(Integer userId);
     void registerFcmToken(Integer userId, String fcmToken);
 
-    /**
-     * Cập nhật profile + upload avatar nếu có.
-     * Controller không cần biết về FileStorageService.
-     */
     UserResponse updateProfileWithAvatar(Integer userId, UpdateProfileRequest request, MultipartFile avatar);
 }

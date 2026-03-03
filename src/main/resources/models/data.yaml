@@ -1,0 +1,16 @@
+names:
+- Banh-Mi
+- Bot Chien
+- Bun
+- Goi-Cuon
+- Pho
+nc: 5
+roboflow:
+  license: CC BY 4.0
+  project: vietnamese-food
+  url: https://universe.roboflow.com/nhh/vietnamese-food/dataset/1
+  version: 1
+  workspace: nhh
+test: ../test/images
+train: ../train/images
+val: ../valid/images

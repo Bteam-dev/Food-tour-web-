@@ -2,6 +2,7 @@ package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
+import com.example.FoodTourApp.service.FoodDetectionService;
 import com.example.FoodTourApp.service.ProductService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,8 +12,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -21,9 +25,11 @@ public class PublicProductController {
 
     private static final Logger logger = LoggerFactory.getLogger(PublicProductController.class);
     private final ProductService productService;
+    private final FoodDetectionService foodDetectionService;
 
-    public PublicProductController(ProductService productService) {
+    public PublicProductController(ProductService productService, FoodDetectionService foodDetectionService) {
         this.productService = productService;
+        this.foodDetectionService = foodDetectionService;
     }
 
     @GetMapping
@@ -132,6 +138,43 @@ public class PublicProductController {
             error.put("success", false);
             error.put("message", "Failed to fetch products");
             return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @PostMapping("/detect-and-search")
+    public ResponseEntity<?> detectAndSearch(@RequestParam("image") MultipartFile image) {
+        logger.info("Nhận request detect món ăn từ ảnh");
+
+        Map<String, Object> response = new HashMap<>();
+
+        try {
+            // Gọi service để detect (toàn bộ logic detect ở đây)
+            List<String> detectedFoods = foodDetectionService.detectFoodNames(image);
+
+            if (detectedFoods.isEmpty()) {
+                response.put("success", false);
+                response.put("message", "Không nhận diện được món ăn từ ảnh");
+                return ResponseEntity.ok(response);
+            }
+
+            // Gọi service Product để tìm sản phẩm matching (logic query ở ProductService)
+            List<ProductResponseDTO> matchedProducts = new ArrayList<>();
+            for (String food : detectedFoods) {
+                // Pageable mặc định: page 0, size 20
+                Page<ProductResponseDTO> page = productService.getProductsByNameContaining(food, PageRequest.of(0, 20));
+                matchedProducts.addAll(page.getContent());
+            }
+
+            response.put("success", true);
+            response.put("detected", detectedFoods);
+            response.put("products", matchedProducts);
+            logger.info("Detect thành công: {} món ăn, {} sản phẩm matching", detectedFoods.size(), matchedProducts.size());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Lỗi khi xử lý detect-and-search: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Lỗi server: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(response);
         }
     }
 }

@@ -26,4 +26,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     // Tìm product theo category - WITH PAGINATION
     @Query("SELECT p FROM Product p WHERE p.category.id = :categoryId AND p.isAvailable = true")
     Page<Product> findByCategoryId(@Param("categoryId") Integer categoryId, Pageable pageable);
+
+    // Tìm product theo tên (search keyword) - WITH PAGINATION
+    Page<Product> findByNameContainingIgnoreCase(String keyword, Pageable pageable);
 }
