@@ -199,38 +199,55 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public Map<String, Object> logout(HttpServletRequest request, String refreshToken) {
         String accessToken = jwtUtil.getJwtFromHeader(request);
+        logger.info("Logout - Authorization header: {}", request.getHeader("Authorization") != null ? "Present" : "MISSING");
+
         if (accessToken == null) {
             accessToken = jwtUtil.getJwtFromCookies(request);
+            logger.info("Logout - Cookie token: {}", accessToken != null ? "Present" : "MISSING");
         }
+
+        logger.info("Logout - refreshToken from body: {}", refreshToken != null ? "Present" : "MISSING");
 
         boolean accessBlacklisted = false;
         boolean refreshBlacklisted = false;
 
-        if (accessToken != null && jwtUtil.validateToken(accessToken)) {
-            Integer userId = jwtUtil.getUserIdFromToken(accessToken);
-            Date exp = jwtUtil.getExpirationDateFromToken(accessToken);
-            LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
-            tokenBlacklistService.blacklistToken(accessToken, "user_" + userId, expiresAt);
-            accessBlacklisted = true;
-            logger.info("Access token blacklisted for userId: {}", userId);
+        if (accessToken != null) {
+            boolean valid = jwtUtil.validateToken(accessToken);
+            logger.info("Logout - accessToken valid: {}", valid);
+            if (valid) {
+                Integer userId = jwtUtil.getUserIdFromToken(accessToken);
+                Date exp = jwtUtil.getExpirationDateFromToken(accessToken);
+                LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+                tokenBlacklistService.blacklistToken(accessToken, "user_" + userId, expiresAt);
+                accessBlacklisted = true;
+                logger.info("✅ Access token blacklisted for userId: {}", userId);
+            }
+        } else {
+            logger.warn("⚠️ Logout called WITHOUT accessToken in header/cookie - token will NOT be blacklisted!");
         }
 
-        if (refreshToken != null && jwtUtil.validateToken(refreshToken)) {
-            Integer userId = jwtUtil.getUserIdFromToken(refreshToken);
-            Date exp = jwtUtil.getExpirationDateFromToken(refreshToken);
-            LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
-            tokenBlacklistService.blacklistToken(refreshToken, "user_" + userId + "_refresh", expiresAt);
-            refreshBlacklisted = true;
-            logger.info("Refresh token blacklisted for userId: {}", userId);
+        if (refreshToken != null) {
+            boolean valid = jwtUtil.validateToken(refreshToken);
+            logger.info("Logout - refreshToken valid: {}", valid);
+            if (valid) {
+                Integer userId = jwtUtil.getUserIdFromToken(refreshToken);
+                Date exp = jwtUtil.getExpirationDateFromToken(refreshToken);
+                LocalDateTime expiresAt = exp.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+                tokenBlacklistService.blacklistToken(refreshToken, "user_" + userId + "_refresh", expiresAt);
+                refreshBlacklisted = true;
+                logger.info("✅ Refresh token blacklisted for userId: {}", userId);
+            }
         }
 
+        // Không throw exception - logout luôn thành công
+        // Dù không có token nào hợp lệ thì FE vẫn cần clear local storage
         if (!accessBlacklisted && !refreshBlacklisted) {
-            throw new IllegalArgumentException("No valid token found");
+            logger.warn("⚠️ Logout: No token was blacklisted. FE probably didn't send Authorization header.");
         }
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
-        response.put("message", "Logout successful. Tokens have been invalidated.");
+        response.put("message", "Logout successful.");
         response.put("accessTokenBlacklisted", accessBlacklisted);
         response.put("refreshTokenBlacklisted", refreshBlacklisted);
         return response;
