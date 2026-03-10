@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.ChatbotDTO.*;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.ChatbotConversationService;
 import com.example.FoodTourApp.service.ChatbotMessageService;
+import com.example.FoodTourApp.service.impl.ChatbotAIServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,7 @@ public class ChatbotController {
 
     private final ChatbotConversationService conversationService;
     private final ChatbotMessageService messageService;
+    private final ChatbotAIServiceImpl chatbotAIService;
 
     /**
      * Tạo conversation mới
@@ -119,6 +121,8 @@ public class ChatbotController {
 
         try {
             conversationService.deleteConversation(id, user);
+            // Xóa AI memory của conversation này để giải phóng RAM
+            chatbotAIService.removeConversationMemory(id);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Conversation deleted successfully");
@@ -134,18 +138,19 @@ public class ChatbotController {
 
     /**
      * Gửi message mới (user hỏi → bot trả lời)
-     * POST /api/chatbot/messages
+     * POST /api/user/chatbot/{conversationId}/messages
      */
-    @PostMapping("/messages")
+    @PostMapping("/{conversationId}/messages")
     public ResponseEntity<?> sendMessage(
+            @PathVariable Long conversationId,
             @Valid @RequestBody SendChatbotMessageRequest request,
             @AuthenticationPrincipal User user) {
 
         logger.info("User ID {} is sending message to conversation {}: {}",
-                user.getId(), request.getConversationId(), request.getContent());
+                user.getId(), conversationId, request.getContent());
 
         try {
-            ChatbotMessageResponse reply = messageService.sendMessage(user, request);
+            ChatbotMessageResponse reply = messageService.sendMessage(user, conversationId, request);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Message sent and replied successfully");
@@ -153,7 +158,7 @@ public class ChatbotController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error sending message for user ID {} in conversation {}: {}",
-                    user.getId(), request.getConversationId(), e.getMessage(), e);
+                    user.getId(), conversationId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", e.getMessage());
@@ -163,7 +168,7 @@ public class ChatbotController {
 
     /**
      * Lấy lịch sử messages trong 1 conversation
-     * GET /api/chatbot/conversations/{id}/messages
+     * GET /api/user/chatbot/conversations/{id}/messages
      */
     @GetMapping("/conversations/{id}/messages")
     public ResponseEntity<?> getConversationMessages(

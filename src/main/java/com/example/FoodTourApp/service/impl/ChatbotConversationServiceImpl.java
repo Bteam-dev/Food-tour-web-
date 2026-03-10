@@ -6,11 +6,9 @@ import com.example.FoodTourApp.DTO.ChatbotDTO.RenameChatbotConversationRequest;
 import com.example.FoodTourApp.entity.ChatbotConversation;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ChatbotConversationRepository;
+import com.example.FoodTourApp.service.ChatbotAIService;
 import com.example.FoodTourApp.service.ChatbotConversationService;
 import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,9 +18,12 @@ import java.util.stream.Collectors;
 public class ChatbotConversationServiceImpl implements ChatbotConversationService {
 
     private final ChatbotConversationRepository conversationRepo;
+    private final ChatbotAIService chatbotAIService;
 
-    public ChatbotConversationServiceImpl(ChatbotConversationRepository conversationRepo) {
+    public ChatbotConversationServiceImpl(ChatbotConversationRepository conversationRepo,
+                                          ChatbotAIService chatbotAIService) {
         this.conversationRepo = conversationRepo;
+        this.chatbotAIService = chatbotAIService;
     }
 
     @Override
@@ -64,6 +65,7 @@ public class ChatbotConversationServiceImpl implements ChatbotConversationServic
             throw new RuntimeException("Not authorized");
         }
         conversationRepo.delete(conv);
+        chatbotAIService.removeConversationMemory(conversationId); // ✅ giải phóng RAM
     }
 
     private ChatbotConversationResponse mapToResponse(ChatbotConversation conv) {

@@ -34,28 +34,32 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
 
     @Override
     @Transactional
-    public ChatbotMessageResponse sendMessage(User user, SendChatbotMessageRequest request) {
-        ChatbotConversation conv = conversationRepo.findById(request.getConversationId())
+    public ChatbotMessageResponse sendMessage(User user, Long conversationId, SendChatbotMessageRequest request) {
+        ChatbotConversation conv = conversationRepo.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
         if (!conv.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Not authorized");
         }
 
+        String userName = user.getFullName() != null ? user.getFullName() : user.getUsername();
+
         // Lưu tin user
         ChatbotMessage userMsg = new ChatbotMessage();
         userMsg.setConversation(conv);
         userMsg.setSenderType("USER");
+        userMsg.setSenderName(userName);
         userMsg.setContent(request.getContent());
         messageRepo.save(userMsg);
         conv.addMessage(userMsg);
 
-        // Gọi AI (RAG)
-        String botReply = chatbotAIService.generateReply(request.getContent());
+        // Gọi AI (RAG) — truyền conversationId để memory độc lập per conversation
+        String botReply = chatbotAIService.generateReply(conversationId, request.getContent());
 
         // Lưu tin bot
         ChatbotMessage botMsg = new ChatbotMessage();
         botMsg.setConversation(conv);
         botMsg.setSenderType("BOT");
+        botMsg.setSenderName("FoodTour Bot");
         botMsg.setContent(botReply);
         messageRepo.save(botMsg);
         conv.addMessage(botMsg);
@@ -63,6 +67,7 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
         ChatbotMessageResponse response = new ChatbotMessageResponse();
         response.setId(botMsg.getId());
         response.setSenderType("BOT");
+        response.setSenderName("FoodTour Bot");
         response.setContent(botReply);
         response.setCreatedAt(botMsg.getCreatedAt());
         return response;
@@ -81,6 +86,7 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
                     ChatbotMessageResponse response = new ChatbotMessageResponse();
                     response.setId(msg.getId());
                     response.setSenderType(msg.getSenderType());
+                    response.setSenderName(msg.getSenderName());
                     response.setContent(msg.getContent());
                     response.setCreatedAt(msg.getCreatedAt());
                     return response;

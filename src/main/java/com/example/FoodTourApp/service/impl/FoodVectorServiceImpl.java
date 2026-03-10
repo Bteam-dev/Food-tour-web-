@@ -29,7 +29,8 @@ import org.springframework.stereotype.Service;
 import java.io.StringReader;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class FoodVectorServiceImpl implements FoodVectorService {
@@ -39,7 +40,9 @@ public class FoodVectorServiceImpl implements FoodVectorService {
     private EmbeddingModel embeddingModel;
     private ElasticsearchClient esClient;
     private final ProductRepository productRepository;
-    private final AtomicBoolean initialized = new AtomicBoolean(false);
+
+    // Background thread để sync không block startup
+    private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
 
     @Value("${ollama.base-url}")
     private String ollamaBaseUrl;
@@ -62,6 +65,9 @@ public class FoodVectorServiceImpl implements FoodVectorService {
     @Value("${rag.min-score}")
     private double minScore;
 
+    // Khởi tạo 1 lần trong @PostConstruct, tái sử dụng mãi
+    private ContentRetriever contentRetriever;
+
     public FoodVectorServiceImpl(ProductRepository productRepository) {
         this.productRepository = productRepository;
     }
@@ -79,12 +85,40 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
             this.esClient = new ElasticsearchClient(transport);
 
-            // Tạo index nếu chưa có
             ensureIndexExists();
 
-            log.info("FoodVectorService initialized. Models will be synced on first use.");
+            // Khởi tạo ContentRetriever 1 lần duy nhất
+            this.contentRetriever = buildContentRetriever();
+
+            // Chạy background: check ES có data chưa
+            // Nếu ES đã có data (kể cả sau restart) → SKIP, không sync lại
+            // Nếu ES trống (lần đầu setup hoặc xóa ElasticSearch_data) → sync toàn bộ
+            backgroundExecutor.submit(this::checkAndSyncIfNeeded);
+
+            log.info("FoodVectorService initialized.");
         } catch (Exception e) {
             log.error("FoodVectorService init failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Kiểm tra ES có data chưa.
+     * - Có data → skip (dù app restart bao nhiêu lần cũng không sync lại)
+     * - Không có data → sync toàn bộ 1 lần duy nhất (lần đầu setup)
+     *
+     * Source of truth là ES trên disk, không phải AtomicBoolean trong RAM.
+     */
+    private void checkAndSyncIfNeeded() {
+        try {
+            long count = esClient.count(c -> c.index(esIndex)).count();
+            if (count == 0) {
+                log.info("ES index is empty → syncing all products for the first time...");
+                syncAllProducts();
+            } else {
+                log.info("ES already has {} products → skip sync. Event-driven sync handles updates.", count);
+            }
+        } catch (Exception e) {
+            log.error("checkAndSyncIfNeeded failed: {}", e.getMessage());
         }
     }
 
@@ -114,12 +148,6 @@ public class FoodVectorServiceImpl implements FoodVectorService {
         }
     }
 
-    private void ensureSynced() {
-        if (initialized.compareAndSet(false, true)) {
-            syncAllProducts();
-        }
-    }
-
     @Override
     public void syncAllProducts() {
         if (embeddingModel == null || esClient == null) {
@@ -132,17 +160,12 @@ public class FoodVectorServiceImpl implements FoodVectorService {
 
             List<TextSegment> segments = new ArrayList<>();
             for (Product p : products) {
-                String text = String.format(
-                        "Món: %s. Quán: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. Giá: %s. Rating: %.1f (%d đánh giá).",
-                        p.getName(), p.getShop().getShopName(), p.getDescription(), p.getIngredients(), p.getTags(),
-                        p.getEffectivePrice(), p.getRating(), p.getTotalReviews()
-                );
+                String text = buildProductText(p);
                 segments.add(TextSegment.from(text, Metadata.from("product_id", p.getId().toString())));
             }
 
             List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
-            // Bulk index vào ES
             List<BulkOperation> ops = new ArrayList<>();
             for (int i = 0; i < segments.size(); i++) {
                 String productId = segments.get(i).metadata().getString("product_id");
@@ -164,7 +187,6 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             esClient.bulk(BulkRequest.of(b -> b.operations(ops)));
             log.info("Synced {} products to vector store.", segments.size());
         } catch (Exception e) {
-            initialized.set(false);
             log.error("syncAllProducts failed: {}", e.getMessage());
         }
     }
@@ -176,11 +198,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             return;
         }
         try {
-            String text = String.format(
-                    "Món: %s. Quán: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. Giá: %s. Rating: %.1f (%d đánh giá).",
-                    product.getName(), product.getShop().getShopName(), product.getDescription(), product.getIngredients(), product.getTags(),
-                    product.getEffectivePrice(), product.getRating(), product.getTotalReviews()
-            );
+            String text = buildProductText(product);
             float[] vector = embeddingModel.embed(TextSegment.from(text)).content().vector();
 
             Map<String, Object> doc = new HashMap<>();
@@ -189,6 +207,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             doc.put("vector", vector);
 
             esClient.index(i -> i.index(esIndex).id(product.getId().toString()).document(doc));
+            log.info("Synced product [{}] to ES.", product.getId());
         } catch (Exception e) {
             log.error("syncProduct failed: {}", e.getMessage());
         }
@@ -202,6 +221,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
         }
         try {
             esClient.delete(d -> d.index(esIndex).id(productId.toString()));
+            log.info("Deleted product [{}] from ES.", productId);
         } catch (Exception e) {
             log.error("deleteProduct failed: {}", e.getMessage());
         }
@@ -209,20 +229,27 @@ public class FoodVectorServiceImpl implements FoodVectorService {
 
     @Override
     public ContentRetriever getContentRetriever() {
-        if (esClient == null || embeddingModel == null) {
+        if (contentRetriever == null) {
             log.warn("getContentRetriever: not initialized.");
             return query -> List.of();
         }
-        ensureSynced();
+        return contentRetriever; // trả về instance cố định, không tạo mới
+    }
 
+    /**
+     * Build ContentRetriever 1 lần duy nhất.
+     * Mỗi lần user chat: embed câu hỏi → cosine similarity search ES → trả về text segments
+     * LangChain4j sẽ tự inject text segments này vào prompt dưới dạng CONTEXT (RAG)
+     */
+    private ContentRetriever buildContentRetriever() {
         return queryObj -> {
             try {
-                // Embed câu hỏi
+                // Embed câu hỏi thành vector (cùng model với lúc indexing sản phẩm)
                 float[] queryVector = embeddingModel.embed(
                         TextSegment.from(queryObj.text())
                 ).content().vector();
 
-                // Dùng script_score thay vì KNN để tránh bug KnnQuery.k
+                // Tìm sản phẩm gần nghĩa nhất bằng cosine similarity
                 String vectorJson = Arrays.toString(queryVector);
                 String queryBody = String.format("""
                     {
@@ -244,6 +271,8 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                         (Class<Map<String, Object>>) (Class<?>) Map.class
                 );
 
+                // Lọc theo minScore và trả về text thô
+                // LangChain4j sẽ tự inject các text này vào prompt dưới dạng CONTEXT
                 List<Content> results = new ArrayList<>();
                 for (Hit<Map<String, Object>> hit : response.hits().hits()) {
                     double score = hit.score() != null ? hit.score() - 1.0 : 0.0;
@@ -258,5 +287,16 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                 return List.of();
             }
         };
+    }
+
+    /**
+     * Tách ra method riêng để tránh duplicate code giữa syncAllProducts và syncProduct
+     */
+    private String buildProductText(Product p) {
+        return String.format(
+                "Món: %s. Quán: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. Giá: %s. Rating: %.1f (%d đánh giá).",
+                p.getName(), p.getShop().getShopName(), p.getDescription(), p.getIngredients(), p.getTags(),
+                p.getEffectivePrice(), p.getRating(), p.getTotalReviews()
+        );
     }
 }

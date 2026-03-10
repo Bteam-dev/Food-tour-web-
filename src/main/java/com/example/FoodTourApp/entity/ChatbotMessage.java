@@ -20,6 +20,9 @@ public class ChatbotMessage {
     @Column(name = "sender_type", nullable = false)
     private String senderType;  // "USER" hoặc "BOT"
 
+    @Column(name = "sender_name", length = 100)
+    private String senderName;  // Tên user hoặc "FoodTour Bot"
+
     @Column(name = "content", columnDefinition = "TEXT", nullable = false)
     private String content;
 
