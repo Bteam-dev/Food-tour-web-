@@ -6,6 +6,7 @@ import com.example.FoodTourApp.DTO.ChatbotDTO.RenameChatbotConversationRequest;
 import com.example.FoodTourApp.entity.ChatbotConversation;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ChatbotConversationRepository;
+import com.example.FoodTourApp.repository.ChatbotMessageRepository;
 import com.example.FoodTourApp.service.ChatbotAIService;
 import com.example.FoodTourApp.service.ChatbotConversationService;
 import jakarta.transaction.Transactional;
@@ -18,11 +19,14 @@ import java.util.stream.Collectors;
 public class ChatbotConversationServiceImpl implements ChatbotConversationService {
 
     private final ChatbotConversationRepository conversationRepo;
+    private final ChatbotMessageRepository messageRepo;
     private final ChatbotAIService chatbotAIService;
 
     public ChatbotConversationServiceImpl(ChatbotConversationRepository conversationRepo,
+                                          ChatbotMessageRepository messageRepo,
                                           ChatbotAIService chatbotAIService) {
         this.conversationRepo = conversationRepo;
+        this.messageRepo = messageRepo;
         this.chatbotAIService = chatbotAIService;
     }
 
@@ -64,6 +68,9 @@ public class ChatbotConversationServiceImpl implements ChatbotConversationServic
         if (!conv.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("Not authorized");
         }
+        // Xóa toàn bộ messages thuộc conversation này trước
+        messageRepo.deleteByConversation_Id(conversationId);
+        // Rồi mới xóa conversation
         conversationRepo.delete(conv);
         chatbotAIService.removeConversationMemory(conversationId); // ✅ giải phóng RAM
     }

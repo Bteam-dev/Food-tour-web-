@@ -7,8 +7,8 @@ import java.time.LocalDateTime;
 @Data
 public class ChatbotMessageResponse {
     private Long id;
-    private String senderType;   // "USER" or "BOT"
-    private String senderName;   // Tên user hoặc "FoodTour Bot"
+    private String senderType;
+    private String senderName;
     private String content;
     private LocalDateTime createdAt;
 }

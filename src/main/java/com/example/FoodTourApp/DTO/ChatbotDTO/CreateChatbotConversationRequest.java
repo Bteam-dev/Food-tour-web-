@@ -1,8 +1,10 @@
 package com.example.FoodTourApp.DTO.ChatbotDTO;
 
 import lombok.Data;
+import javax.validation.constraints.NotBlank;
 
 @Data
 public class CreateChatbotConversationRequest {
-    private String title; // optional
+    @NotBlank(message = "Conversation title is required")
+    private String title;
 }

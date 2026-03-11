@@ -16,7 +16,6 @@ public class Address {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    // Bỏ nullable=false vì khi chọn locality từ HERE API thì không có addressLine
     @Column(name = "address_line", length = 255)
     private String addressLine;
 

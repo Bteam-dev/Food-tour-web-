@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface ChatbotMessageRepository extends JpaRepository<ChatbotMessage, Long> {
     List<ChatbotMessage> findByConversation_IdOrderByCreatedAtAsc(Long conversationId);
+    void deleteByConversation_Id(Long conversationId);
 }

@@ -18,7 +18,6 @@ public class ChatNotification {
     private String senderName;
     private String senderAvatar;
     private String content;
-    /** TEXT | IMAGE | VIDEO | AUDIO | FILE */
     private String messageType;
     private String fileName;
     private String mimeType;
