@@ -43,6 +43,7 @@ public class OrderServiceImpl implements OrderService {
     private final CartRepository cartRepository;
     private final AddressRepository addressRepository;
     private final ProductVariantRepository variantRepository;
+    private final ProductRepository productRepository;
     private final ShopRepository shopRepository;
     private final WalletService walletService;
     private final FCMService fcmService;
@@ -210,6 +211,16 @@ public class OrderServiceImpl implements OrderService {
         // Xóa các CartItem được chọn
         cartItemRepository.deleteAll(cartItems);
 
+        // ===== GIẢM TỒN KHO KHI ĐẶT HÀNG =====
+        for (CartItem cartItem : cartItems) {
+            Product product = cartItem.getProduct();
+            int newStock = product.getStockQuantity() - cartItem.getQuantity();
+            if (newStock < 0) newStock = 0;
+            product.setStockQuantity(newStock);
+            productRepository.save(product);
+            log.info("Stock decreased for product {}: -{} => {}", product.getId(), cartItem.getQuantity(), newStock);
+        }
+
         log.info("Order created successfully: orderId: {}, paymentStatus: {}",
                 order.getId(), order.getPaymentStatus());
 
@@ -349,6 +360,16 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdatedAt(LocalDateTime.now());
 
         orderRepository.save(order);
+
+        // ===== HOÀN LẠI TỒN KHO KHI USER HỦY ĐƠN =====
+        List<OrderItem> orderItems = orderItemRepository.findByOrder(order);
+        for (OrderItem item : orderItems) {
+            Product product = item.getProduct();
+            int restoredStock = product.getStockQuantity() + item.getQuantity();
+            product.setStockQuantity(restoredStock);
+            productRepository.save(product);
+            log.info("Stock restored for product {}: +{} => {}", product.getId(), item.getQuantity(), restoredStock);
+        }
 
         // 🔔 Push: thông báo hủy đơn cho seller
         fcmService.sendOrderStatusChangedToSeller(
@@ -632,6 +653,16 @@ public class OrderServiceImpl implements OrderService {
         order.setUpdatedAt(LocalDateTime.now());
 
         orderRepository.save(order);
+
+        // ===== HOÀN LẠI TỒN KHO KHI SELLER HỦY ĐƠN =====
+        List<OrderItem> orderItems = orderItemRepository.findByOrder(order);
+        for (OrderItem item : orderItems) {
+            Product product = item.getProduct();
+            int restoredStock = product.getStockQuantity() + item.getQuantity();
+            product.setStockQuantity(restoredStock);
+            productRepository.save(product);
+            log.info("Stock restored for product {}: +{} => {}", product.getId(), item.getQuantity(), restoredStock);
+        }
 
         // 🔔 Push: thông báo đơn bị hủy cho người mua
         fcmService.sendOrderStatusChangedToBuyer(
