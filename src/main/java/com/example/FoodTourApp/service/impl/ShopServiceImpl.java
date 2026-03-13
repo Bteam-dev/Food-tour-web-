@@ -1,11 +1,9 @@
 package com.example.FoodTourApp.service.impl;
 
 import com.example.FoodTourApp.DTO.ShopDTO.*;
-import com.example.FoodTourApp.entity.Address;
 import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.AddressRepository;
 import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.ShopService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,7 +25,6 @@ import java.util.stream.Collectors;
 public class ShopServiceImpl implements ShopService {
 
     private final ShopRepository shopRepository;
-    private final AddressRepository addressRepository;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
 
@@ -36,31 +33,22 @@ public class ShopServiceImpl implements ShopService {
     public ShopResponseDTO createShop(CreateShopRequestDTO request, User seller) {
         log.info("Creating shop for seller: {}", seller.getId());
 
-        // Kiểm tra business license và tax code đã tồn tại chưa
         if (request.getBusinessLicense() != null &&
             shopRepository.findByBusinessLicense(request.getBusinessLicense()).isPresent()) {
             throw new RuntimeException("Giấy phép kinh doanh đã được sử dụng");
         }
-
         if (request.getTaxCode() != null &&
             shopRepository.findByTaxCode(request.getTaxCode()).isPresent()) {
             throw new RuntimeException("Mã số thuế đã được sử dụng");
         }
 
-        // Tạo Address entity từ DTO
-        Address address = createAddressFromDTO(request.getAddress(), seller);
-        address = addressRepository.save(address);
-
-        // Tạo Shop entity
         Shop shop = new Shop();
         shop.setSeller(seller);
         shop.setShopName(request.getShopName());
         shop.setDescription(request.getDescription());
         shop.setLogoUrl(request.getLogoUrl());
         shop.setBannerUrl(request.getBannerUrl());
-        shop.setAddress(address);
         shop.setPhone(request.getPhone());
-        // Lấy email từ user đăng ký shop, nếu request có email thì dùng email đó
         shop.setEmail(request.getEmail() != null ? request.getEmail() : seller.getEmail());
         shop.setBusinessLicense(request.getBusinessLicense());
         shop.setTaxCode(request.getTaxCode());
@@ -72,8 +60,20 @@ public class ShopServiceImpl implements ShopService {
         shop.setCreatedAt(LocalDateTime.now());
         shop.setUpdatedAt(LocalDateTime.now());
 
-        shop = shopRepository.save(shop);
+        // Nhúng trực tiếp các trường địa chỉ từ DTO
+        if (request.getAddress() != null) {
+            AddressRequestDTO addr = request.getAddress();
+            shop.setAddressLine(addr.getAddressLine());
+            shop.setWard(addr.getWard());
+            shop.setDistrict(addr.getDistrict());
+            shop.setCity(addr.getCity());
+            shop.setCountry(addr.getCountry() != null ? addr.getCountry() : "Vietnam");
+            shop.setPostalCode(addr.getPostalCode());
+            shop.setLatitude(addr.getLatitude());
+            shop.setLongitude(addr.getLongitude());
+        }
 
+        shop = shopRepository.save(shop);
         log.info("Shop created successfully with id: {}", shop.getId());
         return mapToShopResponseDTO(shop);
     }
@@ -84,121 +84,81 @@ public class ShopServiceImpl implements ShopService {
         log.info("Updating shop: {} by user: {}", shopId, user.getId());
 
         Shop shop;
-
-        // Kiểm tra nếu là Admin thì có quyền sửa tất cả shop
         boolean isAdmin = user.getRole().getRoleName().equals(Role.RoleName.ADMIN);
-
         if (isAdmin) {
-            // Admin có thể sửa bất kỳ shop nào
             shop = shopRepository.findById(shopId)
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
-            log.info("Admin updating shop: {}", shopId);
         } else {
-            // Seller chỉ có thể sửa shop của mình
             shop = shopRepository.findBySellerAndId(user, shopId)
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền chỉnh sửa"));
         }
 
-        // Cập nhật thông tin shop
-        if (request.getShopName() != null) {
-            shop.setShopName(request.getShopName());
-        }
-        if (request.getDescription() != null) {
-            shop.setDescription(request.getDescription());
-        }
-        if (request.getLogoUrl() != null) {
-            shop.setLogoUrl(request.getLogoUrl());
-        }
-        if (request.getBannerUrl() != null) {
-            shop.setBannerUrl(request.getBannerUrl());
-        }
-        if (request.getPhone() != null) {
-            shop.setPhone(request.getPhone());
-        }
-        if (request.getEmail() != null) {
-            shop.setEmail(request.getEmail());
-        }
-        if (request.getBusinessLicense() != null) {
-            shop.setBusinessLicense(request.getBusinessLicense());
-        }
-        if (request.getTaxCode() != null) {
-            shop.setTaxCode(request.getTaxCode());
-        }
-        if (request.getOpeningHours() != null) {
-            shop.setOpeningHours(request.getOpeningHours());
-        }
-        if (request.getIsActive() != null) {
-            shop.setIsActive(request.getIsActive());
-        }
+        if (request.getShopName() != null) shop.setShopName(request.getShopName());
+        if (request.getDescription() != null) shop.setDescription(request.getDescription());
+        if (request.getLogoUrl() != null) shop.setLogoUrl(request.getLogoUrl());
+        if (request.getBannerUrl() != null) shop.setBannerUrl(request.getBannerUrl());
+        if (request.getPhone() != null) shop.setPhone(request.getPhone());
+        if (request.getEmail() != null) shop.setEmail(request.getEmail());
+        if (request.getBusinessLicense() != null) shop.setBusinessLicense(request.getBusinessLicense());
+        if (request.getTaxCode() != null) shop.setTaxCode(request.getTaxCode());
+        if (request.getOpeningHours() != null) shop.setOpeningHours(request.getOpeningHours());
+        if (request.getIsActive() != null) shop.setIsActive(request.getIsActive());
 
-        // Cập nhật địa chỉ nếu có
+        // Cập nhật địa chỉ nhúng trực tiếp
         if (request.getAddress() != null) {
-            Address address = shop.getAddress();
-            updateAddressFromDTO(address, request.getAddress());
-            addressRepository.save(address);
+            AddressRequestDTO addr = request.getAddress();
+            if (addr.getAddressLine() != null) shop.setAddressLine(addr.getAddressLine());
+            if (addr.getWard() != null) shop.setWard(addr.getWard());
+            if (addr.getDistrict() != null) shop.setDistrict(addr.getDistrict());
+            if (addr.getCity() != null) shop.setCity(addr.getCity());
+            if (addr.getCountry() != null) shop.setCountry(addr.getCountry());
+            if (addr.getPostalCode() != null) shop.setPostalCode(addr.getPostalCode());
+            if (addr.getLatitude() != null) shop.setLatitude(addr.getLatitude());
+            if (addr.getLongitude() != null) shop.setLongitude(addr.getLongitude());
         }
 
         shop.setUpdatedAt(LocalDateTime.now());
         shop = shopRepository.save(shop);
-
         log.info("Shop updated successfully: {}", shopId);
         return mapToShopResponseDTO(shop);
     }
 
     @Override
     public ShopResponseDTO getShopById(Integer shopId) {
-        log.info("Getting shop by id: {}", shopId);
-
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
-
         return mapToShopResponseDTO(shop);
     }
 
     @Override
     public List<ShopResponseDTO> getShopsBySeller(User seller) {
-        log.info("Getting shops for seller: {}", seller.getId());
-
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        return shops.stream()
+        return shopRepository.findBySeller(seller).stream()
                 .map(this::mapToShopResponseDTO)
                 .collect(Collectors.toList());
     }
 
     @Override
     public Page<ShopResponseDTO> getAllActiveShops(Pageable pageable) {
-        log.info("Getting all active shops with pagination");
-        Page<Shop> shops = shopRepository.findByIsActiveTrue(pageable);
-        return shops.map(this::mapToShopResponseDTO);
+        return shopRepository.findByIsActiveTrue(pageable).map(this::mapToShopResponseDTO);
     }
-
 
     @Override
     @Transactional
     public void deleteShop(Integer shopId, User user) {
-        log.info("Deleting shop: {} by user: {}", shopId, user.getId());
-
+        log.info("Soft-deleting shop: {} by user: {}", shopId, user.getId());
         Shop shop;
-
-        // Kiểm tra nếu là Admin thì có quyền xóa tất cả shop
         boolean isAdmin = user.getRole().getRoleName().equals(Role.RoleName.ADMIN);
-
         if (isAdmin) {
-            // Admin có thể xóa bất kỳ shop nào
             shop = shopRepository.findById(shopId)
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
-            log.info("Admin deleting shop: {}", shopId);
         } else {
-            // Seller chỉ có thể xóa shop của mình
             shop = shopRepository.findBySellerAndId(user, shopId)
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng hoặc bạn không có quyền xóa"));
         }
-
         shop.setIsActive(false);
         shop.setUpdatedAt(LocalDateTime.now());
         shopRepository.save(shop);
-
-        log.info("Shop deleted (soft delete) successfully: {}", shopId);
+        log.info("Shop soft-deleted successfully: {}", shopId);
     }
 
     @Override
@@ -208,32 +168,26 @@ public class ShopServiceImpl implements ShopService {
         ShopResponseDTO shop = createShop(request, seller);
         Integer shopId = shop.getId();
         String subfolderId = "shop_" + shopId;
-
         UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
         boolean needUpdate = false;
-
         if (logo != null && !logo.isEmpty()) {
             try {
                 String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
                 updateRequest.setLogoUrl(logoUrl);
                 needUpdate = true;
-                log.info("Logo uploaded to ShopLogo/{}/", subfolderId);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
             }
         }
-
         if (banner != null && !banner.isEmpty()) {
             try {
                 String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
                 updateRequest.setBannerUrl(bannerUrl);
                 needUpdate = true;
-                log.info("Banner uploaded to ShopBanner/{}/", subfolderId);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
             }
         }
-
         return needUpdate ? updateShop(shopId, updateRequest, seller) : shop;
     }
 
@@ -242,112 +196,51 @@ public class ShopServiceImpl implements ShopService {
     public ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
                                                 MultipartFile logo, MultipartFile banner) {
         String subfolderId = "shop_" + shopId;
-
         if (logo != null && !logo.isEmpty()) {
             try {
-                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
-                request.setLogoUrl(logoUrl);
-                log.info("Logo uploaded: {}", logoUrl);
+                request.setLogoUrl(fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId));
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
             }
         }
-
         if (banner != null && !banner.isEmpty()) {
             try {
-                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
-                request.setBannerUrl(bannerUrl);
-                log.info("Banner uploaded: {}", bannerUrl);
+                request.setBannerUrl(fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId));
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
             }
         }
-
         return updateShop(shopId, request, seller);
     }
 
     @Override
     @Transactional
     public ShopResponseDTO createShopFromJson(String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
-        if (dataJson == null || dataJson.isEmpty()) {
-            throw new RuntimeException("Thiếu dữ liệu shop");
-        }
-        CreateShopRequestDTO request;
+        if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu shop");
         try {
-            request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
+            CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
+            return createShopWithImages(request, seller, logo, banner);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Dữ liệu shop không hợp lệ: " + e.getMessage(), e);
         }
-        return createShopWithImages(request, seller, logo, banner);
     }
 
     @Override
     @Transactional
     public ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
-        if (dataJson == null || dataJson.isEmpty()) {
-            throw new RuntimeException("Thiếu dữ liệu cập nhật");
-        }
-        UpdateShopRequestDTO request;
+        if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu cập nhật");
         try {
-            request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
+            UpdateShopRequestDTO request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
+            return updateShopWithImages(shopId, request, seller, logo, banner);
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
         }
-        return updateShopWithImages(shopId, request, seller, logo, banner);
     }
 
-    /**
-     * Tạo Address entity từ AddressRequestDTO
-     */
-    private Address createAddressFromDTO(AddressRequestDTO dto, User user) {
-        Address address = new Address();
-        address.setUser(user);
-        address.setAddressLine(dto.getAddressLine());
-        address.setWard(dto.getWard());
-        address.setDistrict(dto.getDistrict());
-        address.setCity(dto.getCity());
-        address.setCountry(dto.getCountry() != null ? dto.getCountry() : "Vietnam");
-        address.setPostalCode(dto.getPostalCode());
-        address.setLatitude(dto.getLatitude());
-        address.setLongitude(dto.getLongitude());
-
-        address.setCreatedAt(LocalDateTime.now());
-        return address;
-    }
-
-    /**
-     * Cập nhật Address entity từ AddressRequestDTO
-     */
-    private void updateAddressFromDTO(Address address, AddressRequestDTO dto) {
-        if (dto.getAddressLine() != null) {
-            address.setAddressLine(dto.getAddressLine());
-        }
-        if (dto.getWard() != null) {
-            address.setWard(dto.getWard());
-        }
-        if (dto.getDistrict() != null) {
-            address.setDistrict(dto.getDistrict());
-        }
-        if (dto.getCity() != null) {
-            address.setCity(dto.getCity());
-        }
-        if (dto.getCountry() != null) {
-            address.setCountry(dto.getCountry());
-        }
-        if (dto.getPostalCode() != null) {
-            address.setPostalCode(dto.getPostalCode());
-        }
-        if (dto.getLatitude() != null) {
-            address.setLatitude(dto.getLatitude());
-        }
-        if (dto.getLongitude() != null) {
-            address.setLongitude(dto.getLongitude());
-        }
-    }
-
-    /**
-     * Map Shop entity sang ShopResponseDTO
-     */
     private ShopResponseDTO mapToShopResponseDTO(Shop shop) {
         ShopResponseDTO dto = new ShopResponseDTO();
         dto.setId(shop.getId());
@@ -357,7 +250,6 @@ public class ShopServiceImpl implements ShopService {
         dto.setDescription(shop.getDescription());
         dto.setLogoUrl(shop.getLogoUrl());
         dto.setBannerUrl(shop.getBannerUrl());
-        dto.setAddress(mapToAddressResponseDTO(shop.getAddress()));
         dto.setPhone(shop.getPhone());
         dto.setEmail(shop.getEmail());
         dto.setBusinessLicense(shop.getBusinessLicense());
@@ -369,31 +261,24 @@ public class ShopServiceImpl implements ShopService {
         dto.setIsActive(shop.getIsActive());
         dto.setCreatedAt(shop.getCreatedAt());
         dto.setUpdatedAt(shop.getUpdatedAt());
-        return dto;
-    }
 
-    /**
-     * Map Address entity sang AddressResponseDTO
-     */
-    private AddressResponseDTO mapToAddressResponseDTO(Address address) {
-        AddressResponseDTO dto = new AddressResponseDTO();
-        dto.setId(address.getId());
-        dto.setAddressLine(address.getAddressLine());
-        dto.setWard(address.getWard());
-        dto.setDistrict(address.getDistrict());
-        dto.setCity(address.getCity());
-        dto.setCountry(address.getCountry());
-        dto.setPostalCode(address.getPostalCode());
-        dto.setLatitude(address.getLatitude());
-        dto.setLongitude(address.getLongitude());
-
-        // Build full address
-        StringBuilder fullAddress = new StringBuilder();
-        if (address.getAddressLine() != null) fullAddress.append(address.getAddressLine());
-        if (address.getWard() != null) fullAddress.append(", ").append(address.getWard());
-        if (address.getDistrict() != null) fullAddress.append(", ").append(address.getDistrict());
-        if (address.getCity() != null) fullAddress.append(", ").append(address.getCity());
-        dto.setFullAddress(fullAddress.toString());
+        // Map địa chỉ nhúng sang AddressResponseDTO
+        AddressResponseDTO addrDto = new AddressResponseDTO();
+        addrDto.setAddressLine(shop.getAddressLine());
+        addrDto.setWard(shop.getWard());
+        addrDto.setDistrict(shop.getDistrict());
+        addrDto.setCity(shop.getCity());
+        addrDto.setCountry(shop.getCountry());
+        addrDto.setPostalCode(shop.getPostalCode());
+        addrDto.setLatitude(shop.getLatitude());
+        addrDto.setLongitude(shop.getLongitude());
+        StringBuilder full = new StringBuilder();
+        if (shop.getAddressLine() != null) full.append(shop.getAddressLine());
+        if (shop.getWard() != null) full.append(", ").append(shop.getWard());
+        if (shop.getDistrict() != null) full.append(", ").append(shop.getDistrict());
+        if (shop.getCity() != null) full.append(", ").append(shop.getCity());
+        addrDto.setFullAddress(full.toString());
+        dto.setAddress(addrDto);
 
         return dto;
     }

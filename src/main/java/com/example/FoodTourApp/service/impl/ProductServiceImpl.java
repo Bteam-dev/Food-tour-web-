@@ -10,6 +10,7 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.ProductService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +20,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -34,10 +36,30 @@ public class ProductServiceImpl implements ProductService {
     private final ShopRepository shopRepository;
     private final CategoryRepository categoryRepository;
     private final VariantTypeRepository variantTypeRepository;
-    private final CartItemRepository cartItemRepository;
-    private final WishlistRepository wishlistRepository;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
+
+    // ── Helper: List<String> → JSON string ───────────────────────────────────
+    private String toJsonArray(List<String> list) {
+        if (list == null || list.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(list);
+        } catch (IOException e) {
+            log.error("Failed to serialize list to JSON: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    // ── Helper: JSON string → List<String> ───────────────────────────────────
+    private List<String> fromJsonArray(String json) {
+        if (json == null || json.isBlank()) return new ArrayList<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (IOException e) {
+            log.warn("Failed to parse JSON array: {}, raw value: {}", e.getMessage(), json);
+            return new ArrayList<>();
+        }
+    }
 
     @Override
     @Transactional
@@ -61,23 +83,16 @@ public class ProductServiceImpl implements ProductService {
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
 
-        // VALIDATION: Giá giảm phải nhỏ hơn giá gốc
         if (request.getDiscountPrice() != null) {
-            if (request.getDiscountPrice().compareTo(request.getPrice()) >= 0) {
+            if (request.getDiscountPrice().compareTo(request.getPrice()) >= 0)
                 throw new RuntimeException("Giá giảm phải nhỏ hơn giá gốc");
-            }
-            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0) {
+            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0)
                 throw new RuntimeException("Giá giảm không thể âm");
-            }
         }
         product.setDiscountPrice(request.getDiscountPrice());
 
-        // Fix: Xử lý imageUrls - chỉ set khi có giá trị
-        if (request.getImageUrls() != null && !request.getImageUrls().isEmpty()) {
-            product.setImageUrls(String.join(",", request.getImageUrls()));
-        } else {
-            product.setImageUrls(null);
-        }
+        // ── imageUrls: lưu JSON array ["url1","url2"] ──────────────────────
+        product.setImageUrls(toJsonArray(request.getImageUrls()));
 
         product.setIngredients(request.getIngredients());
         product.setNutritionInfo(request.getNutritionInfo());
@@ -86,24 +101,18 @@ public class ProductServiceImpl implements ProductService {
         product.setMinOrderQuantity(request.getMinOrderQuantity());
         product.setMaxOrderQuantity(request.getMaxOrderQuantity());
 
-        // Fix: Xử lý tags - chỉ set khi có giá trị
-        if (request.getTags() != null && !request.getTags().isEmpty()) {
-            product.setTags(String.join(",", request.getTags()));
-        } else {
-            product.setTags(null);
-        }
+        // ── tags: lưu JSON array ───────────────────────────────────────────
+        product.setTags(toJsonArray(request.getTags()));
 
         product.setCreatedAt(LocalDateTime.now());
         product.setUpdatedAt(LocalDateTime.now());
 
-        // ✅ LƯU PRODUCT TRƯỚC để có ID
         product = productRepository.save(product);
 
         if (request.getVariants() != null && !request.getVariants().isEmpty()) {
             for (CreateVariantRequestDTO varReq : request.getVariants()) {
                 VariantType variantType = variantTypeRepository.findById(varReq.getVariantTypeId())
                         .orElseThrow(() -> new RuntimeException("Variant type not found"));
-
                 ProductVariant variant = new ProductVariant();
                 variant.setProduct(product);
                 variant.setVariantType(variantType);
@@ -126,34 +135,26 @@ public class ProductServiceImpl implements ProductService {
                 .orElseThrow(() -> new RuntimeException("Product not found"));
 
         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-            if (!product.getShop().getSeller().getId().equals(user.getId())) {
+            if (!product.getShop().getSeller().getId().equals(user.getId()))
                 throw new RuntimeException("You do not have permission to update this product");
-            }
         }
 
         if (request.getName() != null) product.setName(request.getName());
         if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (request.getPrice() != null) product.setPrice(request.getPrice());
 
-        // VALIDATION: Giá giảm phải nhỏ hơn giá gốc
         if (request.getDiscountPrice() != null) {
             java.math.BigDecimal priceToCompare = request.getPrice() != null ? request.getPrice() : product.getPrice();
-            if (request.getDiscountPrice().compareTo(priceToCompare) >= 0) {
+            if (request.getDiscountPrice().compareTo(priceToCompare) >= 0)
                 throw new RuntimeException("Giá giảm phải nhỏ hơn giá gốc");
-            }
-            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0) {
+            if (request.getDiscountPrice().compareTo(java.math.BigDecimal.ZERO) < 0)
                 throw new RuntimeException("Giá giảm không thể âm");
-            }
             product.setDiscountPrice(request.getDiscountPrice());
         }
 
-        // Fix: Xử lý imageUrls - chỉ set khi có giá trị
+        // ── imageUrls: lưu JSON array ──────────────────────────────────────
         if (request.getImageUrls() != null) {
-            if (!request.getImageUrls().isEmpty()) {
-                product.setImageUrls(String.join(",", request.getImageUrls()));
-            } else {
-                product.setImageUrls(null);
-            }
+            product.setImageUrls(request.getImageUrls().isEmpty() ? null : toJsonArray(request.getImageUrls()));
         }
 
         if (request.getIngredients() != null) product.setIngredients(request.getIngredients());
@@ -164,13 +165,9 @@ public class ProductServiceImpl implements ProductService {
         if (request.getMinOrderQuantity() != null) product.setMinOrderQuantity(request.getMinOrderQuantity());
         if (request.getMaxOrderQuantity() != null) product.setMaxOrderQuantity(request.getMaxOrderQuantity());
 
-        // Fix: Xử lý tags - chỉ set khi có giá trị
+        // ── tags: lưu JSON array ───────────────────────────────────────────
         if (request.getTags() != null) {
-            if (!request.getTags().isEmpty()) {
-                product.setTags(String.join(",", request.getTags()));
-            } else {
-                product.setTags(null);
-            }
+            product.setTags(request.getTags().isEmpty() ? null : toJsonArray(request.getTags()));
         }
 
         if (request.getCategoryId() != null) {
@@ -182,45 +179,30 @@ public class ProductServiceImpl implements ProductService {
         product.setUpdatedAt(LocalDateTime.now());
         product = productRepository.save(product);
 
-        // ✅ XỬ LÝ CẬP NHẬT VARIANTS (THÊM MỚI, CẬP NHẬT, XÓA)
         if (request.getVariants() != null) {
             log.info("Processing {} variants for product: {}", request.getVariants().size(), productId);
-
             for (ProductVariantUpdateDTO varUpdate : request.getVariants()) {
-                // Nếu có flag shouldDelete = true, xóa variant
                 if (varUpdate.getShouldDelete() != null && varUpdate.getShouldDelete()) {
                     if (varUpdate.getId() != null) {
                         ProductVariant variant = variantRepository.findById(varUpdate.getId())
                                 .orElseThrow(() -> new RuntimeException("Variant not found with id: " + varUpdate.getId()));
-
-                        // Kiểm tra quyền hạn
                         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+                            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId()))
                                 throw new RuntimeException("You do not have permission to delete this variant");
-                            }
                         }
-
-                        // Soft delete
                         variant.setIsActive(false);
                         variantRepository.save(variant);
                         log.info("Variant {} marked as deleted", varUpdate.getId());
                     }
                     continue;
                 }
-
-                // Nếu có ID = cập nhật variant đã tồn tại
                 if (varUpdate.getId() != null) {
                     ProductVariant variant = variantRepository.findById(varUpdate.getId())
                             .orElseThrow(() -> new RuntimeException("Variant not found with id: " + varUpdate.getId()));
-
-                    // Kiểm tra quyền hạn
                     if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-                        if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+                        if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId()))
                             throw new RuntimeException("You do not have permission to update this variant");
-                        }
                     }
-
-                    // Cập nhật thông tin variant
                     if (varUpdate.getVariantTypeId() != null) {
                         VariantType variantType = variantTypeRepository.findById(varUpdate.getVariantTypeId())
                                 .orElseThrow(() -> new RuntimeException("Variant type not found"));
@@ -229,27 +211,19 @@ public class ProductServiceImpl implements ProductService {
                     if (varUpdate.getVariantValue() != null) variant.setVariantValue(varUpdate.getVariantValue());
                     if (varUpdate.getPriceAdjustment() != null) variant.setPriceAdjustment(varUpdate.getPriceAdjustment());
                     if (varUpdate.getIsActive() != null) variant.setIsActive(varUpdate.getIsActive());
-
                     variantRepository.save(variant);
                     log.info("Variant {} updated successfully", varUpdate.getId());
-                }
-                // Nếu không có ID = thêm mới variant
-                else {
-                    if (varUpdate.getVariantTypeId() == null || varUpdate.getVariantValue() == null) {
+                } else {
+                    if (varUpdate.getVariantTypeId() == null || varUpdate.getVariantValue() == null)
                         throw new RuntimeException("VariantTypeId and VariantValue are required for new variant");
-                    }
-
                     VariantType variantType = variantTypeRepository.findById(varUpdate.getVariantTypeId())
                             .orElseThrow(() -> new RuntimeException("Variant type not found"));
-
                     ProductVariant newVariant = new ProductVariant();
                     newVariant.setProduct(product);
                     newVariant.setVariantType(variantType);
                     newVariant.setVariantValue(varUpdate.getVariantValue());
-                    newVariant.setPriceAdjustment(varUpdate.getPriceAdjustment() != null ?
-                            varUpdate.getPriceAdjustment() : java.math.BigDecimal.ZERO);
+                    newVariant.setPriceAdjustment(varUpdate.getPriceAdjustment() != null ? varUpdate.getPriceAdjustment() : java.math.BigDecimal.ZERO);
                     newVariant.setIsActive(varUpdate.getIsActive() != null ? varUpdate.getIsActive() : true);
-
                     variantRepository.save(newVariant);
                     log.info("New variant added: {}", newVariant.getId());
                 }
@@ -263,100 +237,69 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public void deleteProduct(Integer productId, User user) {
-        log.info("Deleting product: {} by user: {}", productId, user.getId());
-
+        log.info("Soft-deleting product: {} by user: {}", productId, user.getId());
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found"));
-
         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-            if (!product.getShop().getSeller().getId().equals(user.getId())) {
+            if (!product.getShop().getSeller().getId().equals(user.getId()))
                 throw new RuntimeException("You do not have permission to delete this product");
-            }
         }
-
-        // Hard delete - XÓA THẬT khỏi database
-        // Bước 1: Xóa tất cả variants của product
-        variantRepository.deleteByProductId(productId);
-        log.info("Deleted all variants for product: {}", productId);
-
-        // Bước 2: Xóa product khỏi giỏ hàng của tất cả users
-        cartItemRepository.deleteByProductId(productId);
-        log.info("Deleted all cart items for product: {}", productId);
-
-        // Bước 3: Xóa product khỏi wishlist
-        wishlistRepository.deleteByProductId(productId);
-        log.info("Deleted all wishlist items for product: {}", productId);
-
-        // Bước 4: Xóa product bằng ID (không dùng entity để tránh lỗi Hibernate)
-        productRepository.deleteById(productId);
-
-        log.info("Product deleted (hard delete) successfully: {}", productId);
+        product.setIsAvailable(false);
+        product.setUpdatedAt(LocalDateTime.now());
+        productRepository.save(product);
+        List<ProductVariant> variants = variantRepository.findByProductId(productId);
+        for (ProductVariant v : variants) {
+            v.setIsActive(false);
+            variantRepository.save(v);
+        }
+        log.info("Product soft-deleted (isAvailable=false) successfully: {}", productId);
     }
 
     @Override
     public ProductResponseDTO getProductById(Integer productId) {
-        log.info("Getting product by id: {}", productId);
-
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found"));
-
         return mapToProductResponseDTO(product);
     }
 
     @Override
     public List<ProductResponseDTO> getProductsByShop(Shop shop) {
-        log.info("Getting products for shop: {}", shop.getId());
-
-        List<Product> products = productRepository.findByShop(shop);
-        return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
+        return productRepository.findByShop(shop).stream()
+                .map(this::mapToProductResponseDTO).collect(Collectors.toList());
     }
 
     @Override
     public Page<ProductResponseDTO> getActiveProductsByShop(Integer shopId, Pageable pageable) {
-        log.info("Getting active products for shop: {} with pagination", shopId);
-        Page<Product> products = productRepository.findActiveByShopId(shopId, pageable);
-        return products.map(this::mapToProductResponseDTO);
+        return productRepository.findActiveByShopId(shopId, pageable).map(this::mapToProductResponseDTO);
     }
 
     @Override
     public Page<ProductResponseDTO> getAllActiveProducts(Pageable pageable) {
-        log.info("Getting all active products with pagination");
-        Page<Product> products = productRepository.findAllActive(pageable);
-        return products.map(this::mapToProductResponseDTO);
+        return productRepository.findAllActive(pageable).map(this::mapToProductResponseDTO);
     }
 
     @Override
     public Page<ProductResponseDTO> getProductsByCategory(Integer categoryId, Pageable pageable) {
-        log.info("Getting products by category: {} with pagination", categoryId);
-        Page<Product> products = productRepository.findByCategoryId(categoryId, pageable);
-        return products.map(this::mapToProductResponseDTO);
+        return productRepository.findByCategoryId(categoryId, pageable).map(this::mapToProductResponseDTO);
     }
 
     @Override
     @Transactional
     public VariantResponseDTO addVariant(Integer productId, CreateVariantRequestDTO request, User user) {
-        log.info("Adding variant to product: {} by user: {}", productId, user.getId());
-
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found"));
-
         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-            if (!product.getShop().getSeller().getId().equals(user.getId())) {
+            if (!product.getShop().getSeller().getId().equals(user.getId()))
                 throw new RuntimeException("You do not have permission to add variant to this product");
-            }
         }
-
         VariantType variantType = variantTypeRepository.findById(request.getVariantTypeId())
                 .orElseThrow(() -> new RuntimeException("Variant type not found"));
-
         ProductVariant variant = new ProductVariant();
         variant.setProduct(product);
         variant.setVariantType(variantType);
         variant.setVariantValue(request.getVariantValue());
         variant.setPriceAdjustment(request.getPriceAdjustment());
-
         variant = variantRepository.save(variant);
-
         log.info("Variant added successfully: {}", variant.getId());
         return mapToVariantResponseDTO(variant);
     }
@@ -364,17 +307,12 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public VariantResponseDTO updateVariant(Integer variantId, UpdateVariantRequestDTO request, User user) {
-        log.info("Updating variant: {} by user: {}", variantId, user.getId());
-
         ProductVariant variant = variantRepository.findById(variantId)
                 .orElseThrow(() -> new RuntimeException("Variant not found"));
-
         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId()))
                 throw new RuntimeException("You do not have permission to update this variant");
-            }
         }
-
         if (request.getVariantTypeId() != null) {
             VariantType variantType = variantTypeRepository.findById(request.getVariantTypeId())
                     .orElseThrow(() -> new RuntimeException("Variant type not found"));
@@ -383,9 +321,7 @@ public class ProductServiceImpl implements ProductService {
         if (request.getVariantValue() != null) variant.setVariantValue(request.getVariantValue());
         if (request.getPriceAdjustment() != null) variant.setPriceAdjustment(request.getPriceAdjustment());
         if (request.getIsActive() != null) variant.setIsActive(request.getIsActive());
-
         variant = variantRepository.save(variant);
-
         log.info("Variant updated successfully: {}", variantId);
         return mapToVariantResponseDTO(variant);
     }
@@ -393,49 +329,40 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public void deleteVariant(Integer variantId, User user) {
-        log.info("Deleting variant: {} by user: {}", variantId, user.getId());
-
         ProductVariant variant = variantRepository.findById(variantId)
                 .orElseThrow(() -> new RuntimeException("Variant not found"));
-
         if (!user.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
-            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId())) {
+            if (!variant.getProduct().getShop().getSeller().getId().equals(user.getId()))
                 throw new RuntimeException("You do not have permission to delete this variant");
-            }
         }
-
         variant.setIsActive(false);
         variantRepository.save(variant);
-
         log.info("Variant deleted (soft) successfully: {}", variantId);
     }
 
     @Override
     public List<ProductResponseDTO> getAllProducts() {
-        log.info("Getting all products (including inactive)");
-        List<Product> products = productRepository.findAll();
-        return products.stream().map(this::mapToProductResponseDTO).collect(Collectors.toList());
+        return productRepository.findAll().stream()
+                .map(this::mapToProductResponseDTO).collect(Collectors.toList());
     }
 
     @Override
     public void validateShopOwnership(Integer shopId, User user) {
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new RuntimeException("Shop không tồn tại"));
-        boolean isAdmin = user.getRole() != null &&
-                user.getRole().getRoleName() == Role.RoleName.ADMIN;
-        if (!isAdmin && !shop.getSeller().getId().equals(user.getId())) {
+        boolean isAdmin = user.getRole() != null && user.getRole().getRoleName() == Role.RoleName.ADMIN;
+        if (!isAdmin && !shop.getSeller().getId().equals(user.getId()))
             throw new RuntimeException("Bạn không có quyền truy cập shop này");
-        }
     }
 
     @Override
     public void validateProductBelongsToShop(Integer productId, Integer shopId) {
         ProductResponseDTO product = getProductById(productId);
-        if (!product.getShopId().equals(shopId)) {
+        if (!product.getShopId().equals(shopId))
             throw new RuntimeException("Sản phẩm không thuộc shop này");
-        }
     }
 
+    // ── Map entity → DTO ─────────────────────────────────────────────────────
     private ProductResponseDTO mapToProductResponseDTO(Product product) {
         ProductResponseDTO dto = new ProductResponseDTO();
         dto.setId(product.getId());
@@ -448,16 +375,9 @@ public class ProductServiceImpl implements ProductService {
         dto.setPrice(product.getPrice());
         dto.setDiscountPrice(product.getDiscountPrice());
 
-        // Xử lý imageUrls khi convert về List
-        if (product.getImageUrls() != null && !product.getImageUrls().trim().isEmpty()) {
-            List<String> imageUrls = Arrays.stream(product.getImageUrls().split(","))
-                    .map(String::trim)
-                    .filter(url -> !url.isEmpty())
-                    .collect(Collectors.toList());
-            dto.setImageUrls(imageUrls.isEmpty() ? null : imageUrls);
-        } else {
-            dto.setImageUrls(null);
-        }
+        // ── imageUrls: parse từ JSON array ────────────────────────────────
+        List<String> imageUrls = fromJsonArray(product.getImageUrls());
+        dto.setImageUrls(imageUrls.isEmpty() ? null : imageUrls);
 
         dto.setIngredients(product.getIngredients());
         dto.setNutritionInfo(product.getNutritionInfo());
@@ -469,12 +389,9 @@ public class ProductServiceImpl implements ProductService {
         dto.setRating(product.getRating());
         dto.setTotalReviews(product.getTotalReviews());
 
-        // Fix: Xử lý tags khi convert về List
-        if (product.getTags() != null && !product.getTags().isEmpty()) {
-            dto.setTags(List.of(product.getTags().split(",")));
-        } else {
-            dto.setTags(null);
-        }
+        // ── tags: parse từ JSON array ─────────────────────────────────────
+        List<String> tags = fromJsonArray(product.getTags());
+        dto.setTags(tags.isEmpty() ? null : tags);
 
         dto.setCreatedAt(product.getCreatedAt());
         dto.setUpdatedAt(product.getUpdatedAt());
@@ -484,7 +401,6 @@ public class ProductServiceImpl implements ProductService {
 
         return dto;
     }
-
 
     private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
         VariantResponseDTO dto = new VariantResponseDTO();
@@ -500,11 +416,8 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public ProductResponseDTO createProductWithImages(Integer shopId, String dataJson, MultipartFile[] images, User user) {
-        if (dataJson == null || dataJson.isEmpty()) {
-            throw new RuntimeException("Thiếu dữ liệu sản phẩm");
-        }
+        if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu sản phẩm");
         validateShopOwnership(shopId, user);
-
         CreateProductRequestDTO request;
         try {
             request = objectMapper.readValue(dataJson, CreateProductRequestDTO.class);
@@ -512,58 +425,49 @@ public class ProductServiceImpl implements ProductService {
             throw new RuntimeException("Dữ liệu sản phẩm không hợp lệ: " + e.getMessage(), e);
         }
         request.setShopId(shopId);
-
         if (images != null && images.length > 0) {
             try {
                 String subfolderId = "shop_" + shopId;
                 List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
-                log.info("Uploaded {} images to ProductImage/{}/", imageUrls.size(), subfolderId);
+                log.info("Uploaded {} images for product in shop {}", imageUrls.size(), shopId);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
             }
         }
-
         return createProduct(request, user);
     }
 
     @Override
     @Transactional
     public ProductResponseDTO updateProductWithImages(Integer shopId, Integer productId, String dataJson, MultipartFile[] images, User user) {
-        if (dataJson == null || dataJson.isEmpty()) {
-            throw new RuntimeException("Thiếu dữ liệu cập nhật");
-        }
+        if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu cập nhật");
         validateShopOwnership(shopId, user);
         validateProductBelongsToShop(productId, shopId);
-
         UpdateProductRequestDTO request;
         try {
             request = objectMapper.readValue(dataJson, UpdateProductRequestDTO.class);
         } catch (Exception e) {
             throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
         }
-
         if (images != null && images.length > 0) {
             try {
                 String subfolderId = "shop_" + shopId + "/product_" + productId;
                 List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
                 request.setImageUrls(imageUrls);
-                log.info("Uploaded {} images for product {} to ProductImage/{}/", imageUrls.size(), productId, subfolderId);
+                log.info("Uploaded {} images for product {}", imageUrls.size(), productId);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
             }
         }
-
         return updateProduct(productId, request, user);
     }
 
     @Override
     public Page<ProductResponseDTO> getProductsByNameContaining(String keyword, Pageable pageable) {
-        if (keyword == null || keyword.trim().isEmpty()) {
+        if (keyword == null || keyword.trim().isEmpty())
             return productRepository.findAllActive(pageable).map(this::mapToProductResponseDTO);
-        }
-
-        Page<Product> products = productRepository.findByNameContainingIgnoreCase(keyword, pageable);
-        return products.map(this::mapToProductResponseDTO);
+        return productRepository.findByNameContainingIgnoreCase(keyword, pageable)
+                .map(this::mapToProductResponseDTO);
     }
 }

@@ -42,4 +42,21 @@ public interface OrderRepository extends JpaRepository<Order, Integer> {
             @Param("shop") Shop shop,
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
+
+    // Lấy đơn hàng đã thanh toán từ NHIỀU shops và khoảng thời gian
+    @Query("SELECT o FROM Order o WHERE o.shop IN :shops AND o.paymentStatus = 'paid' " +
+           "AND o.createdAt BETWEEN :startDate AND :endDate")
+    List<Order> findPaidOrdersByShopsAndDateRange(
+            @Param("shops") List<Shop> shops,
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate);
+
+    /** Đếm số lần user đã dùng voucher code này (để check max_usage_per_user) */
+    long countByUserAndVoucherCode(User user, String voucherCode);
+
+    /** Lấy đơn hàng có yêu cầu hoàn tiền (hasRefundRequest = true) theo shop */
+    Page<Order> findByShopAndHasRefundRequestTrue(Shop shop, Pageable pageable);
+
+    /** Lấy đơn hàng có yêu cầu hoàn tiền từ NHIỀU shops */
+    Page<Order> findByShopInAndHasRefundRequestTrue(List<Shop> shops, Pageable pageable);
 }

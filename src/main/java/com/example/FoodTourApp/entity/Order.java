@@ -24,9 +24,45 @@ public class Order {
     @JoinColumn(name = "shop_id", nullable = false)
     private Shop shop;
 
+    // ---- Địa chỉ giao hàng (nhúng trực tiếp vào đơn hàng, snapshot tại thời điểm đặt) ----
+    @Column(name = "delivery_address_line", length = 255)
+    private String deliveryAddressLine;
+
+    @Column(name = "delivery_ward", length = 100)
+    private String deliveryWard;
+
+    @Column(name = "delivery_district", length = 100)
+    private String deliveryDistrict;
+
+    @Column(name = "delivery_city", length = 100)
+    private String deliveryCity;
+
+    @Column(name = "delivery_country", length = 100)
+    private String deliveryCountry = "Vietnam";
+
+    @Column(name = "delivery_postal_code", length = 20)
+    private String deliveryPostalCode;
+
+    @Column(name = "delivery_latitude")
+    private Double deliveryLatitude;
+
+    @Column(name = "delivery_longitude")
+    private Double deliveryLongitude;
+    // ------------------------------------------------------------------------------------
+
+    // ---- Tính phí ship theo khoảng cách (HERE Routing API) ----
+    @Column(name = "delivery_distance_km", precision = 8, scale = 2)
+    private BigDecimal deliveryDistanceKm;    // Khoảng cách thực tế (km)
+    // -----------------------------------------------------------
+
+    // ---- Voucher ----
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "delivery_address_id", nullable = false)
-    private Address deliveryAddress;
+    @JoinColumn(name = "voucher_id")
+    private Voucher voucher;
+
+    @Column(name = "voucher_code", length = 50)
+    private String voucherCode;  // Snapshot mã voucher tại thời điểm đặt
+    // -----------------
 
     @Enumerated(EnumType.STRING)
     @Column(name = "order_status", nullable = false)
@@ -56,13 +92,13 @@ public class Order {
     private BigDecimal totalAmount;
 
     @Column(name = "platform_commission_rate", precision = 5, scale = 2)
-    private BigDecimal platformCommissionRate = new BigDecimal("12.00"); // 12% hoa hồng platform (admin)
+    private BigDecimal platformCommissionRate = new BigDecimal("12.00");
 
     @Column(name = "platform_commission_amount", precision = 15, scale = 2)
-    private BigDecimal platformCommissionAmount = BigDecimal.ZERO; // Số tiền hoa hồng thực tế
+    private BigDecimal platformCommissionAmount = BigDecimal.ZERO;
 
     @Column(name = "seller_received_amount", precision = 15, scale = 2)
-    private BigDecimal sellerReceivedAmount = BigDecimal.ZERO; // Số tiền seller thực nhận (sau khi trừ hoa hồng)
+    private BigDecimal sellerReceivedAmount = BigDecimal.ZERO;
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
@@ -96,7 +132,6 @@ public class Order {
     @Column(name = "confirmed_at")
     private LocalDateTime confirmedAt;
 
-    // YÊU CẦU HOÀN TIỀN - Flag đánh dấu order có review yêu cầu refund
     @Column(name = "has_refund_request", nullable = false)
     private Boolean hasRefundRequest = false;
 

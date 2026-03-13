@@ -33,4 +33,16 @@ public class Conversation {
 
     @Column(name = "last_message_at")
     private LocalDateTime lastMessageAt;
+
+    // ---- Chặn / bỏ chặn ----
+    /** User ID đã thực hiện chặn (null = chưa ai chặn) */
+    @Column(name = "blocked_by_user_id")
+    private Integer blockedByUserId;
+
+    @Column(name = "blocked_at")
+    private LocalDateTime blockedAt;
+
+    public boolean isBlocked() {
+        return blockedByUserId != null;
+    }
 }

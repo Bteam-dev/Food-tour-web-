@@ -17,7 +17,8 @@ public interface WishlistService {
     WishlistResponse removeFromWishlist(Integer userId, Integer productId);
 
     /**
-     * Toggle wishlist (thêm nếu chưa có, xóa nếu đã có)
+     * Toggle wishlist: thêm nếu chưa có, xóa nếu đã có.
+     * FE dùng khi user bấm icon trái tim trực tiếp từ màn hình sản phẩm.
      */
     WishlistResponse toggleWishlist(Integer userId, Integer productId);
 
@@ -27,12 +28,14 @@ public interface WishlistService {
     PageResponse<WishlistItemDTO> getUserWishlist(Integer userId, int page, int size);
 
     /**
-     * Kiểm tra sản phẩm đã có trong wishlist chưa
+     * Kiểm tra sản phẩm đã có trong wishlist chưa.
+     * FE dùng để tô màu trái tim khi mở trang chi tiết sản phẩm.
      */
     boolean isInWishlist(Integer userId, Integer productId);
 
     /**
-     * Đếm số lượng sản phẩm trong wishlist
+     * Đếm tổng số sản phẩm trong wishlist.
+     * FE dùng hiển thị badge số lượng trên icon wishlist.
      */
     long countWishlistItems(Integer userId);
 
@@ -41,4 +44,3 @@ public interface WishlistService {
      */
     void clearWishlist(Integer userId);
 }
-

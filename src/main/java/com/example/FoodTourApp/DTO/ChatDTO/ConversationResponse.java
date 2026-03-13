@@ -21,6 +21,11 @@ public class ConversationResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
+    /** true nếu cuộc trò chuyện đang bị chặn */
+    private Boolean isBlocked;
+    /** ID user đã thực hiện chặn (null = chưa ai chặn) */
+    private Integer blockedByUserId;
+
     @Data
     @Builder
     @AllArgsConstructor
@@ -32,4 +37,3 @@ public class ConversationResponse {
         private String avatarUrl;
     }
 }
-

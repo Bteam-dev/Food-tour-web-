@@ -19,9 +19,21 @@ public class OrderItem {
     @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 
+    // nullable = true để đảm bảo khi product bị xóa cứng (hiếm), order item không crash
+    // Thực tế chỉ soft-delete, nhưng phòng tránh
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
+    @JoinColumn(name = "product_id", nullable = true)
     private Product product;
+
+    // ── Snapshot tại thời điểm đặt hàng ──────────────────────────────────────
+    // Đảm bảo order item luôn hiển thị đúng dù product bị soft-delete hay thay đổi
+    @Column(name = "product_name_snapshot", length = 150)
+    private String productNameSnapshot;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "product_image_urls_snapshot", columnDefinition = "TEXT")
+    private String productImageUrlsSnapshot; // JSON array: ["url1","url2"]
+    // ─────────────────────────────────────────────────────────────────────────
 
     @Column(name = "quantity", nullable = false)
     private Integer quantity;

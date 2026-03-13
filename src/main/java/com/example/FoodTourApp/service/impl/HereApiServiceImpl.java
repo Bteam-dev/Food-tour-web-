@@ -258,4 +258,41 @@ public class HereApiServiceImpl implements HereApiService {
             address.path("street").asText(null)
         );
     }
+
+    /**
+     * HERE Routing v8 API – tính khoảng cách đường đi thực tế giữa 2 toạ độ.
+     * Dùng transport mode "scooter" (phù hợp giao đồ ăn).
+     * Trả về null nếu gọi API thất bại để caller có thể fallback.
+     */
+    @Override
+    public java.math.BigDecimal calculateRouteDistanceKm(double originLat, double originLng,
+                                                          double destLat,   double destLng) {
+        try {
+            String url = UriComponentsBuilder
+                    .fromUriString("https://router.hereapi.com/v8/routes")
+                    .queryParam("transportMode", "scooter")
+                    .queryParam("origin",      originLat + "," + originLng)
+                    .queryParam("destination", destLat   + "," + destLng)
+                    .queryParam("return",      "summary")
+                    .queryParam("apiKey",      hereApiKey)
+                    .toUriString();
+
+            log.info("HERE Routing URL: {}", url);
+            String response = restTemplate.getForObject(url, String.class);
+            JsonNode root   = objectMapper.readTree(response);
+
+            // routes[0].sections[0].summary.length  (metres)
+            long metres = root.path("routes").get(0)
+                              .path("sections").get(0)
+                              .path("summary").path("length").asLong(0);
+
+            if (metres <= 0) return null;
+
+            return new java.math.BigDecimal(metres)
+                    .divide(new java.math.BigDecimal("1000"), 2, java.math.RoundingMode.HALF_UP);
+        } catch (Exception e) {
+            log.warn("HERE Routing API failed – falling back to fixed fee: {}", e.getMessage());
+            return null;
+        }
+    }
 }

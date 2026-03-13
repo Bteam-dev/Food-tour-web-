@@ -25,4 +25,7 @@ public class CreateOrderRequestDTO {
     private AddressRequestDTO deliveryAddress;
 
     private String notes;
+
+    /** Mã voucher (tuỳ chọn) */
+    private String voucherCode;
 }

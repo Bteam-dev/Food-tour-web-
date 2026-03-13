@@ -32,9 +32,9 @@ public class CreateProductRequestDTO {
 
     private Integer stockQuantity = 0;
 
-    private Integer minOrderQuantity = 1;
+    private Integer minOrderQuantity;
 
-    private Integer maxOrderQuantity = 999;
+    private Integer maxOrderQuantity;
 
     private List<String> tags;
 

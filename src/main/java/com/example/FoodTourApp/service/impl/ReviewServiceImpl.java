@@ -227,29 +227,31 @@ public class ReviewServiceImpl implements ReviewService {
     @Override
     @Transactional
     public void deleteReview(Integer reviewId, User user) {
-        log.info("User ID {} is deleting review ID {}", user.getId(), reviewId);
+        log.info("User ID {} is soft-deleting review ID {}", user.getId(), reviewId);
 
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new EntityNotFoundException("Review not found"));
 
-        // Chỉ owner mới được xóa
-        if (!review.getUser().getId().equals(user.getId())) {
+        // Chỉ owner hoặc ADMIN mới được xóa
+        boolean isAdmin = user.getRole().getRoleName().equals(Role.RoleName.ADMIN);
+        if (!isAdmin && !review.getUser().getId().equals(user.getId())) {
             throw new IllegalArgumentException("Bạn không có quyền xóa review này");
         }
 
-        // Lưu lại thông tin trước khi xóa
         Review.ReviewableType type = review.getReviewableType();
         Integer reviewableId = review.getReviewableId();
 
-        // Xóa ảnh
-        deleteOldImages(review.getImages());
+        // SOFT DELETE – không xóa thật để các reply vẫn hiển thị
+        // Frontend sẽ kiểm tra isDeleted=true và hiển thị "(review đã bị xóa)"
+        review.setIsDeleted(true);
+        review.setDeletedAt(LocalDateTime.now());
+        review.setUpdatedAt(LocalDateTime.now());
+        reviewRepository.save(review);
 
-        reviewRepository.delete(review);
-
-        // TỰ ĐỘNG CẬP NHẬT RATING VÀ TOTAL_REVIEWS CHO SHOP/PRODUCT SAU KHI XÓA
+        // Cập nhật lại rating (chỉ tính review chưa bị xóa)
         updateReviewableRating(type, reviewableId);
 
-        log.info("Review ID {} deleted successfully", reviewId);
+        log.info("Review ID {} soft-deleted successfully", reviewId);
     }
 
     @Override
@@ -566,6 +568,24 @@ public class ReviewServiceImpl implements ReviewService {
         ReviewResponse response = new ReviewResponse();
         response.setId(review.getId());
         response.setUserId(review.getUser().getId());
+        response.setIsDeleted(review.getIsDeleted());
+
+        // Nếu review đã bị xóa mềm → trả về placeholder, vẫn giữ replies
+        if (Boolean.TRUE.equals(review.getIsDeleted())) {
+            response.setUserFullName("Người dùng ẩn danh");
+            response.setUserAvatarUrl(null);
+            response.setComment("[review đã bị xóa]");
+            response.setRating(review.getRating()); // vẫn giữ rating để tham khảo
+            response.setImages(new ArrayList<>());
+            response.setReviewableType(review.getReviewableType().toString());
+            response.setReviewableId(review.getReviewableId());
+            response.setCreatedAt(review.getCreatedAt());
+            response.setUpdatedAt(review.getUpdatedAt());
+            // Vẫn load replies để FE hiển thị thread
+            List<ReviewReply> replies = reviewReplyRepository.findByReviewIdOrderByCreatedAtAsc(review.getId());
+            response.setReplies(replies.stream().map(this::mapReplyToResponse).toList());
+            return response;
+        }
 
         // Nếu anonymous thì không hiện thông tin user
         if (review.getIsAnonymous()) {
@@ -578,16 +598,12 @@ public class ReviewServiceImpl implements ReviewService {
 
         response.setReviewableType(review.getReviewableType().toString());
         response.setReviewableId(review.getReviewableId());
-
-        // Lấy tên shop/product và ảnh
         response.setReviewableName(getReviewableName(review.getReviewableType(), review.getReviewableId()));
         response.setReviewableImageUrls(getReviewableImageUrls(review.getReviewableType(), review.getReviewableId()));
-
         response.setOrderId(review.getOrder() != null ? review.getOrder().getId() : null);
         response.setRating(review.getRating());
         response.setComment(review.getComment());
 
-        // Parse images JSON
         if (review.getImages() != null && !review.getImages().isEmpty()) {
             try {
                 List<String> images = objectMapper.readValue(review.getImages(), new TypeReference<List<String>>() {});
@@ -601,24 +617,17 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         response.setIsAnonymous(review.getIsAnonymous());
-        response.setReply(review.getReply()); // Shop owner reply
+        response.setReply(review.getReply());
         response.setRepliedAt(review.getRepliedAt());
-
         if (review.getRepliedBy() != null) {
             response.setRepliedByName(review.getRepliedBy().getFullName());
         }
-
-        // User reply lại shop (phản bác) - DEPRECATED nhưng giữ lại
         response.setUserReply(review.getUserReply());
         response.setUserRepliedAt(review.getUserRepliedAt());
 
-        // NEW: Load conversation thread (tất cả replies)
         List<ReviewReply> replies = reviewReplyRepository.findByReviewIdOrderByCreatedAtAsc(review.getId());
-        response.setReplies(replies.stream()
-                .map(this::mapReplyToResponse)
-                .toList());
+        response.setReplies(replies.stream().map(this::mapReplyToResponse).toList());
 
-        // YÊU CẦU HOÀN TIỀN
         response.setHasRefundRequest(review.getHasRefundRequest());
 
         response.setCreatedAt(review.getCreatedAt());
@@ -686,7 +695,12 @@ public class ReviewServiceImpl implements ReviewService {
                 return productRepository.findById(id)
                         .map(product -> {
                             if (product.getImageUrls() != null && !product.getImageUrls().isEmpty()) {
-                                return Arrays.asList(product.getImageUrls().split(","));
+                                try {
+                                    return objectMapper.readValue(product.getImageUrls(), new TypeReference<List<String>>() {});
+                                } catch (Exception e) {
+                                    log.warn("Failed to parse product imageUrls JSON: {}", e.getMessage());
+                                    return List.<String>of();
+                                }
                             }
                             return List.<String>of();
                         })

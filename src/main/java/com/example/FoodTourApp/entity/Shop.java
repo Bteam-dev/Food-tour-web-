@@ -30,9 +30,31 @@ public class Shop {
     @Column(name = "banner_url", length = 255)
     private String bannerUrl;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "address_id", nullable = false)
-    private Address address;
+    // ---- Địa chỉ shop (nhúng trực tiếp, không dùng bảng addresses nữa) ----
+    @Column(name = "address_line", length = 255)
+    private String addressLine;
+
+    @Column(name = "ward", length = 100)
+    private String ward;
+
+    @Column(name = "district", length = 100)
+    private String district;
+
+    @Column(name = "city", nullable = false, length = 100)
+    private String city;
+
+    @Column(name = "country", length = 100)
+    private String country = "Vietnam";
+
+    @Column(name = "postal_code", length = 20)
+    private String postalCode;
+
+    @Column(name = "latitude")
+    private Double latitude;
+
+    @Column(name = "longitude")
+    private Double longitude;
+    // -----------------------------------------------------------------------
 
     @Column(name = "phone", length = 20)
     private String phone;

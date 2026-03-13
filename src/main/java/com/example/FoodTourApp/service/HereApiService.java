@@ -3,6 +3,7 @@ package com.example.FoodTourApp.service;
 import com.example.FoodTourApp.DTO.AddressDTO.AddressDetailDTO;
 import com.example.FoodTourApp.DTO.AddressDTO.AddressSuggestionDTO;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -32,5 +33,11 @@ public interface HereApiService {
      * @return Chi tiết địa chỉ với tọa độ
      */
     AddressDetailDTO geocodeAddress(String address);
-}
 
+    /**
+     * Tính khoảng cách đường đi (km) giữa 2 toạ độ qua HERE Routing API.
+     * Trả về null nếu không tính được (fallback về giá cố định ở caller).
+     */
+    BigDecimal calculateRouteDistanceKm(double originLat, double originLng,
+                                        double destLat,   double destLng);
+}

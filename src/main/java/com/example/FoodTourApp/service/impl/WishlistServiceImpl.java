@@ -10,25 +10,29 @@ import com.example.FoodTourApp.repository.ProductRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.repository.WishlistRepository;
 import com.example.FoodTourApp.service.WishlistService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class WishlistServiceImpl implements WishlistService {
 
     private final WishlistRepository wishlistRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -71,16 +75,6 @@ public class WishlistServiceImpl implements WishlistService {
     }
 
     @Override
-    @Transactional
-    public WishlistResponse toggleWishlist(Integer userId, Integer productId) {
-        if (wishlistRepository.existsByUserIdAndProductId(userId, productId)) {
-            return removeFromWishlist(userId, productId);
-        } else {
-            return addToWishlist(userId, productId);
-        }
-    }
-
-    @Override
     @Transactional(readOnly = true)
     public PageResponse<WishlistItemDTO> getUserWishlist(Integer userId, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
@@ -88,6 +82,25 @@ public class WishlistServiceImpl implements WishlistService {
 
         Page<WishlistItemDTO> dtoPage = wishlistPage.map(this::convertToDTO);
         return PageResponse.of(dtoPage);
+    }
+
+
+    @Override
+    @Transactional
+    public void clearWishlist(Integer userId) {
+        Page<Wishlist> wishlists = wishlistRepository.findByUserIdOrderByCreatedAtDesc(
+                userId, PageRequest.of(0, Integer.MAX_VALUE));
+        wishlistRepository.deleteAll(wishlists.getContent());
+    }
+
+    @Override
+    @Transactional
+    public WishlistResponse toggleWishlist(Integer userId, Integer productId) {
+        if (wishlistRepository.existsByUserIdAndProductId(userId, productId)) {
+            return removeFromWishlist(userId, productId);
+        } else {
+            return addToWishlist(userId, productId);
+        }
     }
 
     @Override
@@ -100,14 +113,6 @@ public class WishlistServiceImpl implements WishlistService {
     @Transactional(readOnly = true)
     public long countWishlistItems(Integer userId) {
         return wishlistRepository.countByUserId(userId);
-    }
-
-    @Override
-    @Transactional
-    public void clearWishlist(Integer userId) {
-        Page<Wishlist> wishlists = wishlistRepository.findByUserIdOrderByCreatedAtDesc(
-                userId, PageRequest.of(0, Integer.MAX_VALUE));
-        wishlistRepository.deleteAll(wishlists.getContent());
     }
 
     private WishlistItemDTO convertToDTO(Wishlist wishlist) {
@@ -132,13 +137,15 @@ public class WishlistServiceImpl implements WishlistService {
         dto.setTotalReviews(product.getTotalReviews());
         dto.setAddedAt(wishlist.getCreatedAt());
 
-        // Parse image URLs
+        // Parse image URLs – JSON array
         if (product.getImageUrls() != null && !product.getImageUrls().trim().isEmpty()) {
-            List<String> imageUrls = Arrays.stream(product.getImageUrls().split(","))
-                    .map(String::trim)
-                    .filter(url -> !url.isEmpty())
-                    .collect(Collectors.toList());
-            dto.setImageUrls(imageUrls.isEmpty() ? Collections.emptyList() : imageUrls);
+            try {
+                List<String> imageUrls = objectMapper.readValue(product.getImageUrls(), new TypeReference<List<String>>() {});
+                dto.setImageUrls(imageUrls.isEmpty() ? Collections.emptyList() : imageUrls);
+            } catch (Exception e) {
+                log.warn("Failed to parse imageUrls JSON for product {}: {}", product.getId(), e.getMessage());
+                dto.setImageUrls(Collections.emptyList());
+            }
         } else {
             dto.setImageUrls(Collections.emptyList());
         }

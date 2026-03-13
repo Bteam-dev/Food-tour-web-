@@ -3,6 +3,8 @@ package com.example.FoodTourApp.entity;
 import com.example.FoodTourApp.config.ProductListenerConfig;
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.math.RoundingMode;
@@ -36,8 +38,9 @@ public class Product {
     @Column(name = "discount_price", precision = 15, scale = 2)
     private BigDecimal discountPrice;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "image_urls", columnDefinition = "TEXT")
-    private String imageUrls; // Lưu dạng: "url1,url2,url3"
+    private String imageUrls; // JSON array: ["url1","url2","url3"]
 
     @Column(name = "ingredients", columnDefinition = "TEXT")
     private String ingredients;

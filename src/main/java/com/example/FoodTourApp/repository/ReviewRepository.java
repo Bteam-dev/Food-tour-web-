@@ -14,10 +14,16 @@ import java.util.Optional;
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Integer> {
 
-    // Tìm review theo reviewable type và ID
+    // Lấy review cho public listing:
+    // - Bao gồm review đã bị soft-delete (isDeleted=true) để FE hiển thị placeholder
+    //   và vẫn thấy replies bên dưới (giống Facebook)
+    // - Chỉ lấy review đã approved
+    @Query("SELECT r FROM Review r WHERE r.reviewableType = :reviewableType " +
+           "AND r.reviewableId = :reviewableId AND r.isApproved = true " +
+           "ORDER BY r.createdAt DESC")
     Page<Review> findByReviewableTypeAndReviewableIdAndIsApprovedTrue(
-            Review.ReviewableType reviewableType,
-            Integer reviewableId,
+            @Param("reviewableType") Review.ReviewableType reviewableType,
+            @Param("reviewableId") Integer reviewableId,
             Pageable pageable
     );
 
@@ -46,25 +52,26 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
             Integer reviewableId
     );
 
-    // Tính điểm trung bình
-    @Query("SELECT AVG(r.rating) FROM Review r WHERE r.reviewableType = :type AND r.reviewableId = :id AND r.isApproved = true")
+    // Tính điểm trung bình – CHỈ tính review chưa bị xóa mềm
+    @Query("SELECT AVG(r.rating) FROM Review r WHERE r.reviewableType = :type AND r.reviewableId = :id AND r.isApproved = true AND r.isDeleted = false")
     Double calculateAverageRating(
             @Param("type") Review.ReviewableType type,
             @Param("id") Integer id
     );
 
-    // Đếm số review theo rating
-    @Query("SELECT COUNT(r) FROM Review r WHERE r.reviewableType = :type AND r.reviewableId = :id AND r.rating = :rating AND r.isApproved = true")
+    // Đếm số review theo rating – chỉ tính chưa bị xóa mềm
+    @Query("SELECT COUNT(r) FROM Review r WHERE r.reviewableType = :type AND r.reviewableId = :id AND r.rating = :rating AND r.isApproved = true AND r.isDeleted = false")
     Long countByRating(
             @Param("type") Review.ReviewableType type,
             @Param("id") Integer id,
             @Param("rating") Integer rating
     );
 
-    // Tổng số review
+    // Tổng số review – chỉ tính chưa bị xóa mềm
+    @Query("SELECT COUNT(r) FROM Review r WHERE r.reviewableType = :reviewableType AND r.reviewableId = :reviewableId AND r.isApproved = true AND r.isDeleted = false")
     Long countByReviewableTypeAndReviewableIdAndIsApprovedTrue(
-            Review.ReviewableType reviewableType,
-            Integer reviewableId
+            @Param("reviewableType") Review.ReviewableType reviewableType,
+            @Param("reviewableId") Integer reviewableId
     );
 
     // TÌM TẤT CẢ REVIEWS CÓ YÊU CẦU HOÀN TIỀN (PRODUCT REVIEW)

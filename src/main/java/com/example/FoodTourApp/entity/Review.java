@@ -72,6 +72,12 @@ public class Review {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 
+    @Column(name = "is_deleted", nullable = false)
+    private Boolean isDeleted = false;   // soft delete – giữ replies khi "xóa"
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     public enum ReviewableType {
         shop, product
     }

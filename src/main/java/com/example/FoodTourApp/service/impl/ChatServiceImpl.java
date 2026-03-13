@@ -102,6 +102,18 @@ public class ChatServiceImpl implements ChatService {
             throw new RuntimeException("Bạn không phải là thành viên của cuộc trò chuyện này");
         }
 
+        // ── Kiểm tra blocked ───────────────────────────────────────────────
+        // Nếu conversation bị chặn, người BỊ chặn (không phải người chặn) không gửi được
+        if (conversation.isBlocked()) {
+            Integer blockedById = conversation.getBlockedByUserId();
+            // Người chặn vẫn gửi được, người bị chặn thì không
+            boolean isSenderTheBlocker = senderId.equals(blockedById);
+            if (!isSenderTheBlocker) {
+                throw new RuntimeException("Bạn đã bị chặn trong cuộc trò chuyện này và không thể gửi tin nhắn.");
+            }
+        }
+        // ──────────────────────────────────────────────────────────────────
+
         User sender = userRepository.findById(senderId)
                 .orElseThrow(() -> new RuntimeException("User không tồn tại"));
 
@@ -359,18 +371,44 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional
     public void deleteConversation(Long conversationId, Integer userId) {
+        // Chat không được phép xóa – liên quan đến lịch sử giao tiếp
+        // Chỉ có thể chặn (block) nếu đối phương quá phiền phức
+        throw new RuntimeException("Không thể xóa cuộc trò chuyện. Hãy sử dụng chức năng chặn (block) nếu đối phương quá phiền phức.");
+    }
+
+    @Override
+    @Transactional
+    public ConversationResponse blockConversation(Long conversationId, Integer userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation không tồn tại"));
-
         boolean isParticipant = conversation.getParticipants().stream()
-                .anyMatch(user -> user.getId().equals(userId));
+                .anyMatch(u -> u.getId().equals(userId));
+        if (!isParticipant) throw new RuntimeException("Bạn không phải thành viên của cuộc trò chuyện này");
+        if (conversation.isBlocked()) throw new RuntimeException("Cuộc trò chuyện đã bị chặn rồi");
 
-        if (!isParticipant) {
-            throw new RuntimeException("Bạn không có quyền xóa cuộc trò chuyện này");
-        }
+        conversation.setBlockedByUserId(userId);
+        conversation.setBlockedAt(java.time.LocalDateTime.now());
+        conversation.setUpdatedAt(java.time.LocalDateTime.now());
+        conversationRepository.save(conversation);
+        log.info("User {} blocked conversation {}", userId, conversationId);
+        return mapToConversationResponse(conversation, userId);
+    }
 
-        conversationRepository.delete(conversation);
-        log.info("User {} deleted conversation {}", userId, conversationId);
+    @Override
+    @Transactional
+    public ConversationResponse unblockConversation(Long conversationId, Integer userId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation không tồn tại"));
+        if (!conversation.isBlocked()) throw new RuntimeException("Cuộc trò chuyện chưa bị chặn");
+        if (!conversation.getBlockedByUserId().equals(userId))
+            throw new RuntimeException("Chỉ người đã chặn mới có thể bỏ chặn");
+
+        conversation.setBlockedByUserId(null);
+        conversation.setBlockedAt(null);
+        conversation.setUpdatedAt(java.time.LocalDateTime.now());
+        conversationRepository.save(conversation);
+        log.info("User {} unblocked conversation {}", userId, conversationId);
+        return mapToConversationResponse(conversation, userId);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -393,6 +431,8 @@ public class ChatServiceImpl implements ChatService {
                 .lastMessage(conversation.getLastMessage())
                 .lastMessageAt(conversation.getLastMessageAt())
                 .unreadCount(unreadCount)
+                .isBlocked(conversation.isBlocked())
+                .blockedByUserId(conversation.getBlockedByUserId())
                 .createdAt(conversation.getCreatedAt())
                 .updatedAt(conversation.getUpdatedAt())
                 .build();

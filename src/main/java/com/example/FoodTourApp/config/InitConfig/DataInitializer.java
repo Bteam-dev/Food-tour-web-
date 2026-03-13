@@ -55,25 +55,18 @@ public class DataInitializer implements CommandLineRunner {
             sellerRole.setCreatedAt(LocalDateTime.now());
             roleRepository.save(sellerRole);
             logger.info("Created role: seller");
-
-            Role resellerRole = new Role();
-            resellerRole.setRoleName(Role.RoleName.RESELLER);
-            resellerRole.setDescription("Reseller role");
-            resellerRole.setCreatedAt(LocalDateTime.now());
-            roleRepository.save(resellerRole);
-            logger.info("Created role: reseller");
         } else {
             logger.info("Roles already exist, skipping role creation.");
         }
 
         // Initialize admin user
-        if (userRepository.findByEmail("admin@foodtourapp.com").isEmpty()) {
+        if (userRepository.findByEmail("pheuconbattai@gmail.com").isEmpty()) {
             logger.info("No admin user found, creating admin user...");
             User admin = new User();
-            admin.setUsername("admin");
-            admin.setEmail("admin@foodtourapp.com");
-            admin.setPasswordHash(passwordEncoder.encode("Admin123!"));
-            admin.setFullName("Admin User");
+            admin.setUsername("pheuconbattai196");
+            admin.setEmail("pheuconbattai@gmail.com");
+            admin.setPasswordHash(passwordEncoder.encode("Minhngosen196@"));
+            admin.setFullName("Admin Tổng");
             admin.setPhone("1234567890");
             admin.setAvatarUrl(null); // Admin không cần avatar lúc khởi tạo
             admin.setDateOfBirth(null); // Có thể cập nhật sau

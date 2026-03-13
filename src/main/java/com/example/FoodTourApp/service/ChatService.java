@@ -85,4 +85,15 @@ public interface ChatService {
      * Xóa conversation (soft delete hoặc hard delete)
      */
     void deleteConversation(Long conversationId, Integer userId);
+
+    /**
+     * Chặn cuộc trò chuyện (blockedByUserId = userId)
+     * Người bị chặn không thể gửi tin nhắn trong conversation đó
+     */
+    ConversationResponse blockConversation(Long conversationId, Integer userId);
+
+    /**
+     * Bỏ chặn cuộc trò chuyện (chỉ người đã chặn mới có thể bỏ)
+     */
+    ConversationResponse unblockConversation(Long conversationId, Integer userId);
 }

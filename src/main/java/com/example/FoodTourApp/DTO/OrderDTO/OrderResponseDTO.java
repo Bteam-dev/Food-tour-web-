@@ -43,5 +43,11 @@ public class OrderResponseDTO {
     // YÊU CẦU HOÀN TIỀN - Đơn hàng có review yêu cầu refund
     private Boolean hasRefundRequest;
 
+    /** Khoảng cách giao hàng (km) */
+    private BigDecimal deliveryDistanceKm;
+
+    /** Voucher đã áp dụng */
+    private String voucherCode;
+
     private List<OrderItemResponseDTO> orderItems;
 }

@@ -165,6 +165,34 @@ public class ChatController {
         }
     }
 
+    // ─── Block / Unblock ─────────────────────────────────────────────────────
+
+    /**
+     * Chặn cuộc trò chuyện – người bị chặn không gửi được tin nhắn
+     * POST /api/user/chat/conversations/{conversationId}/block
+     */
+    @PostMapping("/conversations/{conversationId}/block")
+    public ResponseEntity<?> blockConversation(
+            @PathVariable Long conversationId,
+            @AuthenticationPrincipal User user) {
+        try {
+            return ok("Đã chặn cuộc trò chuyện", chatService.blockConversation(conversationId, user.getId()));
+        } catch (Exception e) { return error(e); }
+    }
+
+    /**
+     * Bỏ chặn cuộc trò chuyện – chỉ người đã chặn mới bỏ được
+     * POST /api/user/chat/conversations/{conversationId}/unblock
+     */
+    @PostMapping("/conversations/{conversationId}/unblock")
+    public ResponseEntity<?> unblockConversation(
+            @PathVariable Long conversationId,
+            @AuthenticationPrincipal User user) {
+        try {
+            return ok("Đã bỏ chặn cuộc trò chuyện", chatService.unblockConversation(conversationId, user.getId()));
+        } catch (Exception e) { return error(e); }
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private ResponseEntity<Map<String, Object>> ok(String message, Object data) {

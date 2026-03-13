@@ -15,7 +15,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -55,9 +54,7 @@ public class UserWishlistController {
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error adding to wishlist for user ID {}: {}", user.getId(), e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                    new WishlistResponse(e.getMessage(), false, null, 0L)
-            );
+            return ResponseEntity.badRequest().body(new WishlistResponse(e.getMessage(), false, null, 0L));
         }
     }
 
@@ -75,35 +72,33 @@ public class UserWishlistController {
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error removing from wishlist for user ID {}: {}", user.getId(), e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                    new WishlistResponse(e.getMessage(), false, null, 0L)
-            );
+            return ResponseEntity.badRequest().body(new WishlistResponse(e.getMessage(), false, null, 0L));
         }
     }
 
     /**
-     * Toggle wishlist (thêm nếu chưa có, xóa nếu đã có)
-     * POST /api/user/wishlist/toggle
+     * Toggle wishlist: thêm nếu chưa có, xóa nếu đã có
+     * POST /api/user/wishlist/toggle/{productId}
+     * FE dùng khi bấm icon trái tim – nếu đã có thì xóa, chưa có thì thêm
      */
-    @PostMapping("/toggle")
+    @PostMapping("/toggle/{productId}")
     public ResponseEntity<WishlistResponse> toggleWishlist(
-            @Valid @RequestBody AddToWishlistRequest request,
+            @PathVariable Integer productId,
             @AuthenticationPrincipal User user) {
-        logger.info("User ID {} is toggling product {} in wishlist", user.getId(), request.getProductId());
+        logger.info("User ID {} is toggling product {} in wishlist", user.getId(), productId);
         try {
-            WishlistResponse response = wishlistService.toggleWishlist(user.getId(), request.getProductId());
+            WishlistResponse response = wishlistService.toggleWishlist(user.getId(), productId);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             logger.error("Error toggling wishlist for user ID {}: {}", user.getId(), e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                    new WishlistResponse(e.getMessage(), false, null, 0L)
-            );
+            return ResponseEntity.badRequest().body(new WishlistResponse(e.getMessage(), false, null, 0L));
         }
     }
 
     /**
      * Kiểm tra sản phẩm đã có trong wishlist chưa
      * GET /api/user/wishlist/check/{productId}
+     * FE dùng để tô màu trái tim khi mở trang chi tiết sản phẩm
      */
     @GetMapping("/check/{productId}")
     public ResponseEntity<Map<String, Object>> checkWishlist(
@@ -111,23 +106,19 @@ public class UserWishlistController {
             @AuthenticationPrincipal User user) {
         logger.info("User ID {} is checking product {} in wishlist", user.getId(), productId);
         boolean inWishlist = wishlistService.isInWishlist(user.getId(), productId);
-        Map<String, Object> response = new HashMap<>();
-        response.put("productId", productId);
-        response.put("inWishlist", inWishlist);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(Map.of("productId", productId, "inWishlist", inWishlist));
     }
 
     /**
      * Đếm số lượng sản phẩm trong wishlist
      * GET /api/user/wishlist/count
+     * FE dùng hiển thị badge số lượng trên icon wishlist
      */
     @GetMapping("/count")
     public ResponseEntity<Map<String, Object>> countWishlistItems(@AuthenticationPrincipal User user) {
         logger.info("User ID {} is getting wishlist count", user.getId());
         long count = wishlistService.countWishlistItems(user.getId());
-        Map<String, Object> response = new HashMap<>();
-        response.put("count", count);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(Map.of("count", count));
     }
 
     /**
@@ -139,17 +130,10 @@ public class UserWishlistController {
         logger.info("User ID {} is clearing wishlist", user.getId());
         try {
             wishlistService.clearWishlist(user.getId());
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Đã xóa toàn bộ danh sách yêu thích");
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(Map.of("success", true, "message", "Đã xóa toàn bộ danh sách yêu thích"));
         } catch (Exception e) {
             logger.error("Error clearing wishlist for user ID {}: {}", user.getId(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
         }
     }
 }
-

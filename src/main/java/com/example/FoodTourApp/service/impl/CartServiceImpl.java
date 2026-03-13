@@ -5,6 +5,7 @@ import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.*;
 import com.example.FoodTourApp.repository.*;
 import com.example.FoodTourApp.service.CartService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -278,8 +279,11 @@ public class CartServiceImpl implements CartService {
 
         List<String> imageUrls = List.of();
         if (product.getImageUrls() != null && !product.getImageUrls().isBlank()) {
-            imageUrls = Arrays.stream(product.getImageUrls().split(","))
-                    .map(String::trim).filter(u -> !u.isEmpty()).collect(Collectors.toList());
+            try {
+                imageUrls = objectMapper.readValue(product.getImageUrls(), new TypeReference<List<String>>() {});
+            } catch (Exception e) {
+                log.warn("Failed to parse product imageUrls JSON for product {}: {}", product.getId(), e.getMessage());
+            }
         }
 
         CartItemResponseDTO dto = new CartItemResponseDTO();

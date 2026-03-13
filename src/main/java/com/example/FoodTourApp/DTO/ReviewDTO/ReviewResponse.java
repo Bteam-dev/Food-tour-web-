@@ -27,6 +27,9 @@ public class ReviewResponse {
     private LocalDateTime userRepliedAt;
     private List<ReviewReplyResponse> replies; // NEW: Thread conversation (cãi nhau dài được!)
 
+    // Soft-delete flag – frontend hiển thị "(review đã bị xóa)" khi true
+    private Boolean isDeleted;
+
     // YÊU CẦU HOÀN TIỀN
     private Boolean hasRefundRequest;
 
