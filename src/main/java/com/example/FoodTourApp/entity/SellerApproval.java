@@ -2,6 +2,8 @@ package com.example.FoodTourApp.entity;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -17,8 +19,9 @@ public class SellerApproval {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "id_card_image_url", nullable = false, length = 255)
-    private String idCardImageUrl;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "id_card_image_urls", nullable = false, columnDefinition = "JSON")
+    private String idCardImageUrls;
 
     @Column(name = "facebook_url", length = 255)
     private String facebookUrl;

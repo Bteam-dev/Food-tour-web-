@@ -8,6 +8,7 @@ public class VariantTypeResponseDTO {
     private Integer id;
     private String name;
     private String description;
+    private String selectionType; // "SINGLE" hoặc "MULTIPLE"
     private Boolean isActive;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

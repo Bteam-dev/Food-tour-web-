@@ -62,8 +62,9 @@ public class Shop {
     @Column(name = "email", length = 100)
     private String email;
 
-    @Column(name = "business_license", length = 100, nullable = false)
-    private String businessLicense;
+    @Column(name = "business_license", nullable = false, columnDefinition = "JSON")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String businessLicenseImageUrls;
 
     @Column(name = "tax_code", length = 50, nullable = false)
     private String taxCode;
@@ -83,6 +84,9 @@ public class Shop {
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
+
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

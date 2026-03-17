@@ -28,7 +28,7 @@ public class SellerShopController {
     private final ShopService shopService;
 
     /**
-     * Tạo cửa hàng mới (upload ảnh logo và banner dưới dạng form-data)
+     * Tạo cửa hàng mới (upload ảnh logo, banner, giấy phép kinh doanh dưới dạng form-data)
      * POST /api/seller/shops
      *
      * Cách sử dụng:
@@ -36,19 +36,21 @@ public class SellerShopController {
      * - data: JSON string (CreateShopRequestDTO) - REQUIRED
      * - logo: file (optional, jpg/jpeg/png, max 5MB)
      * - banner: file (optional, jpg/jpeg/png, max 5MB)
+     * - businessLicenseImages: file[] (optional, ảnh giấy phép kinh doanh, jpg/jpeg/png, max 5MB mỗi file)
      *
-     * NOTE: Không cần gửi logoUrl/bannerUrl trong JSON nữa, chỉ cần upload file
+     * NOTE: Không cần gửi logoUrl/bannerUrl/businessLicense trong JSON nữa, chỉ cần upload file
      */
     @PostMapping
     public ResponseEntity<ShopResponseDTO> createShop(
             @RequestParam(value = "data", required = false) String dataJson,
             @RequestParam(value = "logo", required = false) MultipartFile logo,
             @RequestParam(value = "banner", required = false) MultipartFile banner,
+            @RequestParam(value = "businessLicenseImages", required = false) MultipartFile[] businessLicenseImages,
             @AuthenticationPrincipal User seller) {
 
         log.info("Creating shop by seller: {}", seller.getId());
         try {
-            ShopResponseDTO response = shopService.createShopFromJson(dataJson, seller, logo, banner);
+            ShopResponseDTO response = shopService.createShopFromJson(dataJson, seller, logo, banner, businessLicenseImages);
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (Exception e) {
             log.error("Error creating shop: {}", e.getMessage(), e);
@@ -57,7 +59,7 @@ public class SellerShopController {
     }
 
     /**
-     * Cập nhật thông tin cửa hàng (upload ảnh logo và banner mới dưới dạng form-data)
+     * Cập nhật thông tin cửa hàng (upload ảnh logo, banner, giấy phép kinh doanh mới dưới dạng form-data)
      * PUT /api/seller/shops/{shopId}
      *
      * Cách sử dụng:
@@ -65,6 +67,7 @@ public class SellerShopController {
      * - data: JSON string (UpdateShopRequestDTO) - REQUIRED
      * - logo: file (optional, nếu muốn đổi logo mới)
      * - banner: file (optional, nếu muốn đổi banner mới)
+     * - businessLicenseImages: file[] (optional, ảnh giấy phép kinh doanh mới)
      */
     @PutMapping("/{shopId}")
     public ResponseEntity<ShopResponseDTO> updateShop(
@@ -72,11 +75,12 @@ public class SellerShopController {
             @RequestParam(value = "data", required = false) String dataJson,
             @RequestParam(value = "logo", required = false) MultipartFile logo,
             @RequestParam(value = "banner", required = false) MultipartFile banner,
+            @RequestParam(value = "businessLicenseImages", required = false) MultipartFile[] businessLicenseImages,
             @AuthenticationPrincipal User seller) {
 
         log.info("Updating shop: {} by seller: {}", shopId, seller.getId());
         try {
-            ShopResponseDTO response = shopService.updateShopFromJson(shopId, dataJson, seller, logo, banner);
+            ShopResponseDTO response = shopService.updateShopFromJson(shopId, dataJson, seller, logo, banner, businessLicenseImages);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error updating shop: {}", e.getMessage(), e);

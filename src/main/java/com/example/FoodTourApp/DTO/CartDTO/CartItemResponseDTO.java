@@ -24,4 +24,10 @@ public class CartItemResponseDTO {
     private String specialInstructions;
     private LocalDateTime addedAt;
     private LocalDateTime updatedAt;
+
+    /** Tổng số loại sản phẩm (items) hiện có trong giỏ hàng */
+    private Integer totalCartItems;
+
+    /** Tổng số lượng (quantity) hiện có trong giỏ hàng */
+    private Integer totalCartQuantity;
 }

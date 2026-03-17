@@ -59,26 +59,49 @@ public interface ShopService {
     void deleteShop(Integer shopId, User seller);
 
     /**
-     * Tạo shop + upload logo/banner trong một lần gọi duy nhất.
+     * Tạo shop + upload logo/banner/businessLicense trong một lần gọi duy nhất.
      * Controller không cần biết về FileStorageService.
      */
     ShopResponseDTO createShopWithImages(CreateShopRequestDTO request, User seller,
-                                         MultipartFile logo, MultipartFile banner);
+                                         MultipartFile logo, MultipartFile banner,
+                                         MultipartFile[] businessLicenseImages);
 
     /**
-     * Cập nhật shop + upload logo/banner mới nếu có.
+     * Cập nhật shop + upload logo/banner/businessLicense mới nếu có.
      */
     ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
-                                         MultipartFile logo, MultipartFile banner);
+                                         MultipartFile logo, MultipartFile banner,
+                                         MultipartFile[] businessLicenseImages);
 
     /**
-     * Tạo shop từ JSON string + upload logo/banner.
+     * Tạo shop từ JSON string + upload logo/banner/businessLicense.
      * Controller chỉ truyền raw dataJson và files.
      */
-    ShopResponseDTO createShopFromJson(String dataJson, User seller, MultipartFile logo, MultipartFile banner);
+    ShopResponseDTO createShopFromJson(String dataJson, User seller,
+                                       MultipartFile logo, MultipartFile banner,
+                                       MultipartFile[] businessLicenseImages);
 
     /**
-     * Cập nhật shop từ JSON string + upload logo/banner mới.
+     * Cập nhật shop từ JSON string + upload logo/banner/businessLicense mới.
      */
-    ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller, MultipartFile logo, MultipartFile banner);
+    ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller,
+                                       MultipartFile logo, MultipartFile banner,
+                                       MultipartFile[] businessLicenseImages);
+
+    /**
+     * Admin duyệt shop: set isVerified = true, isActive = true.
+     * Gửi FCM notification cho seller.
+     */
+    ShopResponseDTO approveShop(Integer shopId);
+
+    /**
+     * Admin từ chối shop: set isVerified = false, isActive = false.
+     * Gửi FCM notification cho seller kèm lý do.
+     */
+    ShopResponseDTO rejectShop(Integer shopId, String reason);
+
+    /**
+     * Admin lấy tất cả shops (kể cả chưa verified).
+     */
+    Page<ShopResponseDTO> getAllShopsForAdmin(Pageable pageable);
 }

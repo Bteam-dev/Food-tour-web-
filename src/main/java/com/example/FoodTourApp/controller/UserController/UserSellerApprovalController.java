@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalRequest;
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.SellerApprovalService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,8 +16,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import javax.validation.Valid;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -28,16 +29,39 @@ public class UserSellerApprovalController {
 
     private static final Logger logger = LoggerFactory.getLogger(UserSellerApprovalController.class);
     private final SellerApprovalService sellerApprovalService;
+    private final ObjectMapper objectMapper;
 
+    /**
+     * Nộp đơn xin trở thành seller.
+     * Content-Type: multipart/form-data
+     * - data: JSON string (SellerApprovalRequest) chứa facebookUrl, zaloUrl (optional)
+     * - idCardImages: file[] (REQUIRED) - Ảnh căn cước công dân (mặt trước, mặt sau)
+     */
     @PostMapping("/submit")
-    public ResponseEntity<?> submitApproval(@Valid @RequestBody SellerApprovalRequest request,
-                                            Authentication authentication) {
+    public ResponseEntity<?> submitApproval(
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "idCardImages") MultipartFile[] idCardImages,
+            Authentication authentication) {
         User user = (User) authentication.getPrincipal();
         Integer userId = user.getId();
         logger.info("User ID {} is submitting seller approval request", userId);
 
         try {
-            SellerApprovalResponse response = sellerApprovalService.submitApproval(userId, request);
+            // Validate idCardImages
+            if (idCardImages == null || idCardImages.length == 0) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("success", false);
+                error.put("message", "Ảnh căn cước công dân là bắt buộc");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            // Parse JSON data (optional fields)
+            SellerApprovalRequest request = new SellerApprovalRequest();
+            if (dataJson != null && !dataJson.isEmpty()) {
+                request = objectMapper.readValue(dataJson, SellerApprovalRequest.class);
+            }
+
+            SellerApprovalResponse response = sellerApprovalService.submitApproval(userId, request, idCardImages);
             logger.info("Seller approval request submitted successfully by user ID {}", userId);
 
             Map<String, Object> result = new HashMap<>();

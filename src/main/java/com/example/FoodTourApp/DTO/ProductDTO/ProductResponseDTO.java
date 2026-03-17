@@ -12,6 +12,7 @@ public class ProductResponseDTO {
     private Integer id;
     private Integer shopId;
     private String shopName;
+    private Boolean shopIsOpen; // ✅ NEW: shop's open/closed status
     private Integer categoryId;
     private String categoryName;
     private String name;

@@ -19,10 +19,11 @@ public interface ShopRepository extends JpaRepository<Shop, Integer> {
 
     List<Shop> findByIsVerifiedTrue();
 
-    Optional<Shop> findByBusinessLicense(String businessLicense);
-
     Optional<Shop> findByTaxCode(String taxCode);
 
-    // WITH PAGINATION
+    // Chỉ shop đã verified VÀ đang active mới hiện ra public
+    Page<Shop> findByIsVerifiedTrueAndIsActiveTrue(Pageable pageable);
+
+    // Admin: tất cả shop (kể cả chưa verified)
     Page<Shop> findByIsActiveTrue(Pageable pageable);
 }

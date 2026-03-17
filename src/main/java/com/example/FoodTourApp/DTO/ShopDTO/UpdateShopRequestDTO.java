@@ -31,8 +31,6 @@ public class UpdateShopRequestDTO {
     @Email(message = "Email không hợp lệ")
     private String email;
 
-    private String businessLicense;
-
     private String taxCode;
 
     private String openingHours;

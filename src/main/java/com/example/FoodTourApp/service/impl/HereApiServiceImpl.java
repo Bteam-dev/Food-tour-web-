@@ -13,6 +13,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 @Service
 @Slf4j
@@ -39,8 +40,8 @@ public class HereApiServiceImpl implements HereApiService {
             UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(HERE_AUTOCOMPLETE_URL)
                     .queryParam("q", query)
                     .queryParam("limit", limit != null ? limit : 5)
-                    .queryParam("at", "16.0544,108.2022") // Tọa độ trung tâm Việt Nam (Đà Nẵng)
-                    .queryParam("in", "countryCode:VNM") // Chỉ tìm ở Việt Nam
+                    .queryParam("at", "14.0583,108.2772") // Trung tâm địa lý Việt Nam (Tây Nguyên)
+                    .queryParam("in", "countryCode:VNM") // Giới hạn toàn quốc Việt Nam
                     .queryParam("lang", "vi-VN")
                     .queryParam("apiKey", hereApiKey);
 
@@ -79,6 +80,7 @@ public class HereApiServiceImpl implements HereApiService {
                 String districtHere = address.path("district").asText(null);
                 String cityHere = address.path("city").asText(null);
                 String countyHere = address.path("county").asText(null);
+                String stateHere = address.path("state").asText(null);
 
                 // Build addressLine từ số nhà + đường
                 // Nếu không có thì để null (trường hợp chọn locality)
@@ -87,15 +89,8 @@ public class HereApiServiceImpl implements HereApiService {
                 // Map theo cấu trúc VN: ward → district → city
                 suggestion.setWard(districtHere);
 
-                // Nếu có county: city=quận/huyện, county=tỉnh/thành
-                // Nếu không có county: city=tỉnh/thành
-                if (countyHere != null && !countyHere.isEmpty()) {
-                    suggestion.setDistrict(cityHere);
-                    suggestion.setCity(countyHere);
-                } else {
-                    suggestion.setDistrict(null);
-                    suggestion.setCity(cityHere);
-                }
+                // Map district và city từ HERE API response
+                mapDistrictAndCity(suggestion::setDistrict, suggestion::setCity, cityHere, countyHere, stateHere);
 
                 suggestion.setCountry(address.path("countryName").asText("Vietnam"));
                 suggestion.setPostalCode(address.path("postalCode").asText(null));
@@ -142,6 +137,7 @@ public class HereApiServiceImpl implements HereApiService {
             String districtHere = address.path("district").asText(null);
             String cityHere = address.path("city").asText(null);
             String countyHere = address.path("county").asText(null);
+            String stateHere = address.path("state").asText(null);
 
             AddressDetailDTO detail = new AddressDetailDTO();
 
@@ -151,16 +147,8 @@ public class HereApiServiceImpl implements HereApiService {
             // ward: phường/xã
             detail.setWard(districtHere);
 
-            // district và city mapping theo logic:
-            // Nếu có county: city (HERE) = district (VN), county (HERE) = city (VN)
-            // Nếu không có county: city (HERE) = city (VN)
-            if (countyHere != null && !countyHere.isEmpty()) {
-                detail.setDistrict(cityHere);    // "Quận Cầu Giấy"
-                detail.setCity(countyHere);      // "Hà Nội"
-            } else {
-                detail.setDistrict(null);
-                detail.setCity(cityHere);
-            }
+            // Map district và city từ HERE API response
+            mapDistrictAndCity(detail::setDistrict, detail::setCity, cityHere, countyHere, stateHere);
 
             detail.setCountry(address.path("countryName").asText("Vietnam"));
             detail.setPostalCode(address.path("postalCode").asText(null));
@@ -205,21 +193,14 @@ public class HereApiServiceImpl implements HereApiService {
             String street = addressNode.path("street").asText(null);
             String countyValue = addressNode.path("county").asText(null);
             String cityValue = addressNode.path("city").asText(null);
+            String stateValue = addressNode.path("state").asText(null);
 
             AddressDetailDTO detail = new AddressDetailDTO();
             detail.setAddressLine(buildAddressLineFromComponents(houseNumber, street));
             detail.setWard(addressNode.path("district").asText(null));
 
-            if (cityValue != null && countyValue != null) {
-                detail.setDistrict(cityValue);
-                detail.setCity(countyValue);
-            } else if (cityValue != null) {
-                detail.setCity(cityValue);
-                detail.setDistrict(null);
-            } else if (countyValue != null) {
-                detail.setCity(countyValue);
-                detail.setDistrict(null);
-            }
+            // Map district và city từ HERE API response
+            mapDistrictAndCity(detail::setDistrict, detail::setCity, cityValue, countyValue, stateValue);
 
             detail.setCountry(addressNode.path("countryName").asText("Vietnam"));
             detail.setPostalCode(addressNode.path("postalCode").asText(null));
@@ -231,6 +212,37 @@ public class HereApiServiceImpl implements HereApiService {
         } catch (Exception e) {
             log.error("Error calling HERE Geocode API: ", e);
             throw new RuntimeException("Không thể geocode địa chỉ: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Map district (quận/huyện) và city (tỉnh/thành phố) từ HERE API response.
+     *
+     * HERE API trả về cấu trúc address cho Việt Nam:
+     * - Trường hợp 1 (có county): city=quận/huyện, county=tỉnh/thành, state có thể trùng county
+     * - Trường hợp 2 (không có county, có state): city=quận/huyện, state=tỉnh/thành
+     * - Trường hợp 3 (chỉ có city): city=tỉnh/thành (district không xác định)
+     *
+     * @param setDistrict setter cho district (quận/huyện)
+     * @param setCity     setter cho city (tỉnh/thành phố)
+     * @param cityHere    giá trị "city" từ HERE API
+     * @param countyHere  giá trị "county" từ HERE API (có thể null)
+     * @param stateHere   giá trị "state" từ HERE API (có thể null)
+     */
+    private void mapDistrictAndCity(Consumer<String> setDistrict, Consumer<String> setCity,
+                                    String cityHere, String countyHere, String stateHere) {
+        if (countyHere != null && !countyHere.isEmpty()) {
+            // county có giá trị -> city (HERE) = quận/huyện, county = tỉnh/thành
+            setDistrict.accept(cityHere);
+            setCity.accept(countyHere);
+        } else if (stateHere != null && !stateHere.isEmpty()) {
+            // Không có county nhưng có state -> city (HERE) = quận/huyện, state = tỉnh/thành
+            setDistrict.accept(cityHere);
+            setCity.accept(stateHere);
+        } else {
+            // Chỉ có city -> city = tỉnh/thành, district không xác định
+            setDistrict.accept(null);
+            setCity.accept(cityHere);
         }
     }
 

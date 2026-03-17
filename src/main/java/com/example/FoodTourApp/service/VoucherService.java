@@ -19,11 +19,17 @@ public interface VoucherService {
     /** Xóa (soft: isActive = false) */
     void deactivate(Integer voucherId, User actor);
 
-    /** Lấy voucher toàn sàn đang hiệu lực (public) */
+    /** Lấy voucher toàn sàn đang hiệu lực (public), có thể lọc theo discountType */
     Page<VoucherResponse> getActivePlatformVouchers(Pageable pageable);
+
+    /** Lấy voucher toàn sàn đang hiệu lực, lọc theo loại giảm giá (PERCENT/FIXED/FREE_SHIP) */
+    Page<VoucherResponse> getActivePlatformVouchersByType(String discountType, Pageable pageable);
 
     /** Lấy voucher của shop đang hiệu lực (public) */
     Page<VoucherResponse> getActiveShopVouchers(Integer shopId, Pageable pageable);
+
+    /** Lấy voucher của shop đang hiệu lực, lọc theo loại giảm giá */
+    Page<VoucherResponse> getActiveShopVouchersByType(Integer shopId, String discountType, Pageable pageable);
 
     /** Seller lấy toàn bộ voucher shop mình */
     Page<VoucherResponse> getMyShopVouchers(User seller, Pageable pageable);

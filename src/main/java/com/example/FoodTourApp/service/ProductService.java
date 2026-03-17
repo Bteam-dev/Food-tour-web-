@@ -71,4 +71,14 @@ public interface ProductService {
 
     //Tìm sản phẩm theo tên (LIKE %keyword%)
     Page<ProductResponseDTO> getProductsByNameContaining(String keyword, Pageable pageable);
+
+    /**
+     * Lọc và sắp xếp sản phẩm nâng cao.
+     *
+     * @param sortBy    "rating_desc" | "rating_asc" | "best_selling" | "newest" | "price_asc" | "price_desc"
+     * @param city      Tên thành phố (tùy chọn)
+     * @param categoryId ID danh mục (tùy chọn)
+     * @param pageable  Phân trang
+     */
+    Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId, Pageable pageable);
 }

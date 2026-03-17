@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -224,18 +223,4 @@ public class SellerProductController {
         }
     }
 
-    // Endpoint để admin lấy tất cả sản phẩm (kể cả inactive)
-    @GetMapping("/all")
-    @PreAuthorize("hasAuthority('ADMIN')")
-    public ResponseEntity<?> getAllProducts(@AuthenticationPrincipal User user) {
-        logger.info("Admin {} is fetching all products", user.getEmail());
-
-        try {
-            List<ProductResponseDTO> products = productService.getAllProducts();
-            return ResponseEntity.ok(Map.of("success", true, "data", products));
-        } catch (Exception e) {
-            logger.error("Error fetching all products: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().body(Map.of("success", false, "message", "Failed to fetch products"));
-        }
-    }
 }

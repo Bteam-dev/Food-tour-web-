@@ -9,14 +9,20 @@ import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.RoleRepository;
 import com.example.FoodTourApp.repository.SellerApprovalRepository;
 import com.example.FoodTourApp.repository.UserRepository;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.SellerApprovalService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 public class SellerApprovalServiceImpl implements SellerApprovalService {
@@ -24,18 +30,27 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
     private final SellerApprovalRepository sellerApprovalRepository;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
+    private final FCMService fcmService;
 
     public SellerApprovalServiceImpl(SellerApprovalRepository sellerApprovalRepository,
                                      UserRepository userRepository,
-                                     RoleRepository roleRepository) {
+                                     RoleRepository roleRepository,
+                                     FileStorageService fileStorageService,
+                                     ObjectMapper objectMapper,
+                                     FCMService fcmService) {
         this.sellerApprovalRepository = sellerApprovalRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
+        this.fileStorageService = fileStorageService;
+        this.objectMapper = objectMapper;
+        this.fcmService = fcmService;
     }
 
     @Override
     @Transactional
-    public SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request) {
+    public SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request, MultipartFile[] idCardImages) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
@@ -49,9 +64,33 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new IllegalArgumentException("You already have a pending approval request");
         }
 
+        // Upload ảnh CCCD
+        List<String> idCardImageUrls;
+        try {
+            idCardImageUrls = fileStorageService.storeFiles(
+                    idCardImages,
+                    FileStorageService.FileCategory.ID_CARD,
+                    "user_" + userId
+            );
+        } catch (IOException e) {
+            throw new RuntimeException("Không thể upload ảnh căn cước công dân: " + e.getMessage(), e);
+        }
+
+        if (idCardImageUrls.isEmpty()) {
+            throw new IllegalArgumentException("Ảnh căn cước công dân là bắt buộc");
+        }
+
+        // Lưu danh sách URL dưới dạng JSON
+        String idCardImageUrlsJson;
+        try {
+            idCardImageUrlsJson = objectMapper.writeValueAsString(idCardImageUrls);
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi khi xử lý dữ liệu ảnh: " + e.getMessage(), e);
+        }
+
         SellerApproval approval = new SellerApproval();
         approval.setUser(user);
-        approval.setIdCardImageUrl(request.getIdCardImageUrl());
+        approval.setIdCardImageUrls(idCardImageUrlsJson);
         approval.setFacebookUrl(request.getFacebookUrl());
         approval.setZaloUrl(request.getZaloUrl());
         approval.setStatus(SellerApproval.ApprovalStatus.PENDING);
@@ -87,6 +126,13 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new IllegalArgumentException("Cannot set status to PENDING");
         }
 
+        // Lý do từ chối là bắt buộc khi REJECTED
+        if (newStatus == SellerApproval.ApprovalStatus.REJECTED) {
+            if (request.getReviewNotes() == null || request.getReviewNotes().isBlank()) {
+                throw new IllegalArgumentException("Lý do từ chối là bắt buộc khi từ chối đơn đăng ký");
+            }
+        }
+
         approval.setStatus(newStatus);
         approval.setReviewedAt(LocalDateTime.now());
         approval.setReviewer(admin);
@@ -103,6 +149,19 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
         }
 
         SellerApproval savedApproval = sellerApprovalRepository.save(approval);
+
+        // Gửi push notification cho user
+        User targetUser = approval.getUser();
+        try {
+            if (newStatus == SellerApproval.ApprovalStatus.APPROVED) {
+                fcmService.sendSellerApprovedNotification(targetUser);
+            } else if (newStatus == SellerApproval.ApprovalStatus.REJECTED) {
+                fcmService.sendSellerRejectedNotification(targetUser, request.getReviewNotes());
+            }
+        } catch (Exception e) {
+            // Không để FCM lỗi ảnh hưởng đến luồng chính
+        }
+
         return mapToResponse(savedApproval);
     }
 
@@ -162,10 +221,25 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
     private SellerApprovalResponse mapToResponse(SellerApproval approval) {
         SellerApprovalResponse response = new SellerApprovalResponse();
         response.setId(approval.getId());
-        response.setUserId(approval.getUser().getId());
-        response.setUserFullName(approval.getUser().getFullName());
-        response.setUserEmail(approval.getUser().getEmail());
-        response.setIdCardImageUrl(approval.getIdCardImageUrl());
+
+        User user = approval.getUser();
+        response.setUserId(user.getId());
+        response.setUserFullName(user.getFullName());
+        response.setUserEmail(user.getEmail());
+        response.setUserAvatarUrl(user.getAvatarUrl());
+        response.setUserPhone(user.getPhone());
+
+        // Parse JSON array thành List<String>
+        try {
+            List<String> imageUrls = objectMapper.readValue(
+                    approval.getIdCardImageUrls(),
+                    new TypeReference<List<String>>() {}
+            );
+            response.setIdCardImageUrls(imageUrls);
+        } catch (Exception e) {
+            response.setIdCardImageUrls(List.of());
+        }
+
         response.setFacebookUrl(approval.getFacebookUrl());
         response.setZaloUrl(approval.getZaloUrl());
         response.setStatus(approval.getStatus().toString());
@@ -173,8 +247,10 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
         response.setReviewedAt(approval.getReviewedAt());
 
         if (approval.getReviewer() != null) {
-            response.setReviewerId(approval.getReviewer().getId());
-            response.setReviewerFullName(approval.getReviewer().getFullName());
+            User reviewer = approval.getReviewer();
+            response.setReviewerId(reviewer.getId());
+            response.setReviewerFullName(reviewer.getFullName());
+            response.setReviewerAvatarUrl(reviewer.getAvatarUrl());
         }
 
         response.setReviewNotes(approval.getReviewNotes());

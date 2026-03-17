@@ -24,12 +24,27 @@ public interface VoucherRepository extends JpaRepository<Voucher, Integer> {
            "AND v.startDate <= :now AND v.endDate >= :now")
     Page<Voucher> findActivePlatformVouchers(@Param("now") LocalDateTime now, Pageable pageable);
 
+    // Lấy voucher toàn sàn còn hiệu lực theo loại giảm giá
+    @Query("SELECT v FROM Voucher v WHERE v.scope = 'PLATFORM' AND v.isActive = true " +
+           "AND v.startDate <= :now AND v.endDate >= :now AND v.discountType = :discountType")
+    Page<Voucher> findActivePlatformVouchersByDiscountType(@Param("now") LocalDateTime now,
+                                                           @Param("discountType") Voucher.DiscountType discountType,
+                                                           Pageable pageable);
+
     // Lấy voucher của shop còn hiệu lực
     @Query("SELECT v FROM Voucher v WHERE v.shop = :shop AND v.isActive = true " +
            "AND v.startDate <= :now AND v.endDate >= :now")
     Page<Voucher> findActiveVouchersByShop(@Param("shop") Shop shop,
                                            @Param("now") LocalDateTime now,
                                            Pageable pageable);
+
+    // Lấy voucher của shop còn hiệu lực theo loại giảm giá
+    @Query("SELECT v FROM Voucher v WHERE v.shop = :shop AND v.isActive = true " +
+           "AND v.startDate <= :now AND v.endDate >= :now AND v.discountType = :discountType")
+    Page<Voucher> findActiveVouchersByShopAndDiscountType(@Param("shop") Shop shop,
+                                                          @Param("now") LocalDateTime now,
+                                                          @Param("discountType") Voucher.DiscountType discountType,
+                                                          Pageable pageable);
 
     // Tất cả voucher của shop (admin/seller quản lý)
     Page<Voucher> findByShop(Shop shop, Pageable pageable);

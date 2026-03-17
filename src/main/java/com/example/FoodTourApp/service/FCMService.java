@@ -40,5 +40,18 @@ public interface FCMService {
 
     void sendReviewReplyNotification(User recipient, String replierName, String replierRole,
                                      String targetName, Integer reviewId);
+
+    // ── Shop Approval ─────────────────────────────────────────────────────────
+    void sendShopApprovedNotification(User seller, String shopName);
+
+    void sendShopRejectedNotification(User seller, String shopName, String reason);
+
+    // ── Seller Approval ───────────────────────────────────────────────────────
+    void sendSellerApprovedNotification(User user);
+
+    void sendSellerRejectedNotification(User user, String reason);
+
+    // ── Voucher ───────────────────────────────────────────────────────────────
+    void sendVoucherCreatedNotification(User recipient, String voucherTitle, String code, String discountSummary);
 }
 

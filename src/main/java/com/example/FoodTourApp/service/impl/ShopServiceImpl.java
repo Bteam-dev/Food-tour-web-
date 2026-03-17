@@ -5,7 +5,9 @@ import com.example.FoodTourApp.entity.Role;
 import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.ShopRepository;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.ShopService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,8 +17,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,16 +31,13 @@ public class ShopServiceImpl implements ShopService {
     private final ShopRepository shopRepository;
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
+    private final FCMService fcmService;
 
     @Override
     @Transactional
     public ShopResponseDTO createShop(CreateShopRequestDTO request, User seller) {
         log.info("Creating shop for seller: {}", seller.getId());
 
-        if (request.getBusinessLicense() != null &&
-            shopRepository.findByBusinessLicense(request.getBusinessLicense()).isPresent()) {
-            throw new RuntimeException("Giấy phép kinh doanh đã được sử dụng");
-        }
         if (request.getTaxCode() != null &&
             shopRepository.findByTaxCode(request.getTaxCode()).isPresent()) {
             throw new RuntimeException("Mã số thuế đã được sử dụng");
@@ -50,7 +51,6 @@ public class ShopServiceImpl implements ShopService {
         shop.setBannerUrl(request.getBannerUrl());
         shop.setPhone(request.getPhone());
         shop.setEmail(request.getEmail() != null ? request.getEmail() : seller.getEmail());
-        shop.setBusinessLicense(request.getBusinessLicense());
         shop.setTaxCode(request.getTaxCode());
         shop.setOpeningHours(request.getOpeningHours());
         shop.setRating(0.0);
@@ -99,7 +99,6 @@ public class ShopServiceImpl implements ShopService {
         if (request.getBannerUrl() != null) shop.setBannerUrl(request.getBannerUrl());
         if (request.getPhone() != null) shop.setPhone(request.getPhone());
         if (request.getEmail() != null) shop.setEmail(request.getEmail());
-        if (request.getBusinessLicense() != null) shop.setBusinessLicense(request.getBusinessLicense());
         if (request.getTaxCode() != null) shop.setTaxCode(request.getTaxCode());
         if (request.getOpeningHours() != null) shop.setOpeningHours(request.getOpeningHours());
         if (request.getIsActive() != null) shop.setIsActive(request.getIsActive());
@@ -139,7 +138,8 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     public Page<ShopResponseDTO> getAllActiveShops(Pageable pageable) {
-        return shopRepository.findByIsActiveTrue(pageable).map(this::mapToShopResponseDTO);
+        // Chỉ trả về shop đã được admin duyệt (isVerified=true) VÀ đang hoạt động (isActive=true)
+        return shopRepository.findByIsVerifiedTrueAndIsActiveTrue(pageable).map(this::mapToShopResponseDTO);
     }
 
     @Override
@@ -164,62 +164,154 @@ public class ShopServiceImpl implements ShopService {
     @Override
     @Transactional
     public ShopResponseDTO createShopWithImages(CreateShopRequestDTO request, User seller,
-                                                MultipartFile logo, MultipartFile banner) {
-        ShopResponseDTO shop = createShop(request, seller);
-        Integer shopId = shop.getId();
-        String subfolderId = "shop_" + shopId;
-        UpdateShopRequestDTO updateRequest = new UpdateShopRequestDTO();
-        boolean needUpdate = false;
+                                                MultipartFile logo, MultipartFile banner,
+                                                MultipartFile[] businessLicenseImages) {
+        // Validate giấy phép kinh doanh trước
+        if (businessLicenseImages == null || businessLicenseImages.length == 0) {
+            throw new RuntimeException("Ảnh giấy phép kinh doanh là bắt buộc");
+        }
+
+        if (request.getTaxCode() != null &&
+            shopRepository.findByTaxCode(request.getTaxCode()).isPresent()) {
+            throw new RuntimeException("Mã số thuế đã được sử dụng");
+        }
+
+        // Dùng temp folder để upload ảnh trước khi có shopId
+        String tempFolder = "temp_" + seller.getId() + "_" + System.currentTimeMillis();
+
+        // Upload ảnh giấy phép kinh doanh TRƯỚC
+        List<String> businessLicenseUrls;
+        try {
+            businessLicenseUrls = fileStorageService.storeFiles(
+                    businessLicenseImages,
+                    FileStorageService.FileCategory.BUSINESS_LICENSE,
+                    tempFolder
+            );
+            if (businessLicenseUrls.isEmpty()) {
+                throw new RuntimeException("Ảnh giấy phép kinh doanh là bắt buộc");
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Không thể upload ảnh giấy phép kinh doanh: " + e.getMessage(), e);
+        }
+
+        // Upload logo (nếu có)
+        String logoUrl = request.getLogoUrl();
         if (logo != null && !logo.isEmpty()) {
             try {
-                String logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId);
-                updateRequest.setLogoUrl(logoUrl);
-                needUpdate = true;
-            } catch (java.io.IOException e) {
+                logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, tempFolder);
+            } catch (IOException e) {
                 throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
             }
         }
+
+        // Upload banner (nếu có)
+        String bannerUrl = request.getBannerUrl();
         if (banner != null && !banner.isEmpty()) {
             try {
-                String bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId);
-                updateRequest.setBannerUrl(bannerUrl);
-                needUpdate = true;
-            } catch (java.io.IOException e) {
+                bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, tempFolder);
+            } catch (IOException e) {
                 throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
             }
         }
-        return needUpdate ? updateShop(shopId, updateRequest, seller) : shop;
+
+        // Tạo Shop entity với đầy đủ dữ liệu, save 1 lần duy nhất
+        log.info("Creating shop for seller: {}", seller.getId());
+        Shop shop = new Shop();
+        shop.setSeller(seller);
+        shop.setShopName(request.getShopName());
+        shop.setDescription(request.getDescription());
+        shop.setLogoUrl(logoUrl);
+        shop.setBannerUrl(bannerUrl);
+        shop.setPhone(request.getPhone());
+        shop.setEmail(request.getEmail() != null ? request.getEmail() : seller.getEmail());
+        shop.setTaxCode(request.getTaxCode());
+        shop.setOpeningHours(request.getOpeningHours());
+        shop.setRating(0.0);
+        shop.setTotalReviews(0L);
+        shop.setIsVerified(false);
+        shop.setIsActive(true);
+        shop.setCreatedAt(LocalDateTime.now());
+        shop.setUpdatedAt(LocalDateTime.now());
+
+        if (request.getAddress() != null) {
+            AddressRequestDTO addr = request.getAddress();
+            shop.setAddressLine(addr.getAddressLine());
+            shop.setWard(addr.getWard());
+            shop.setDistrict(addr.getDistrict());
+            shop.setCity(addr.getCity());
+            shop.setCountry(addr.getCountry() != null ? addr.getCountry() : "Vietnam");
+            shop.setPostalCode(addr.getPostalCode());
+            shop.setLatitude(addr.getLatitude());
+            shop.setLongitude(addr.getLongitude());
+        }
+
+        try {
+            shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicenseUrls));
+        } catch (IOException e) {
+            throw new RuntimeException("Lỗi serialize danh sách ảnh giấy phép: " + e.getMessage(), e);
+        }
+
+        shop = shopRepository.save(shop);
+        log.info("Shop created successfully with id: {}", shop.getId());
+        return mapToShopResponseDTO(shop);
     }
 
     @Override
     @Transactional
     public ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
-                                                MultipartFile logo, MultipartFile banner) {
+                                                MultipartFile logo, MultipartFile banner,
+                                                MultipartFile[] businessLicenseImages) {
         String subfolderId = "shop_" + shopId;
+
+        // Upload logo mới
         if (logo != null && !logo.isEmpty()) {
             try {
                 request.setLogoUrl(fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId));
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
             }
         }
+
+        // Upload banner mới
         if (banner != null && !banner.isEmpty()) {
             try {
                 request.setBannerUrl(fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId));
-            } catch (java.io.IOException e) {
+            } catch (IOException e) {
                 throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
             }
         }
+
+        // Upload ảnh giấy phép kinh doanh mới (nếu có)
+        if (businessLicenseImages != null && businessLicenseImages.length > 0) {
+            try {
+                List<String> businessLicenseUrls = fileStorageService.storeFiles(
+                        businessLicenseImages,
+                        FileStorageService.FileCategory.BUSINESS_LICENSE,
+                        subfolderId
+                );
+                if (!businessLicenseUrls.isEmpty()) {
+                    Shop shop = shopRepository.findById(shopId)
+                            .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+                    shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicenseUrls));
+                    shopRepository.save(shop);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Không thể upload ảnh giấy phép kinh doanh: " + e.getMessage(), e);
+            }
+        }
+
         return updateShop(shopId, request, seller);
     }
 
     @Override
     @Transactional
-    public ShopResponseDTO createShopFromJson(String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
+    public ShopResponseDTO createShopFromJson(String dataJson, User seller,
+                                              MultipartFile logo, MultipartFile banner,
+                                              MultipartFile[] businessLicenseImages) {
         if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu shop");
         try {
             CreateShopRequestDTO request = objectMapper.readValue(dataJson, CreateShopRequestDTO.class);
-            return createShopWithImages(request, seller, logo, banner);
+            return createShopWithImages(request, seller, logo, banner, businessLicenseImages);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -229,16 +321,58 @@ public class ShopServiceImpl implements ShopService {
 
     @Override
     @Transactional
-    public ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller, MultipartFile logo, MultipartFile banner) {
+    public ShopResponseDTO updateShopFromJson(Integer shopId, String dataJson, User seller,
+                                              MultipartFile logo, MultipartFile banner,
+                                              MultipartFile[] businessLicenseImages) {
         if (dataJson == null || dataJson.isEmpty()) throw new RuntimeException("Thiếu dữ liệu cập nhật");
         try {
             UpdateShopRequestDTO request = objectMapper.readValue(dataJson, UpdateShopRequestDTO.class);
-            return updateShopWithImages(shopId, request, seller, logo, banner);
+            return updateShopWithImages(shopId, request, seller, logo, banner, businessLicenseImages);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO approveShop(Integer shopId) {
+        log.info("Admin approving shop: {}", shopId);
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+        shop.setIsVerified(true);
+        shop.setIsActive(true);
+        shop.setUpdatedAt(LocalDateTime.now());
+        shop = shopRepository.save(shop);
+        log.info("Shop {} approved successfully", shopId);
+
+        // Gửi FCM notification cho seller
+        fcmService.sendShopApprovedNotification(shop.getSeller(), shop.getShopName());
+        return mapToShopResponseDTO(shop);
+    }
+
+    @Override
+    @Transactional
+    public ShopResponseDTO rejectShop(Integer shopId, String reason) {
+        log.info("Admin rejecting shop: {}", shopId);
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+        shop.setIsVerified(false);
+        shop.setIsActive(false);
+        shop.setRejectionReason(reason);
+        shop.setUpdatedAt(LocalDateTime.now());
+        shop = shopRepository.save(shop);
+        log.info("Shop {} rejected. Reason: {}", shopId, reason);
+
+        // Gửi FCM notification cho seller
+        fcmService.sendShopRejectedNotification(shop.getSeller(), shop.getShopName(), reason);
+        return mapToShopResponseDTO(shop);
+    }
+
+    @Override
+    public Page<ShopResponseDTO> getAllShopsForAdmin(Pageable pageable) {
+        return shopRepository.findAll(pageable).map(this::mapToShopResponseDTO);
     }
 
     private ShopResponseDTO mapToShopResponseDTO(Shop shop) {
@@ -252,13 +386,30 @@ public class ShopServiceImpl implements ShopService {
         dto.setBannerUrl(shop.getBannerUrl());
         dto.setPhone(shop.getPhone());
         dto.setEmail(shop.getEmail());
-        dto.setBusinessLicense(shop.getBusinessLicense());
+
+        // Parse JSON array ảnh giấy phép kinh doanh
+        try {
+            if (shop.getBusinessLicenseImageUrls() != null) {
+                List<String> imageUrls = objectMapper.readValue(
+                        shop.getBusinessLicenseImageUrls(),
+                        new TypeReference<List<String>>() {}
+                );
+                dto.setBusinessLicenseImageUrls(imageUrls);
+            } else {
+                dto.setBusinessLicenseImageUrls(List.of());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse businessLicenseImageUrls for shop {}: {}", shop.getId(), e.getMessage());
+            dto.setBusinessLicenseImageUrls(List.of());
+        }
+
         dto.setTaxCode(shop.getTaxCode());
         dto.setOpeningHours(shop.getOpeningHours());
         dto.setRating(shop.getRating());
         dto.setTotalReviews(shop.getTotalReviews());
         dto.setIsVerified(shop.getIsVerified());
         dto.setIsActive(shop.getIsActive());
+        dto.setRejectionReason(shop.getRejectionReason());
         dto.setCreatedAt(shop.getCreatedAt());
         dto.setUpdatedAt(shop.getUpdatedAt());
 

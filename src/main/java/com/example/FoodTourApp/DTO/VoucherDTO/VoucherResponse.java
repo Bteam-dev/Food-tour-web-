@@ -23,6 +23,12 @@ public class VoucherResponse {
     private Boolean isActive;
     private Integer shopId;
     private String shopName;
+    private String shopLogoUrl;
+    // Thông tin người tạo voucher
+    private Integer createdById;
+    private String createdByName;
+    private String createdByAvatarUrl;
+    private String createdByRole; // ADMIN hoặc SELLER
     private LocalDateTime createdAt;
 }
 

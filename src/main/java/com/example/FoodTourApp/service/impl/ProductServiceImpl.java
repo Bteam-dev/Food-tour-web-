@@ -22,6 +22,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.DayOfWeek;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -71,6 +73,16 @@ public class ProductServiceImpl implements ProductService {
 
         if (!shop.getSeller().getId().equals(seller.getId()) && !seller.getRole().getRoleName().equals(Role.RoleName.ADMIN)) {
             throw new RuntimeException("You do not have permission to create product for this shop");
+        }
+
+        // Shop phải được admin xác minh trước khi tạo sản phẩm
+        if (!Boolean.TRUE.equals(shop.getIsVerified())) {
+            throw new RuntimeException("Shop của bạn chưa được admin duyệt. Vui lòng chờ xét duyệt trước khi thêm sản phẩm.");
+        }
+
+        // Shop phải đang hoạt động (isActive=true)
+        if (!Boolean.TRUE.equals(shop.getIsActive())) {
+            throw new RuntimeException("Shop của bạn hiện đang bị vô hiệu hóa. Vui lòng liên hệ admin để được hỗ trợ.");
         }
 
         Category category = categoryRepository.findById(request.getCategoryId())
@@ -366,8 +378,14 @@ public class ProductServiceImpl implements ProductService {
     private ProductResponseDTO mapToProductResponseDTO(Product product) {
         ProductResponseDTO dto = new ProductResponseDTO();
         dto.setId(product.getId());
-        dto.setShopId(product.getShop().getId());
-        dto.setShopName(product.getShop().getShopName());
+
+        Shop shop = product.getShop();
+        dto.setShopId(shop.getId());
+        dto.setShopName(shop.getShopName());
+        
+        // ✅ NEW: Calculate if shop is currently open based on openingHours
+        dto.setShopIsOpen(isShopCurrentlyOpen(shop));
+        
         dto.setCategoryId(product.getCategory().getId());
         dto.setCategoryName(product.getCategory().getName());
         dto.setName(product.getName());
@@ -400,6 +418,53 @@ public class ProductServiceImpl implements ProductService {
         dto.setVariants(variants.stream().map(this::mapToVariantResponseDTO).collect(Collectors.toList()));
 
         return dto;
+    }
+    
+    /**
+     * ✅ NEW: Check if shop is currently open based on openingHours JSON
+     * Format: {"MONDAY":{"open":"09:00","close":"22:00"}, ...}
+     */
+    private boolean isShopCurrentlyOpen(Shop shop) {
+        String openingHoursJson = shop.getOpeningHours();
+        if (openingHoursJson == null || openingHoursJson.isBlank()) {
+            return true; // No hours specified = always open
+        }
+        
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            DayOfWeek today = now.getDayOfWeek();
+            LocalTime currentTime = now.toLocalTime();
+            
+            // Parse opening hours JSON
+            var hoursMap = objectMapper.readValue(openingHoursJson, 
+                new TypeReference<java.util.Map<String, java.util.Map<String, String>>>() {});
+            
+            var todayHours = hoursMap.get(today.name());
+            if (todayHours == null) {
+                return false; // No hours for today = closed
+            }
+            
+            String openStr = todayHours.get("open");
+            String closeStr = todayHours.get("close");
+            
+            if (openStr == null || closeStr == null) {
+                return false;
+            }
+            
+            LocalTime openTime = LocalTime.parse(openStr);
+            LocalTime closeTime = LocalTime.parse(closeStr);
+            
+            // Handle overnight hours (e.g., 22:00 - 02:00)
+            if (closeTime.isBefore(openTime)) {
+                return currentTime.isAfter(openTime) || currentTime.isBefore(closeTime);
+            }
+            
+            return !currentTime.isBefore(openTime) && !currentTime.isAfter(closeTime);
+            
+        } catch (Exception e) {
+            log.warn("Failed to parse shop opening hours for shop {}: {}", shop.getId(), e.getMessage());
+            return true; // Fallback to open if parse fails
+        }
     }
 
     private VariantResponseDTO mapToVariantResponseDTO(ProductVariant variant) {
@@ -469,5 +534,56 @@ public class ProductServiceImpl implements ProductService {
             return productRepository.findAllActive(pageable).map(this::mapToProductResponseDTO);
         return productRepository.findByNameContainingIgnoreCase(keyword, pageable)
                 .map(this::mapToProductResponseDTO);
+    }
+
+    /**
+     * Lọc và sắp xếp sản phẩm nâng cao.
+     *
+     * sortBy:
+     *   "rating_desc"   → rating cao → thấp (dùng Pageable + Sort)
+     *   "rating_asc"    → rating thấp → cao
+     *   "best_selling"  → bán chạy nhất (query riêng)
+     *   "newest"        → mới nhất (createdAt DESC)
+     *   "price_asc"     → giá thấp → cao
+     *   "price_desc"    → giá cao → thấp
+     *   null / ""       → mặc định createdAt DESC
+     */
+    @Override
+    public Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId, Pageable pageable) {
+        // Xác định sort direction
+        org.springframework.data.domain.Sort sort;
+        boolean isBestSelling = "best_selling".equalsIgnoreCase(sortBy);
+
+        if (!isBestSelling) {
+            sort = switch (sortBy == null ? "" : sortBy.toLowerCase()) {
+                case "rating_desc" -> org.springframework.data.domain.Sort.by("rating").descending();
+                case "rating_asc"  -> org.springframework.data.domain.Sort.by("rating").ascending();
+                case "price_asc"   -> org.springframework.data.domain.Sort.by("price").ascending();
+                case "price_desc"  -> org.springframework.data.domain.Sort.by("price").descending();
+                default            -> org.springframework.data.domain.Sort.by("createdAt").descending(); // newest
+            };
+            // Rebuild pageable với sort mới
+            pageable = org.springframework.data.domain.PageRequest.of(
+                    pageable.getPageNumber(), pageable.getPageSize(), sort);
+        }
+
+        // Lấy dữ liệu theo city + category + sortBy
+        if (isBestSelling) {
+            if (city != null && !city.isBlank()) {
+                return productRepository.findBestSellingByCity(city, pageable).map(this::mapToProductResponseDTO);
+            }
+            return productRepository.findBestSelling(pageable).map(this::mapToProductResponseDTO);
+        }
+
+        if (city != null && !city.isBlank() && categoryId != null) {
+            return productRepository.findAvailableByCityAndCategory(city, categoryId, pageable).map(this::mapToProductResponseDTO);
+        }
+        if (city != null && !city.isBlank()) {
+            return productRepository.findAvailableByCity(city, pageable).map(this::mapToProductResponseDTO);
+        }
+        if (categoryId != null) {
+            return productRepository.findByCategoryId(categoryId, pageable).map(this::mapToProductResponseDTO);
+        }
+        return productRepository.findAllActive(pageable).map(this::mapToProductResponseDTO);
     }
 }

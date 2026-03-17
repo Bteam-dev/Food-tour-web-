@@ -48,8 +48,7 @@ public class Order {
 
     @Column(name = "delivery_longitude")
     private Double deliveryLongitude;
-    // ------------------------------------------------------------------------------------
-
+    // -----------------------------------------------------------------------------------
     // ---- Tính phí ship theo khoảng cách (HERE Routing API) ----
     @Column(name = "delivery_distance_km", precision = 8, scale = 2)
     private BigDecimal deliveryDistanceKm;    // Khoảng cách thực tế (km)

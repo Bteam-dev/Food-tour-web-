@@ -18,11 +18,12 @@ public interface UserService {
 
     // Admin
     List<UserResponse> getAllUsers();
+    List<UserResponse> searchUsers(String name, String roleName);
     UserResponse getUserById(Integer id);
     UserResponse createUserByAdmin(CreateUserRequest request);
-    UserResponse updateUserByAdmin(Integer id, UpdateUserByAdminRequest request);
+    UserResponse updateUserByAdmin(Integer id, UpdateUserByAdminRequest request, Integer currentAdminId);
     void deleteUser(Integer id);
-    void toggleUserActiveStatus(Integer id);
+    void toggleUserActiveStatus(Integer id, Integer currentAdminId);
 
     // User - Đổi từ email sang userId
     UserResponse updateProfile(Integer userId, UpdateProfileRequest request);

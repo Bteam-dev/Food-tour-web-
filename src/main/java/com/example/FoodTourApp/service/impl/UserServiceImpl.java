@@ -125,6 +125,22 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public List<UserResponse> searchUsers(String name, String roleName) {
+        Role.RoleName roleNameEnum = null;
+        if (roleName != null && !roleName.isBlank()) {
+            try {
+                roleNameEnum = Role.RoleName.valueOf(roleName.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Invalid role: " + roleName);
+            }
+        }
+        String nameParam = (name != null && !name.isBlank()) ? name : null;
+        return userRepository.searchByNameAndRole(nameParam, roleNameEnum).stream()
+                .map(this::mapToUserResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public UserResponse getUserById(Integer id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + id));
@@ -142,7 +158,10 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public void toggleUserActiveStatus(Integer id) {
+    public void toggleUserActiveStatus(Integer id, Integer currentAdminId) {
+        if (id.equals(currentAdminId)) {
+            throw new IllegalArgumentException("Bạn không thể tự khóa tài khoản của chính mình");
+        }
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + id));
         user.setIsActive(!user.getIsActive());
@@ -152,7 +171,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public UserResponse updateUserByAdmin(Integer id, UpdateUserByAdminRequest request) {
+    public UserResponse updateUserByAdmin(Integer id, UpdateUserByAdminRequest request, Integer currentAdminId) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + id));
 
@@ -178,9 +197,20 @@ public class UserServiceImpl implements UserService {
         if (request.getPhone() != null) user.setPhone(request.getPhone());
         if (request.getDateOfBirth() != null) user.setDateOfBirth(request.getDateOfBirth());
         if (request.getGender() != null) user.setGender(User.Gender.valueOf(request.getGender().toLowerCase()));
-        if (request.getIsActive() != null) user.setIsActive(request.getIsActive());
+        if (request.getIsActive() != null) {
+            if (!request.getIsActive() && id.equals(currentAdminId)) {
+                throw new IllegalArgumentException("Bạn không thể tự khóa tài khoản của chính mình");
+            }
+            user.setIsActive(request.getIsActive());
+        }
 
         if (request.getRoleName() != null) {
+            if (id.equals(currentAdminId)) {
+                throw new IllegalArgumentException("Bạn không thể thay đổi role của chính mình");
+            }
+            if (Role.RoleName.ADMIN.name().equalsIgnoreCase(request.getRoleName())) {
+                throw new IllegalArgumentException("Không thể gán role ADMIN cho người dùng khác");
+            }
             Role role = roleRepository.findByRoleName(Role.RoleName.valueOf(request.getRoleName()))
                     .orElseThrow(() -> new EntityNotFoundException("Role not found"));
             user.setRole(role);

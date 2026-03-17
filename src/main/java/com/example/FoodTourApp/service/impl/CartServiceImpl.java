@@ -126,8 +126,17 @@ public class CartServiceImpl implements CartService {
         cart.setUpdatedAt(LocalDateTime.now());
         cartRepository.save(cart);
 
-        log.info("addToCart done: cartItemId={}", cartItem.getId());
-        return mapToCartItemResponseDTO(cartItem, selectedVariants);
+        // Tính tổng giỏ hàng để trả về phản hồi rõ ràng
+        List<CartItem> allItems = cartItemRepository.findByCart(cart);
+        int totalCartItems = allItems.size();
+        int totalCartQuantity = allItems.stream().mapToInt(CartItem::getQuantity).sum();
+
+        log.info("addToCart done: cartItemId={}, totalCartItems={}, totalCartQuantity={}",
+                cartItem.getId(), totalCartItems, totalCartQuantity);
+        CartItemResponseDTO dto = mapToCartItemResponseDTO(cartItem, selectedVariants);
+        dto.setTotalCartItems(totalCartItems);
+        dto.setTotalCartQuantity(totalCartQuantity);
+        return dto;
     }
 
     // ─────────────────────────────────────────────
@@ -324,6 +333,20 @@ public class CartServiceImpl implements CartService {
                 .collect(Collectors.toList());
         if (variants.size() != variantIds.size())
             throw new RuntimeException("One or more variants are invalid or not active");
+
+        // Kiểm tra ràng buộc SINGLE: mỗi loại biến thể SINGLE chỉ được chọn đúng 1 variant
+        Map<Integer, List<ProductVariant>> byType = variants.stream()
+                .collect(Collectors.groupingBy(v -> v.getVariantType().getId()));
+
+        for (Map.Entry<Integer, List<ProductVariant>> entry : byType.entrySet()) {
+            com.example.FoodTourApp.entity.VariantType vt = entry.getValue().get(0).getVariantType();
+            if (vt.getSelectionType() == com.example.FoodTourApp.entity.VariantType.SelectionType.SINGLE
+                    && entry.getValue().size() > 1) {
+                throw new RuntimeException(
+                        "Loại biến thể '" + vt.getName() + "' chỉ được chọn 1 giá trị (SINGLE)");
+            }
+        }
+
         return variants;
     }
 

@@ -25,20 +25,36 @@ public class PublicVoucherController {
 
     private final VoucherService voucherService;
 
-    /** GET /api/public/vouchers/platform?page=0&size=10 */
+    /**
+     * GET /api/public/vouchers/platform?page=0&size=10&discountType=PERCENT
+     * discountType: PERCENT | FIXED | FREE_SHIP (tùy chọn, nếu không truyền trả tất cả)
+     */
     @GetMapping("/platform")
     public ResponseEntity<Page<VoucherResponse>> getPlatformVouchers(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String discountType) {
+        if (discountType != null && !discountType.isBlank()) {
+            return ResponseEntity.ok(
+                    voucherService.getActivePlatformVouchersByType(discountType, PageRequest.of(page, size)));
+        }
         return ResponseEntity.ok(voucherService.getActivePlatformVouchers(PageRequest.of(page, size)));
     }
 
-    /** GET /api/public/vouchers/shop/{shopId}?page=0&size=10 */
+    /**
+     * GET /api/public/vouchers/shop/{shopId}?page=0&size=10&discountType=FIXED
+     * discountType: PERCENT | FIXED | FREE_SHIP (tùy chọn)
+     */
     @GetMapping("/shop/{shopId}")
     public ResponseEntity<Page<VoucherResponse>> getShopVouchers(
             @PathVariable Integer shopId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String discountType) {
+        if (discountType != null && !discountType.isBlank()) {
+            return ResponseEntity.ok(
+                    voucherService.getActiveShopVouchersByType(shopId, discountType, PageRequest.of(page, size)));
+        }
         return ResponseEntity.ok(voucherService.getActiveShopVouchers(shopId, PageRequest.of(page, size)));
     }
 

@@ -295,5 +295,76 @@ public class FCMServiceImpl implements FCMService {
                 ? orderNumber.substring(orderNumber.length() - 8).toUpperCase()
                 : orderNumber.toUpperCase();
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SHOP APPROVAL NOTIFICATIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Override
+    @Async
+    public void sendShopApprovedNotification(User seller, String shopName) {
+        String title = "✅ Shop của bạn đã được duyệt";
+        String body = "Shop \"" + shopName + "\" đã được admin phê duyệt và có thể bắt đầu hoạt động!";
+        sendToUser(seller, title, body, Map.of(
+                "type", "SHOP_APPROVED",
+                "shopName", shopName != null ? shopName : ""
+        ));
+    }
+
+    @Override
+    @Async
+    public void sendShopRejectedNotification(User seller, String shopName, String reason) {
+        String title = "❌ Shop của bạn bị từ chối";
+        String body = "Shop \"" + shopName + "\" đã bị admin từ chối."
+                + (reason != null && !reason.isBlank() ? " Lý do: " + reason : "");
+        sendToUser(seller, title, body, Map.of(
+                "type", "SHOP_REJECTED",
+                "shopName", shopName != null ? shopName : "",
+                "reason", reason != null ? reason : ""
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SELLER APPROVAL NOTIFICATIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Override
+    @Async
+    public void sendSellerApprovedNotification(User user) {
+        String title = "✅ Đăng ký người bán đã được duyệt";
+        String body = "Chúc mừng! Đơn đăng ký trở thành người bán của bạn đã được admin phê duyệt. Bạn có thể bắt đầu tạo cửa hàng ngay bây giờ!";
+        sendToUser(user, title, body, Map.of(
+                "type", "SELLER_APPROVED"
+        ));
+    }
+
+    @Override
+    @Async
+    public void sendSellerRejectedNotification(User user, String reason) {
+        String title = "❌ Đăng ký người bán bị từ chối";
+        String body = "Đơn đăng ký người bán của bạn đã bị từ chối."
+                + (reason != null && !reason.isBlank() ? " Lý do: " + reason : "");
+        sendToUser(user, title, body, Map.of(
+                "type", "SELLER_REJECTED",
+                "reason", reason != null ? reason : ""
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // VOUCHER NOTIFICATIONS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Override
+    @Async
+    public void sendVoucherCreatedNotification(User recipient, String voucherTitle, String code, String discountSummary) {
+        String title = "🎁 Có voucher mới dành cho bạn!";
+        String body = voucherTitle + " – Mã: " + code
+                + (discountSummary != null && !discountSummary.isBlank() ? " (" + discountSummary + ")" : "");
+        sendToUser(recipient, title, body, Map.of(
+                "type", "VOUCHER_CREATED",
+                "code", code != null ? code : "",
+                "title", voucherTitle != null ? voucherTitle : ""
+        ));
+    }
 }
 

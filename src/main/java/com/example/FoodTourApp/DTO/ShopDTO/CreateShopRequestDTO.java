@@ -42,9 +42,6 @@ public class CreateShopRequestDTO {
     @Email(message = "Email không hợp lệ")
     private String email;
 
-    @NotBlank(message = "Giấy phép kinh doanh không được để trống")
-    private String businessLicense;
-
     @NotBlank(message = "Mã số thuế không được để trống")
     private String taxCode;
 

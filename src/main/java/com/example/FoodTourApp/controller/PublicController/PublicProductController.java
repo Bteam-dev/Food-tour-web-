@@ -32,20 +32,28 @@ public class PublicProductController {
         this.foodDetectionService = foodDetectionService;
     }
 
+    /**
+     * GET /api/public/products
+     * Lấy danh sách sản phẩm, hỗ trợ lọc tùy chọn:
+     *   ?city=HCM                          lọc theo thành phố
+     *   ?categoryId=1                      lọc theo danh mục
+     *   ?sortBy=rating_desc|best_selling|newest|price_asc|price_desc
+     *   ?page=0&size=20
+     * Nếu không truyền param nào thì trả về tất cả sản phẩm active (sắp xếp theo createdAt DESC).
+     */
     @GetMapping
     public ResponseEntity<?> getAllActiveProducts(
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) String sortBy,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Fetching all active products with pagination - page: {}, size: {}", page, size);
+            @RequestParam(defaultValue = "20") int size) {
+        logger.info("Fetching active products - city={}, categoryId={}, sortBy={}, page={}, size={}",
+                city, categoryId, sortBy, page, size);
 
         try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
-                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
-
-            Page<ProductResponseDTO> products = productService.getAllActiveProducts(pageable);
+            Pageable pageable = PageRequest.of(page, size);
+            Page<ProductResponseDTO> products = productService.getFilteredProducts(sortBy, city, categoryId, pageable);
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
@@ -56,7 +64,7 @@ public class PublicProductController {
             logger.error("Error fetching active products: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", "Failed to fetch products");
+            error.put("message", e.getMessage());
             return ResponseEntity.internalServerError().body(error);
         }
     }
@@ -111,36 +119,6 @@ public class PublicProductController {
         }
     }
 
-    @GetMapping("/category/{categoryId}")
-    public ResponseEntity<?> getProductsByCategory(
-            @PathVariable Integer categoryId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Fetching products for category: {} with pagination", categoryId);
-
-        try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
-                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
-
-            Page<ProductResponseDTO> products = productService.getProductsByCategory(categoryId, pageable);
-            PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", pageResponse);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching products for category {}: {}", categoryId, e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Failed to fetch products");
-            return ResponseEntity.internalServerError().body(error);
-        }
-    }
-
     @PostMapping("/detect-and-search")
     public ResponseEntity<?> detectAndSearch(@RequestParam("image") MultipartFile image) {
         logger.info("Nhận request detect món ăn từ ảnh");
@@ -177,4 +155,5 @@ public class PublicProductController {
             return ResponseEntity.internalServerError().body(response);
         }
     }
+
 }

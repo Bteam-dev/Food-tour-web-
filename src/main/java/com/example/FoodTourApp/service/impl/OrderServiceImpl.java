@@ -20,7 +20,10 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -76,6 +79,17 @@ public class OrderServiceImpl implements OrderService {
 
         // ── 3. Tạo Order, snapshot địa chỉ giao hàng ─────────────────────────
         Shop shop = cartItems.get(0).getProduct().getShop();
+
+        // ── Kiểm tra shop đã được admin duyệt chưa ──────────────────────────
+        if (!Boolean.TRUE.equals(shop.getIsVerified())) {
+            throw new RuntimeException("Shop chưa được admin duyệt, không thể đặt hàng");
+        }
+        if (!Boolean.TRUE.equals(shop.getIsActive())) {
+            throw new RuntimeException("Shop hiện không hoạt động, không thể đặt hàng");
+        }
+
+        // ── Kiểm tra giờ mở cửa shop ────────────────────────────────────────
+        validateShopOpeningHours(shop);
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
         order.setUser(user);
@@ -334,7 +348,7 @@ public class OrderServiceImpl implements OrderService {
 
         if (order.getPaymentMethod() == Order.PaymentMethod.app_wallet
                 && order.getPaymentStatus() == Order.PaymentStatus.paid) {
-            walletService.refundOrder(order);
+            walletService.refundCancelledOrder(order);
         }
         order.setOrderStatus(Order.OrderStatus.cancelled);
         order.setCancelledAt(LocalDateTime.now());
@@ -373,9 +387,13 @@ public class OrderServiceImpl implements OrderService {
         order.setOrderStatus(Order.OrderStatus.delivered);
         order.setActualDeliveryTime(LocalDateTime.now());
         order.setUpdatedAt(LocalDateTime.now());
-        if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod
+        if (order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
+            // Wallet: giải phóng escrow → seller nhận sellerReceivedAmount
+            walletService.releaseEscrowToSeller(order);
+        } else if (order.getPaymentMethod() == Order.PaymentMethod.ship_cod
                 && order.getPaymentStatus() != Order.PaymentStatus.paid) {
-            applyCommission(order);
+            // COD: thu commission từ ví seller
+            walletService.processCommissionCOD(order);
             order.setPaymentStatus(Order.PaymentStatus.paid);
         }
         orderRepository.save(order);
@@ -394,7 +412,7 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Đơn hàng đã thanh toán rồi");
         if (order.getOrderStatus() == Order.OrderStatus.cancelled)
             throw new RuntimeException("Không thể xác nhận đơn đã hủy");
-        applyCommission(order);
+        walletService.processCommissionCOD(order);
         order.setPaymentStatus(Order.PaymentStatus.paid);
         order.setOrderStatus(Order.OrderStatus.delivered);
         order.setActualDeliveryTime(LocalDateTime.now());
@@ -413,7 +431,7 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Chỉ hoàn tiền được đơn đã thanh toán");
         if (order.getPaymentStatus() == Order.PaymentStatus.refunded)
             throw new RuntimeException("Đơn đã được hoàn tiền rồi");
-        walletService.refundOrder(order);
+        walletService.refundDeliveredOrder(order);
         order.setPaymentStatus(Order.PaymentStatus.refunded);
         order.setUpdatedAt(LocalDateTime.now());
         orderRepository.save(order);
@@ -432,7 +450,7 @@ public class OrderServiceImpl implements OrderService {
             throw new RuntimeException("Không thể hủy đơn đã giao");
         if (order.getPaymentStatus() == Order.PaymentStatus.paid
                 && order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
-            walletService.refundOrder(order);
+            walletService.refundCancelledOrder(order);
         }
         order.setOrderStatus(Order.OrderStatus.cancelled);
         order.setCancelledAt(LocalDateTime.now());
@@ -456,16 +474,6 @@ public class OrderServiceImpl implements OrderService {
         return order;
     }
 
-    private void applyCommission(Order order) {
-        BigDecimal rate = order.getPlatformCommissionRate() != null
-                ? order.getPlatformCommissionRate() : new BigDecimal("12.00");
-        BigDecimal commission = order.getTotalAmount().multiply(rate)
-                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
-        order.setPlatformCommissionRate(rate);
-        order.setPlatformCommissionAmount(commission);
-        order.setSellerReceivedAmount(order.getTotalAmount().subtract(commission));
-    }
-
     private void restoreStock(Order order) {
         for (OrderItem item : orderItemRepository.findByOrder(order)) {
             Product p = item.getProduct();
@@ -474,59 +482,145 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    /**
+     * Kiểm tra shop có đang trong giờ mở cửa không.
+     * openingHours JSON format:
+     * {
+     *   "monday":    {"open": "08:00", "close": "22:00", "closed": false},
+     *   "tuesday":   {"open": "08:00", "close": "22:00", "closed": false},
+     *   ...
+     *   "sunday":    {"closed": true}
+     * }
+     * Nếu openingHours == null → không kiểm tra (shop mở cả ngày).
+     */
+    @SuppressWarnings("unchecked")
+    private void validateShopOpeningHours(Shop shop) {
+        String openingHoursJson = shop.getOpeningHours();
+        if (openingHoursJson == null || openingHoursJson.isBlank()) {
+            // Không cấu hình giờ → coi như mở cả ngày
+            return;
+        }
+        try {
+            Map<String, Object> hoursMap = objectMapper.readValue(openingHoursJson, Map.class);
+            LocalDateTime now = LocalDateTime.now();
+            DayOfWeek dayOfWeek = now.getDayOfWeek();
+
+            // Chuyển DayOfWeek sang key tiếng Anh viết thường
+            String dayKey = dayOfWeek.name().toLowerCase(); // e.g. "monday"
+
+            Object dayObj = hoursMap.get(dayKey);
+            if (dayObj == null) {
+                // Không có cấu hình cho ngày này → coi như mở
+                return;
+            }
+
+            Map<String, Object> dayConfig = (Map<String, Object>) dayObj;
+
+            // Kiểm tra closed flag
+            Object closedFlag = dayConfig.get("closed");
+            if (Boolean.TRUE.equals(closedFlag)) {
+                throw new RuntimeException("Shop đang đóng cửa hôm nay, vui lòng đặt hàng vào ngày khác");
+            }
+
+            String openStr  = (String) dayConfig.get("open");
+            String closeStr = (String) dayConfig.get("close");
+
+            if (openStr == null || closeStr == null) {
+                // Thiếu cấu hình open/close → coi như mở
+                return;
+            }
+
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("HH:mm");
+            LocalTime openTime  = LocalTime.parse(openStr,  fmt);
+            LocalTime closeTime = LocalTime.parse(closeStr, fmt);
+            LocalTime currentTime = now.toLocalTime();
+
+            boolean isOpen;
+            if (closeTime.isAfter(openTime)) {
+                // Trường hợp bình thường: ví dụ 08:00 → 22:00
+                isOpen = !currentTime.isBefore(openTime) && currentTime.isBefore(closeTime);
+            } else {
+                // Qua nửa đêm: ví dụ 22:00 → 02:00
+                isOpen = !currentTime.isBefore(openTime) || currentTime.isBefore(closeTime);
+            }
+
+            if (!isOpen) {
+                throw new RuntimeException(
+                    "Shop chưa mở cửa. Giờ hoạt động hôm nay: " + openStr + " - " + closeStr
+                );
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Không thể parse openingHours của shop {}: {}", shop.getId(), e.getMessage());
+            // Parse lỗi → không chặn đặt hàng
+        }
+    }
+
     // ── Pagination / filter methods (unchanged logic, reuse) ─────────────────
 
-    @Override
-    public Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Pageable pageable) {
+    // ── Helper: resolve danh sách shops theo shopId (null = tất cả) ─────────
+
+    /**
+     * Trả về danh sách shops của seller.
+     * - shopId = null → tất cả shops
+     * - shopId != null → đúng shop đó (phải thuộc seller, nếu không throw)
+     */
+    private List<Shop> resolveShops(User seller, Integer shopId) {
         List<Shop> shops = shopRepository.findBySeller(seller);
         if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
-        // Lấy từ tất cả shops
+        if (shopId == null) return shops;
+        return shops.stream()
+                .filter(s -> s.getId().equals(shopId))
+                .findFirst()
+                .map(List::of)
+                .orElseThrow(() -> new RuntimeException("Shop không tồn tại hoặc không thuộc quyền quản lý của bạn"));
+    }
+
+    @Override
+    public Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Integer shopId, Pageable pageable) {
+        List<Shop> shops = resolveShops(seller, shopId);
         return orderRepository.findByShopInAndHasRefundRequestTrue(shops, pageable)
                 .map(this::mapToOrderResponseDTO);
     }
 
     @Override
-    public Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable) {
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
-        return orderRepository.findByShop(shops.get(0), pageable).map(this::mapToOrderResponseDTO);
+    public Page<OrderResponseDTO> getShopOrders(User seller, Integer shopId, Pageable pageable) {
+        List<Shop> shops = resolveShops(seller, shopId);
+        return orderRepository.findByShopIn(shops, pageable).map(this::mapToOrderResponseDTO);
     }
 
-
     @Override
-    public Page<OrderResponseDTO> getShopOrdersWithFilter(User seller, Order.OrderStatus status,
+    public Page<OrderResponseDTO> getShopOrdersWithFilter(User seller, Integer shopId, Order.OrderStatus status,
             LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
-        Shop shop = shops.get(0);
+        List<Shop> shops = resolveShops(seller, shopId);
         Page<Order> orders;
         if (status != null && startDate != null && endDate != null)
-            orders = orderRepository.findByShopAndOrderStatusAndCreatedAtBetween(shop, status, startDate, endDate, pageable);
+            orders = orderRepository.findByShopInAndOrderStatusAndCreatedAtBetween(shops, status, startDate, endDate, pageable);
         else if (status != null)
-            orders = orderRepository.findByShopAndOrderStatus(shop, status, pageable);
+            orders = orderRepository.findByShopInAndOrderStatus(shops, status, pageable);
         else if (startDate != null && endDate != null)
-            orders = orderRepository.findByShopAndCreatedAtBetween(shop, startDate, endDate, pageable);
+            orders = orderRepository.findByShopInAndCreatedAtBetween(shops, startDate, endDate, pageable);
         else
-            orders = orderRepository.findByShop(shop, pageable);
+            orders = orderRepository.findByShopIn(shops, pageable);
         return orders.map(this::mapToOrderResponseDTO);
     }
 
     @Override
-    public Page<OrderResponseDTO> getShopOrdersWithFilterByStatusString(User seller, String status,
+    public Page<OrderResponseDTO> getShopOrdersWithFilterByStatusString(User seller, Integer shopId, String status,
             LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
         Order.OrderStatus orderStatus = null;
         if (status != null && !status.isEmpty()) {
             try { orderStatus = Order.OrderStatus.valueOf(status.toLowerCase()); }
             catch (IllegalArgumentException e) { throw new RuntimeException("Trạng thái không hợp lệ: " + status); }
         }
-        return getShopOrdersWithFilter(seller, orderStatus, startDate, endDate, pageable);
+        return getShopOrdersWithFilter(seller, shopId, orderStatus, startDate, endDate, pageable);
     }
 
     @Override
-    public List<RevenueStatisticsDTO> getRevenueStatistics(User seller, String periodType,
+    public List<RevenueStatisticsDTO> getRevenueStatistics(User seller, Integer shopId, String periodType,
             LocalDateTime startDate, LocalDateTime endDate) {
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
+        List<Shop> shops = resolveShops(seller, shopId);
         List<Order> paidOrders = orderRepository.findPaidOrdersByShopsAndDateRange(shops, startDate, endDate);
         Map<String, List<Order>> grouped = new java.util.HashMap<>();
         for (Order o : paidOrders) {
@@ -534,7 +628,7 @@ public class OrderServiceImpl implements OrderService {
                 case "day"   -> o.getCreatedAt().toLocalDate().toString();
                 case "month" -> o.getCreatedAt().getYear() + "-" + String.format("%02d", o.getCreatedAt().getMonthValue());
                 case "year"  -> String.valueOf(o.getCreatedAt().getYear());
-                default      -> throw new RuntimeException("Invalid period type");
+                default      -> throw new RuntimeException("Invalid period type: phải là day, month hoặc year");
             };
             grouped.computeIfAbsent(period, k -> new java.util.ArrayList<>()).add(o);
         }
@@ -553,10 +647,9 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public List<ProductSalesStatisticsDTO> getTopSellingProducts(User seller,
+    public List<ProductSalesStatisticsDTO> getTopSellingProducts(User seller, Integer shopId,
             LocalDateTime startDate, LocalDateTime endDate, int limit) {
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
+        List<Shop> shops = resolveShops(seller, shopId);
         List<Order> paidOrders = orderRepository.findPaidOrdersByShopsAndDateRange(shops, startDate, endDate);
         Map<Integer, ProductSalesStatisticsDTO> statsMap = new java.util.HashMap<>();
         for (Order o : paidOrders) {
@@ -578,32 +671,28 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public DashboardStatisticsDTO getDashboardStatistics(User seller, LocalDateTime startDate, LocalDateTime endDate) {
-        List<Shop> shops = shopRepository.findBySeller(seller);
-        if (shops.isEmpty()) throw new RuntimeException("Bạn chưa có shop nào");
+    public DashboardStatisticsDTO getDashboardStatistics(User seller, Integer shopId,
+            LocalDateTime startDate, LocalDateTime endDate) {
+        List<Shop> shops = resolveShops(seller, shopId);
 
         DashboardStatisticsDTO dashboard = new DashboardStatisticsDTO();
 
-        // Tính tổng từ TẤT CẢ shops
-        long totalOrders = 0;
-        long pendingOrders = 0;
-        long completedOrders = 0;
-        long cancelledOrders = 0;
-        BigDecimal totalRevenue = BigDecimal.ZERO;
-        BigDecimal platformCommission = BigDecimal.ZERO;
-        BigDecimal sellerRevenue = BigDecimal.ZERO;
-
-        for (Shop shop : shops) {
-            totalOrders += orderRepository.countByShop(shop);
-            pendingOrders += orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.pending);
-            completedOrders += orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.delivered);
-            cancelledOrders += orderRepository.countByShopAndOrderStatus(shop, Order.OrderStatus.cancelled);
-
-            List<Order> paid = orderRepository.findPaidOrdersByShopAndDateRange(shop, startDate, endDate);
-            totalRevenue = totalRevenue.add(paid.stream().map(Order::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
-            platformCommission = platformCommission.add(paid.stream().map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add));
-            sellerRevenue = sellerRevenue.add(paid.stream().map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add));
+        // Set thông tin scope
+        if (shopId != null && shops.size() == 1) {
+            dashboard.setShopId(shops.get(0).getId());
+            dashboard.setShopName(shops.get(0).getShopName());
         }
+        // shopId = null → shopId và shopName trong DTO vẫn null (tổng hợp tất cả)
+
+        long totalOrders      = orderRepository.countByShopIn(shops);
+        long pendingOrders    = orderRepository.countByShopInAndOrderStatus(shops, Order.OrderStatus.pending);
+        long completedOrders  = orderRepository.countByShopInAndOrderStatus(shops, Order.OrderStatus.delivered);
+        long cancelledOrders  = orderRepository.countByShopInAndOrderStatus(shops, Order.OrderStatus.cancelled);
+
+        List<Order> paidOrders = orderRepository.findPaidOrdersByShopsAndDateRange(shops, startDate, endDate);
+        BigDecimal totalRevenue      = paidOrders.stream().map(Order::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal platformCommission = paidOrders.stream().map(o -> o.getPlatformCommissionAmount() != null ? o.getPlatformCommissionAmount() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal sellerRevenue      = paidOrders.stream().map(o -> o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add);
 
         dashboard.setTotalOrders(totalOrders);
         dashboard.setPendingOrders(pendingOrders);
@@ -612,7 +701,7 @@ public class OrderServiceImpl implements OrderService {
         dashboard.setTotalRevenue(totalRevenue);
         dashboard.setPlatformCommission(platformCommission);
         dashboard.setSellerRevenue(sellerRevenue);
-        dashboard.setTopSellingProducts(getTopSellingProducts(seller, startDate, endDate, 10));
+        dashboard.setTopSellingProducts(getTopSellingProducts(seller, shopId, startDate, endDate, 10));
         return dashboard;
     }
 

@@ -45,12 +45,15 @@ public class WalletTransaction {
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public enum TransactionType {
-        deposit,           // Nạp tiền vào ví
-        withdrawal,        // Rút tiền từ ví
-        payment,           // Thanh toán đơn hàng (trừ tiền người mua)
-        refund,            // Hoàn tiền
-        received_payment,  // Nhận tiền từ đơn hàng (cộng tiền người bán)
-        admin_adjustment,  // Admin điều chỉnh số dư
-        platform_commission // Hoa hồng nền tảng (admin nhận từ mỗi đơn hàng)
+        deposit,            // Nạp tiền vào ví
+        withdrawal,         // Rút tiền từ ví
+        payment,            // Thanh toán đơn hàng (trừ tiền người mua)
+        refund,             // Hoàn tiền cho người mua
+        received_payment,   // Nhận tiền từ đơn hàng sau khi giao thành công (seller)
+        admin_adjustment,   // Admin điều chỉnh số dư thủ công
+        platform_commission, // Hoa hồng nền tảng (admin giữ sau khi đơn giao xong)
+        escrow_hold,        // Giữ tiền escrow khi buyer thanh toán (cộng vào admin, chờ giao)
+        escrow_release,     // Giải phóng escrow cho seller sau khi giao thành công
+        commission_refund   // Hoàn hoa hồng về buyer khi refund sau delivered
     }
 }

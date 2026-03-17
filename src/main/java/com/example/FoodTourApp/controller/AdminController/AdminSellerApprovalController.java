@@ -31,20 +31,26 @@ public class AdminSellerApprovalController {
         this.sellerApprovalService = sellerApprovalService;
     }
 
-    @GetMapping("/pending")
-    public ResponseEntity<?> getAllPendingApprovals(
+    /**
+     * Lấy danh sách approval requests, có thể lọc theo status.
+     * GET /api/admin/seller-approval?status=PENDING|APPROVED|REJECTED|ALL
+     * Nếu không truyền status thì mặc định là ALL.
+     */
+    @GetMapping
+    public ResponseEntity<?> getApprovals(
+            @RequestParam(defaultValue = "ALL") String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "submittedAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir,
             Authentication authentication) {
         User admin = (User) authentication.getPrincipal();
-        logger.info("Admin ID {} is fetching all pending approval requests (page: {}, size: {})", admin.getId(), page, size);
+        logger.info("Admin ID {} is fetching approval requests with status: {} (page: {}, size: {})", admin.getId(), status, page, size);
 
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
-            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals(pageable);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllApprovalsByStatus(status, pageable);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -52,13 +58,20 @@ public class AdminSellerApprovalController {
             result.put("currentPage", approvals.getNumber());
             result.put("totalItems", approvals.getTotalElements());
             result.put("totalPages", approvals.getTotalPages());
+            result.put("filter", status);
 
             return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching pending approvals: {}", e.getMessage(), e);
+        } catch (IllegalArgumentException e) {
+            logger.error("Invalid status filter '{}' requested by admin ID {}: {}", status, admin.getId(), e.getMessage());
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", "Failed to fetch pending approval requests");
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            logger.error("Error fetching approvals with status {}: {}", status, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch approval requests");
             return ResponseEntity.internalServerError().body(error);
         }
     }
@@ -121,76 +134,4 @@ public class AdminSellerApprovalController {
         }
     }
 
-    @GetMapping("/all")
-    public ResponseEntity<?> getAllApprovals(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "submittedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir,
-            Authentication authentication) {
-        User admin = (User) authentication.getPrincipal();
-        logger.info("Admin ID {} is fetching all approval requests (page: {}, size: {})", admin.getId(), page, size);
-
-        try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
-            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllPendingApprovals(pageable);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", approvals.getContent());
-            result.put("currentPage", approvals.getNumber());
-            result.put("totalItems", approvals.getTotalElements());
-            result.put("totalPages", approvals.getTotalPages());
-            result.put("message", "Currently showing pending approvals only. Can be extended to show all.");
-
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error fetching all approvals: {}", e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Failed to fetch approval requests");
-            return ResponseEntity.internalServerError().body(error);
-        }
-    }
-
-    @GetMapping("/filter")
-    public ResponseEntity<?> getApprovalsByStatus(
-            @RequestParam(defaultValue = "ALL") String status,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "submittedAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir,
-            Authentication authentication) {
-        User admin = (User) authentication.getPrincipal();
-        logger.info("Admin ID {} is fetching approval requests with status: {} (page: {}, size: {})", admin.getId(), status, page, size);
-
-        try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
-            Page<SellerApprovalResponse> approvals = sellerApprovalService.getAllApprovalsByStatus(status, pageable);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", approvals.getContent());
-            result.put("currentPage", approvals.getNumber());
-            result.put("totalItems", approvals.getTotalElements());
-            result.put("totalPages", approvals.getTotalPages());
-            result.put("filter", status);
-
-            return ResponseEntity.ok(result);
-        } catch (IllegalArgumentException e) {
-            logger.error("Invalid status filter '{}' requested by admin ID {}: {}", status, admin.getId(), e.getMessage());
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
-        } catch (Exception e) {
-            logger.error("Error fetching approvals with status {}: {}", status, e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", "Failed to fetch approval requests");
-            return ResponseEntity.internalServerError().body(error);
-        }
-    }
 }

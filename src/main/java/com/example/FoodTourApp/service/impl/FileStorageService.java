@@ -23,6 +23,8 @@ public class FileStorageService {
     private static final String REVIEW_IMAGE_DIR = BASE_DIR + "\\ReviewImage";
     private static final String USER_AVATAR_DIR = BASE_DIR + "\\UserAvatar";
     private static final String FILE_MESSAGE_DIR = BASE_DIR + "\\FileMessage";
+    private static final String BUSINESS_LICENSE_DIR = BASE_DIR + "\\BusinessLicense";
+    private static final String ID_CARD_DIR = BASE_DIR + "\\IdCard";
 
     // Base URL để truy cập file từ frontend
     private static final String BASE_URL = "/uploads";
@@ -37,7 +39,9 @@ public class FileStorageService {
         SHOP_BANNER,        // Banner cửa hàng
         REVIEW_IMAGE,       // Ảnh đánh giá (review)
         USER_AVATAR,        // Avatar người dùng
-        FILE_MESSAGE        // File gửi trong chat
+        FILE_MESSAGE,       // File gửi trong chat
+        BUSINESS_LICENSE,   // Ảnh giấy phép kinh doanh
+        ID_CARD             // Ảnh căn cước công dân
     }
 
     /**
@@ -308,6 +312,10 @@ public class FileStorageService {
                 return USER_AVATAR_DIR;
             case FILE_MESSAGE:
                 return FILE_MESSAGE_DIR;
+            case BUSINESS_LICENSE:
+                return BUSINESS_LICENSE_DIR;
+            case ID_CARD:
+                return ID_CARD_DIR;
             default:
                 return PRODUCT_IMAGE_DIR;
         }

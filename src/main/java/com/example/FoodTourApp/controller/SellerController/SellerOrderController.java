@@ -33,46 +33,18 @@ public class SellerOrderController {
     private final OrderService orderService;
     private static final Logger logger = LoggerFactory.getLogger(SellerOrderController.class);
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Tổng hợp TẤT CẢ shops (không truyền shopId)
+    // ══════════════════════════════════════════════════════════════════════════
+
     /**
-     * Lấy danh sách đơn hàng của shop
+     * Lấy / lọc đơn hàng tổng hợp tất cả shops.
      * GET /api/seller/orders
+     * GET /api/seller/orders?status=PENDING&startDate=...&endDate=...
+     * Nếu không truyền filter thì trả về tất cả.
      */
     @GetMapping
     public ResponseEntity<?> getShopOrders(
-            @AuthenticationPrincipal User seller,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Seller ID {} is getting shop orders with pagination", seller.getId());
-        try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
-                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
-
-            Page<OrderResponseDTO> orders = orderService.getShopOrders(seller, pageable);
-            PageResponse<OrderResponseDTO> pageResponse = PageResponse.of(orders);
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", pageResponse);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error getting shop orders for seller ID {}: {}", seller.getId(), e.getMessage(), e);
-            Map<String, Object> error = new HashMap<>();
-            error.put("success", false);
-            error.put("message", e.getMessage());
-            return ResponseEntity.badRequest().body(error);
-        }
-    }
-
-    /**
-     * Lọc đơn hàng theo trạng thái và thời gian
-     * GET /api/seller/orders/filter
-     * Params: status (optional), startDate (optional), endDate (optional)
-     */
-    @GetMapping("/filter")
-    public ResponseEntity<?> getShopOrdersWithFilter(
             @AuthenticationPrincipal User seller,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
@@ -81,20 +53,49 @@ public class SellerOrderController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Seller ID {} is filtering shop orders: status={}, startDate={}, endDate={}",
-                seller.getId(), status, startDate, endDate);
+        return getShopOrdersWithFilterInternal(seller, null, status, startDate, endDate, page, size, sortBy, sortDir);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Theo shop cụ thể /{shopId}/...
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Lấy / lọc đơn hàng theo shop cụ thể.
+     * GET /api/seller/orders/{shopId}
+     * GET /api/seller/orders/{shopId}?status=PENDING&startDate=...&endDate=...
+     * Nếu không truyền filter thì trả về tất cả đơn của shop đó.
+     */
+    @GetMapping("/{shopId}")
+    public ResponseEntity<?> getShopOrdersByShopId(
+            @AuthenticationPrincipal User seller,
+            @PathVariable Integer shopId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        return getShopOrdersWithFilterInternal(seller, shopId, status, startDate, endDate, page, size, sortBy, sortDir);
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    private ResponseEntity<?> getShopOrdersWithFilterInternal(User seller, Integer shopId,
+            String status, LocalDateTime startDate, LocalDateTime endDate,
+            int page, int size, String sortBy, String sortDir) {
+        logger.info("Seller ID {} filtering orders: shopId={}, status={}, startDate={}, endDate={}",
+                seller.getId(), shopId, status, startDate, endDate);
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ?
                     Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
-
             Page<OrderResponseDTO> orders = orderService.getShopOrdersWithFilterByStatusString(
-                    seller, status, startDate, endDate, pageable);
-            PageResponse<OrderResponseDTO> pageResponse = PageResponse.of(orders);
-
+                    seller, shopId, status, startDate, endDate, pageable);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("data", pageResponse);
+            result.put("data", PageResponse.of(orders));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error filtering shop orders for seller ID {}: {}", seller.getId(), e.getMessage(), e);
@@ -239,8 +240,8 @@ public class SellerOrderController {
 
     /**
      * Thống kê doanh thu theo ngày/tháng/năm
-     * GET /api/seller/orders/statistics/revenue
-     * Params: periodType (day/month/year), startDate, endDate
+     * GET /api/seller/orders/statistics/revenue           (tất cả shops)
+     * GET /api/seller/orders/{shopId}/statistics/revenue  (shop cụ thể)
      */
     @GetMapping("/statistics/revenue")
     public ResponseEntity<?> getRevenueStatistics(
@@ -248,12 +249,25 @@ public class SellerOrderController {
             @RequestParam String periodType,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        logger.info("Seller ID {} is getting revenue statistics: periodType={}, startDate={}, endDate={}",
-                seller.getId(), periodType, startDate, endDate);
+        return getRevenueStatisticsInternal(seller, null, periodType, startDate, endDate);
+    }
+
+    @GetMapping("/{shopId}/statistics/revenue")
+    public ResponseEntity<?> getRevenueStatisticsByShopId(
+            @AuthenticationPrincipal User seller,
+            @PathVariable Integer shopId,
+            @RequestParam String periodType,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+        return getRevenueStatisticsInternal(seller, shopId, periodType, startDate, endDate);
+    }
+
+    private ResponseEntity<?> getRevenueStatisticsInternal(User seller, Integer shopId,
+            String periodType, LocalDateTime startDate, LocalDateTime endDate) {
+        logger.info("Seller ID {} getting revenue stats: shopId={}, periodType={}", seller.getId(), shopId, periodType);
         try {
             List<RevenueStatisticsDTO> statistics = orderService.getRevenueStatistics(
-                    seller, periodType, startDate, endDate);
-
+                    seller, shopId, periodType, startDate, endDate);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", statistics);
@@ -269,8 +283,8 @@ public class SellerOrderController {
 
     /**
      * Thống kê sản phẩm bán chạy
-     * GET /api/seller/orders/statistics/top-products
-     * Params: startDate, endDate, limit (default: 10)
+     * GET /api/seller/orders/statistics/top-products           (tất cả shops)
+     * GET /api/seller/orders/{shopId}/statistics/top-products  (shop cụ thể)
      */
     @GetMapping("/statistics/top-products")
     public ResponseEntity<?> getTopSellingProducts(
@@ -278,12 +292,25 @@ public class SellerOrderController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             @RequestParam(defaultValue = "10") int limit) {
-        logger.info("Seller ID {} is getting top selling products: startDate={}, endDate={}, limit={}",
-                seller.getId(), startDate, endDate, limit);
+        return getTopSellingProductsInternal(seller, null, startDate, endDate, limit);
+    }
+
+    @GetMapping("/{shopId}/statistics/top-products")
+    public ResponseEntity<?> getTopSellingProductsByShopId(
+            @AuthenticationPrincipal User seller,
+            @PathVariable Integer shopId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
+            @RequestParam(defaultValue = "10") int limit) {
+        return getTopSellingProductsInternal(seller, shopId, startDate, endDate, limit);
+    }
+
+    private ResponseEntity<?> getTopSellingProductsInternal(User seller, Integer shopId,
+            LocalDateTime startDate, LocalDateTime endDate, int limit) {
+        logger.info("Seller ID {} getting top products: shopId={}, limit={}", seller.getId(), shopId, limit);
         try {
             List<ProductSalesStatisticsDTO> statistics = orderService.getTopSellingProducts(
-                    seller, startDate, endDate, limit);
-
+                    seller, shopId, startDate, endDate, limit);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", statistics);
@@ -298,20 +325,32 @@ public class SellerOrderController {
     }
 
     /**
-     * Dashboard tổng quan cho seller
-     * GET /api/seller/orders/statistics/dashboard
-     * Params: startDate, endDate
+     * Dashboard tổng quan
+     * GET /api/seller/orders/statistics/dashboard           (tất cả shops)
+     * GET /api/seller/orders/{shopId}/statistics/dashboard  (shop cụ thể)
      */
     @GetMapping("/statistics/dashboard")
     public ResponseEntity<?> getDashboardStatistics(
             @AuthenticationPrincipal User seller,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
-        logger.info("Seller ID {} is getting dashboard statistics: startDate={}, endDate={}",
-                seller.getId(), startDate, endDate);
-        try {
-            DashboardStatisticsDTO dashboard = orderService.getDashboardStatistics(seller, startDate, endDate);
+        return getDashboardStatisticsInternal(seller, null, startDate, endDate);
+    }
 
+    @GetMapping("/{shopId}/statistics/dashboard")
+    public ResponseEntity<?> getDashboardStatisticsByShopId(
+            @AuthenticationPrincipal User seller,
+            @PathVariable Integer shopId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
+        return getDashboardStatisticsInternal(seller, shopId, startDate, endDate);
+    }
+
+    private ResponseEntity<?> getDashboardStatisticsInternal(User seller, Integer shopId,
+            LocalDateTime startDate, LocalDateTime endDate) {
+        logger.info("Seller ID {} getting dashboard: shopId={}", seller.getId(), shopId);
+        try {
+            DashboardStatisticsDTO dashboard = orderService.getDashboardStatistics(seller, shopId, startDate, endDate);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", dashboard);
@@ -326,8 +365,9 @@ public class SellerOrderController {
     }
 
     /**
-     * Lấy danh sách đơn hàng có yêu cầu refund từ review
-     * GET /api/seller/orders/refund-requests
+     * Đơn hàng có yêu cầu refund
+     * GET /api/seller/orders/refund-requests           (tất cả shops)
+     * GET /api/seller/orders/{shopId}/refund-requests  (shop cụ thể)
      */
     @GetMapping("/refund-requests")
     public ResponseEntity<?> getOrdersWithRefundRequests(
@@ -336,14 +376,28 @@ public class SellerOrderController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Seller ID {} is getting orders with refund requests", seller.getId());
+        return getOrdersWithRefundRequestsInternal(seller, null, page, size, sortBy, sortDir);
+    }
+
+    @GetMapping("/{shopId}/refund-requests")
+    public ResponseEntity<?> getOrdersWithRefundRequestsByShopId(
+            @AuthenticationPrincipal User seller,
+            @PathVariable Integer shopId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+        return getOrdersWithRefundRequestsInternal(seller, shopId, page, size, sortBy, sortDir);
+    }
+
+    private ResponseEntity<?> getOrdersWithRefundRequestsInternal(User seller, Integer shopId,
+            int page, int size, String sortBy, String sortDir) {
+        logger.info("Seller ID {} getting refund requests, shopId={}", seller.getId(), shopId);
         try {
             Sort sort = sortDir.equalsIgnoreCase("ASC") ?
                     Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
             Pageable pageable = PageRequest.of(page, size, sort);
-
-            Page<OrderResponseDTO> ordersWithRefund = orderService.getOrdersWithRefundRequests(seller, pageable);
-
+            Page<OrderResponseDTO> ordersWithRefund = orderService.getOrdersWithRefundRequests(seller, shopId, pageable);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("message", "Danh sách đơn hàng có yêu cầu hoàn tiền");

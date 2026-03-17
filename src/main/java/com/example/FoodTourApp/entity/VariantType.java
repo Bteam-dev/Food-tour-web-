@@ -8,6 +8,12 @@ import java.time.LocalDateTime;
 @Table(name = "variant_types")
 @Data
 public class VariantType {
+
+    public enum SelectionType {
+        SINGLE,   // Chỉ chọn 1 (ví dụ: Size)
+        MULTIPLE  // Chọn nhiều (ví dụ: Topping)
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
@@ -17,6 +23,10 @@ public class VariantType {
 
     @Column(name = "description", length = 255)
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "selection_type", nullable = false, length = 10)
+    private SelectionType selectionType = SelectionType.MULTIPLE;
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;

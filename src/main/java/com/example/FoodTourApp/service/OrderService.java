@@ -53,15 +53,19 @@ public interface OrderService {
     OrderResponseDTO cancelOrderBySeller(Integer orderId, User seller, String reason);
 
     /**
-     * Seller lấy danh sách đơn hàng của shop với lọc
+     * Seller lấy danh sách đơn hàng.
+     * shopId = null → tổng hợp tất cả shops của seller
+     * shopId != null → chỉ shop đó (phải thuộc seller)
      */
-    Page<OrderResponseDTO> getShopOrders(User seller, Pageable pageable);
+    Page<OrderResponseDTO> getShopOrders(User seller, Integer shopId, Pageable pageable);
 
     /**
-     * Seller lọc đơn hàng theo trạng thái và thời gian
+     * Seller lọc đơn hàng theo trạng thái và thời gian.
+     * shopId = null → tổng hợp tất cả shops
      */
     Page<OrderResponseDTO> getShopOrdersWithFilter(
             User seller,
+            Integer shopId,
             Order.OrderStatus status,
             LocalDateTime startDate,
             LocalDateTime endDate,
@@ -69,43 +73,51 @@ public interface OrderService {
 
     /**
      * Lọc đơn hàng theo trạng thái (string) và thời gian - tự parse OrderStatus.
-     * Controller chỉ cần truyền string status, không cần tự parse enum.
+     * shopId = null → tổng hợp tất cả shops
      */
     Page<OrderResponseDTO> getShopOrdersWithFilterByStatusString(
             User seller,
+            Integer shopId,
             String status,
             LocalDateTime startDate,
             LocalDateTime endDate,
             Pageable pageable);
 
     /**
-     * Thống kê doanh thu theo ngày/tháng/năm
+     * Thống kê doanh thu theo ngày/tháng/năm.
+     * shopId = null → tổng hợp tất cả shops
      */
     List<RevenueStatisticsDTO> getRevenueStatistics(
             User seller,
+            Integer shopId,
             String periodType, // "day", "month", "year"
             LocalDateTime startDate,
             LocalDateTime endDate);
 
     /**
-     * Thống kê sản phẩm bán chạy
+     * Thống kê sản phẩm bán chạy.
+     * shopId = null → tổng hợp tất cả shops
      */
     List<ProductSalesStatisticsDTO> getTopSellingProducts(
             User seller,
+            Integer shopId,
             LocalDateTime startDate,
             LocalDateTime endDate,
             int limit);
 
     /**
-     * Dashboard tổng quan cho seller
+     * Dashboard tổng quan cho seller.
+     * shopId = null → tổng hợp tất cả shops
      */
     DashboardStatisticsDTO getDashboardStatistics(
             User seller,
+            Integer shopId,
             LocalDateTime startDate,
             LocalDateTime endDate);
 
     /**
-     * Lấy danh sách đơn hàng có yêu cầu hoàn tiền (hasRefundRequest = true)
+     * Lấy danh sách đơn hàng có yêu cầu hoàn tiền (hasRefundRequest = true).
+     * shopId = null → tổng hợp tất cả shops
      */
-    Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Pageable pageable);
+    Page<OrderResponseDTO> getOrdersWithRefundRequests(User seller, Integer shopId, Pageable pageable);
 }

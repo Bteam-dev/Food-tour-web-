@@ -59,4 +59,25 @@ public interface OrderRepository extends JpaRepository<Order, Integer> {
 
     /** Lấy đơn hàng có yêu cầu hoàn tiền từ NHIỀU shops */
     Page<Order> findByShopInAndHasRefundRequestTrue(List<Shop> shops, Pageable pageable);
+
+    // ── Multi-shop pagination/filter ─────────────────────────────────────────
+
+    /** Lấy tất cả đơn hàng từ nhiều shops (phân trang) */
+    Page<Order> findByShopIn(List<Shop> shops, Pageable pageable);
+
+    /** Lọc đơn hàng từ nhiều shops theo trạng thái */
+    Page<Order> findByShopInAndOrderStatus(List<Shop> shops, Order.OrderStatus orderStatus, Pageable pageable);
+
+    /** Lọc đơn hàng từ nhiều shops theo khoảng thời gian */
+    Page<Order> findByShopInAndCreatedAtBetween(List<Shop> shops, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+    /** Lọc đơn hàng từ nhiều shops theo trạng thái và khoảng thời gian */
+    Page<Order> findByShopInAndOrderStatusAndCreatedAtBetween(
+            List<Shop> shops, Order.OrderStatus orderStatus, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
+
+    /** Đếm đơn hàng từ nhiều shops */
+    Long countByShopIn(List<Shop> shops);
+
+    /** Đếm đơn hàng từ nhiều shops theo trạng thái */
+    Long countByShopInAndOrderStatus(List<Shop> shops, Order.OrderStatus orderStatus);
 }

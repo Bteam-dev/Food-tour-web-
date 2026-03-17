@@ -52,6 +52,12 @@ public class VariantTypeService {
         variantType.setDescription(requestDTO.getDescription());
         variantType.setIsActive(true);
 
+        if (requestDTO.getSelectionType() != null) {
+            variantType.setSelectionType(VariantType.SelectionType.valueOf(requestDTO.getSelectionType()));
+        } else {
+            variantType.setSelectionType(VariantType.SelectionType.MULTIPLE);
+        }
+
         VariantType savedVariantType = variantTypeRepository.save(variantType);
         return convertToDTO(savedVariantType);
     }
@@ -70,6 +76,10 @@ public class VariantTypeService {
 
         variantType.setName(requestDTO.getName());
         variantType.setDescription(requestDTO.getDescription());
+
+        if (requestDTO.getSelectionType() != null) {
+            variantType.setSelectionType(VariantType.SelectionType.valueOf(requestDTO.getSelectionType()));
+        }
 
         VariantType updatedVariantType = variantTypeRepository.save(variantType);
         return convertToDTO(updatedVariantType);
@@ -100,6 +110,9 @@ public class VariantTypeService {
         dto.setId(variantType.getId());
         dto.setName(variantType.getName());
         dto.setDescription(variantType.getDescription());
+        dto.setSelectionType(variantType.getSelectionType() != null
+                ? variantType.getSelectionType().name()
+                : VariantType.SelectionType.MULTIPLE.name());
         dto.setIsActive(variantType.getIsActive());
         dto.setCreatedAt(variantType.getCreatedAt());
         dto.setUpdatedAt(variantType.getUpdatedAt());

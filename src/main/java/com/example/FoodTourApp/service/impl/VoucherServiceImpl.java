@@ -7,7 +7,9 @@ import com.example.FoodTourApp.entity.Shop;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.entity.Voucher;
 import com.example.FoodTourApp.repository.ShopRepository;
+import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.repository.VoucherRepository;
+import com.example.FoodTourApp.service.FCMService;
 import com.example.FoodTourApp.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,8 @@ public class VoucherServiceImpl implements VoucherService {
 
     private final VoucherRepository voucherRepository;
     private final ShopRepository shopRepository;
+    private final UserRepository userRepository;
+    private final FCMService fcmService;
 
     @Override
     @Transactional
@@ -34,7 +38,24 @@ public class VoucherServiceImpl implements VoucherService {
         Voucher v = buildVoucher(request);
         v.setScope(Voucher.VoucherScope.PLATFORM);
         v.setShop(null);
-        return mapToResponse(voucherRepository.save(v));
+        VoucherResponse response = mapToResponse(voucherRepository.save(v));
+
+        // Gửi thông báo FCM cho tất cả người dùng có fcmToken
+        try {
+            String discountSummary = buildDiscountSummary(v);
+            List<User> allUsers = userRepository.findAll();
+            for (User user : allUsers) {
+                try {
+                    fcmService.sendVoucherCreatedNotification(user, v.getTitle(), v.getCode(), discountSummary);
+                } catch (Exception e) {
+                    log.warn("Không thể gửi FCM cho user {}: {}", user.getId(), e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Lỗi khi gửi FCM voucher notification: {}", e.getMessage());
+        }
+
+        return response;
     }
 
     @Override
@@ -82,11 +103,35 @@ public class VoucherServiceImpl implements VoucherService {
     }
 
     @Override
+    public Page<VoucherResponse> getActivePlatformVouchersByType(String discountType, Pageable pageable) {
+        Voucher.DiscountType type = parseDiscountType(discountType);
+        return voucherRepository.findActivePlatformVouchersByDiscountType(LocalDateTime.now(), type, pageable)
+                .map(this::mapToResponse);
+    }
+
+    @Override
     public Page<VoucherResponse> getActiveShopVouchers(Integer shopId, Pageable pageable) {
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new RuntimeException("Shop không tồn tại"));
         return voucherRepository.findActiveVouchersByShop(shop, LocalDateTime.now(), pageable)
                 .map(this::mapToResponse);
+    }
+
+    @Override
+    public Page<VoucherResponse> getActiveShopVouchersByType(Integer shopId, String discountType, Pageable pageable) {
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Shop không tồn tại"));
+        Voucher.DiscountType type = parseDiscountType(discountType);
+        return voucherRepository.findActiveVouchersByShopAndDiscountType(shop, LocalDateTime.now(), type, pageable)
+                .map(this::mapToResponse);
+    }
+
+    private Voucher.DiscountType parseDiscountType(String discountType) {
+        try {
+            return Voucher.DiscountType.valueOf(discountType.toUpperCase());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Loại giảm giá không hợp lệ. Phải là: PERCENT, FIXED, hoặc FREE_SHIP");
+        }
     }
 
     @Override
@@ -176,6 +221,16 @@ public class VoucherServiceImpl implements VoucherService {
             dto.setShopName(v.getShop().getShopName());
         }
         return dto;
+    }
+
+    /** Tạo chuỗi mô tả giá trị giảm để gửi FCM */
+    private String buildDiscountSummary(Voucher v) {
+        if (v.getDiscountType() == null) return "";
+        return switch (v.getDiscountType()) {
+            case PERCENT   -> "Giảm " + v.getDiscountValue().toPlainString() + "%";
+            case FIXED     -> "Giảm " + v.getDiscountValue().toPlainString() + "đ";
+            case FREE_SHIP -> "Miễn phí vận chuyển";
+        };
     }
 }
 

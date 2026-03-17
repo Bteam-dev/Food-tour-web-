@@ -3,6 +3,7 @@ package com.example.FoodTourApp.DTO.ShopDTO;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * DTO cho response Shop (trả về cho client)
@@ -33,7 +34,7 @@ public class ShopResponseDTO {
 
     private String email;
 
-    private String businessLicense;
+    private List<String> businessLicenseImageUrls;
 
     private String taxCode;
 
@@ -46,6 +47,9 @@ public class ShopResponseDTO {
     private Boolean isVerified;
 
     private Boolean isActive;
+
+    /** Lý do từ chối (nếu shop bị từ chối) */
+    private String rejectionReason;
 
     private LocalDateTime createdAt;
 

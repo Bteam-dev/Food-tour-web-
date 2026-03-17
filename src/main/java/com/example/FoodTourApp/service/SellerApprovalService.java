@@ -5,13 +5,15 @@ import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalRequest;
 import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.web.multipart.MultipartFile;
 
 public interface SellerApprovalService {
     /**
      * Nộp đơn xin trở thành seller.
+     * Ảnh CCCD được upload dưới dạng MultipartFile[].
      * Ném IllegalStateException nếu user đã là SELLER rồi.
      */
-    SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request);
+    SellerApprovalResponse submitApproval(Integer userId, SellerApprovalRequest request, MultipartFile[] idCardImages);
     SellerApprovalResponse reviewApproval(Integer adminId, ReviewApprovalRequest request);
     Page<SellerApprovalResponse> getAllPendingApprovals(Pageable pageable);
     Page<SellerApprovalResponse> getAllApprovalsByStatus(String status, Pageable pageable);
