@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,6 +34,7 @@ public class ShopServiceImpl implements ShopService {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
     private final FCMService fcmService;
+    private final FileAccessTokenService fileAccessTokenService;
 
     @Override
     @Transactional
@@ -179,15 +182,15 @@ public class ShopServiceImpl implements ShopService {
         // Dùng temp folder để upload ảnh trước khi có shopId
         String tempFolder = "temp_" + seller.getId() + "_" + System.currentTimeMillis();
 
-        // Upload ảnh giấy phép kinh doanh TRƯỚC
-        List<String> businessLicenseUrls;
+        // Upload ảnh giấy phép kinh doanh TRƯỚC - Lưu dưới dạng relative path
+        List<String> businessLicensePaths;
         try {
-            businessLicenseUrls = fileStorageService.storeFiles(
+            businessLicensePaths = fileStorageService.storeSensitiveFiles(
                     businessLicenseImages,
                     FileStorageService.FileCategory.BUSINESS_LICENSE,
                     tempFolder
             );
-            if (businessLicenseUrls.isEmpty()) {
+            if (businessLicensePaths.isEmpty()) {
                 throw new RuntimeException("Ảnh giấy phép kinh doanh là bắt buộc");
             }
         } catch (IOException e) {
@@ -246,7 +249,7 @@ public class ShopServiceImpl implements ShopService {
         }
 
         try {
-            shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicenseUrls));
+            shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicensePaths));
         } catch (IOException e) {
             throw new RuntimeException("Lỗi serialize danh sách ảnh giấy phép: " + e.getMessage(), e);
         }
@@ -281,18 +284,18 @@ public class ShopServiceImpl implements ShopService {
             }
         }
 
-        // Upload ảnh giấy phép kinh doanh mới (nếu có)
+        // Upload ảnh giấy phép kinh doanh mới (nếu có) - Lưu dưới dạng relative path
         if (businessLicenseImages != null && businessLicenseImages.length > 0) {
             try {
-                List<String> businessLicenseUrls = fileStorageService.storeFiles(
+                List<String> businessLicensePaths = fileStorageService.storeSensitiveFiles(
                         businessLicenseImages,
                         FileStorageService.FileCategory.BUSINESS_LICENSE,
                         subfolderId
                 );
-                if (!businessLicenseUrls.isEmpty()) {
+                if (!businessLicensePaths.isEmpty()) {
                     Shop shop = shopRepository.findById(shopId)
                             .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
-                    shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicenseUrls));
+                    shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicensePaths));
                     shopRepository.save(shop);
                 }
             } catch (IOException e) {
@@ -387,14 +390,46 @@ public class ShopServiceImpl implements ShopService {
         dto.setPhone(shop.getPhone());
         dto.setEmail(shop.getEmail());
 
-        // Parse JSON array ảnh giấy phép kinh doanh
+        // Parse JSON array ảnh giấy phép kinh doanh và convert sang signed URLs
         try {
             if (shop.getBusinessLicenseImageUrls() != null) {
-                List<String> imageUrls = objectMapper.readValue(
+                List<String> relativePaths = objectMapper.readValue(
                         shop.getBusinessLicenseImageUrls(),
                         new TypeReference<List<String>>() {}
                 );
-                dto.setBusinessLicenseImageUrls(imageUrls);
+                
+                // Lấy thông tin user đang request từ Security Context
+                Integer requestUserId = null;
+                String requestUserRole = "GUEST";
+                try {
+                    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+                    if (authentication != null && authentication.getPrincipal() instanceof User) {
+                        User requestUser = (User) authentication.getPrincipal();
+                        requestUserId = requestUser.getId();
+                        requestUserRole = requestUser.getRole().getRoleName().name();
+                    }
+                } catch (Exception e) {
+                    // Nếu không lấy được user từ context
+                }
+                
+                // Convert relative paths thành signed URLs với ownership validation
+                // fileOwnerId = sellerId (seller sở hữu shop)
+                // requestUserId = người đang xem
+                // requestUserRole = role của người xem (ADMIN/SELLER)
+                Integer fileOwnerId = shop.getSeller().getId();
+                Integer finalRequestUserId = requestUserId != null ? requestUserId : fileOwnerId;
+                String finalRequestUserRole = requestUserRole;
+                
+                List<String> signedUrls = relativePaths.stream()
+                        .map(relativePath -> fileAccessTokenService.generateSignedUrl(
+                                relativePath, 
+                                fileOwnerId, 
+                                finalRequestUserId, 
+                                finalRequestUserRole
+                        ))
+                        .toList();
+                
+                dto.setBusinessLicenseImageUrls(signedUrls);
             } else {
                 dto.setBusinessLicenseImageUrls(List.of());
             }
@@ -432,5 +467,10 @@ public class ShopServiceImpl implements ShopService {
         dto.setAddress(addrDto);
 
         return dto;
+    }
+
+    @Override
+    public List<String> getAvailableCities() {
+        return shopRepository.findDistinctCitiesByVerifiedAndActive();
     }
 }

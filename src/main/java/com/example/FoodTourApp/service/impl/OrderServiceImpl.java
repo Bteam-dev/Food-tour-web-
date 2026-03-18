@@ -314,8 +314,13 @@ public class OrderServiceImpl implements OrderService {
         if (order.getPaymentMethod() == Order.PaymentMethod.app_wallet) {
             walletService.processOrderPayment(order);
             orderRepository.save(order);
+            // Force-initialize seller entity within this transaction to avoid
+            // Hibernate lazy-proxy issue when @Async thread accesses it outside session
+            User seller = order.getShop().getSeller();
+            seller.getId(); // triggers proxy initialization while session is still open
+            seller.getFcmToken(); // eagerly read before async
             fcmService.sendOrderPaidNotification(user, order.getOrderNumber(), order.getShop().getShopName(), order.getTotalAmount());
-            fcmService.sendNewOrderToSeller(order.getShop().getSeller(), order.getOrderNumber(), user.getFullName(), order.getTotalAmount());
+            fcmService.sendNewOrderToSeller(seller, order.getOrderNumber(), user.getFullName(), order.getTotalAmount());
         } else {
             throw new RuntimeException("Đơn hàng COD sẽ thanh toán khi nhận hàng");
         }
@@ -652,19 +657,79 @@ public class OrderServiceImpl implements OrderService {
         List<Shop> shops = resolveShops(seller, shopId);
         List<Order> paidOrders = orderRepository.findPaidOrdersByShopsAndDateRange(shops, startDate, endDate);
         Map<Integer, ProductSalesStatisticsDTO> statsMap = new java.util.HashMap<>();
+        Map<Integer, Long> orderCountMap = new java.util.HashMap<>();
+        
         for (Order o : paidOrders) {
             for (OrderItem item : orderItemRepository.findByOrder(o)) {
                 Integer pid = item.getProduct().getId();
                 ProductSalesStatisticsDTO stat = statsMap.computeIfAbsent(pid, k -> {
                     ProductSalesStatisticsDTO s = new ProductSalesStatisticsDTO();
-                    s.setProductId(pid); s.setProductName(item.getProduct().getName());
-                    s.setTotalQuantitySold(0L); s.setTotalRevenue(BigDecimal.ZERO);
+                    s.setProductId(pid); 
+                    s.setProductName(item.getProduct().getName());
+                    s.setTotalQuantitySold(0L); 
+                    s.setTotalRevenue(BigDecimal.ZERO);
+                    s.setSellerRevenue(BigDecimal.ZERO);
+                    s.setTotalOrders(0L);
+                    
+                    // Set product image URL
+                    if (item.getProduct().getImageUrls() != null && !item.getProduct().getImageUrls().trim().isEmpty()) {
+                        try {
+                            // Parse JSON array để lấy ảnh đầu tiên
+                            String imageUrls = item.getProduct().getImageUrls().trim();
+                            if (imageUrls.startsWith("[") && imageUrls.endsWith("]")) {
+                                imageUrls = imageUrls.substring(1, imageUrls.length() - 1);
+                                String[] urls = imageUrls.split(",");
+                                if (urls.length > 0) {
+                                    String firstUrl = urls[0].trim().replace("\"", "");
+                                    if (!firstUrl.isEmpty()) {
+                                        s.setProductImageUrl(firstUrl);
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            // Ignore parsing error, just leave image URL null
+                        }
+                    }
+                    
                     return s;
                 });
+                
+                // Cập nhật số lượng bán và doanh thu tổng
                 stat.setTotalQuantitySold(stat.getTotalQuantitySold() + item.getQuantity());
                 stat.setTotalRevenue(stat.getTotalRevenue().add(item.getTotalPrice()));
+                
+                // Tính doanh thu seller nhận được từ order item này
+                // Doanh thu seller = (item price / total order price) * seller received amount
+                BigDecimal itemRatio = BigDecimal.ZERO;
+                if (o.getTotalAmount() != null && o.getTotalAmount().compareTo(BigDecimal.ZERO) > 0) {
+                    itemRatio = item.getTotalPrice().divide(o.getTotalAmount(), 4, BigDecimal.ROUND_HALF_UP);
+                }
+                
+                BigDecimal sellerReceivedFromOrder = o.getSellerReceivedAmount() != null ? o.getSellerReceivedAmount() : BigDecimal.ZERO;
+                BigDecimal itemSellerRevenue = itemRatio.multiply(sellerReceivedFromOrder);
+                stat.setSellerRevenue(stat.getSellerRevenue().add(itemSellerRevenue));
+                
+                // Đếm số đơn hàng duy nhất cho mỗi sản phẩm
+                orderCountMap.merge(pid, 1L, (oldVal, newVal) -> {
+                    // Chỉ tăng nếu order này chưa được đếm cho sản phẩm này
+                    return oldVal;
+                });
             }
         }
+        
+        // Set số đơn hàng cho từng sản phẩm
+        for (ProductSalesStatisticsDTO stat : statsMap.values()) {
+            Set<Integer> uniqueOrderIds = new HashSet<>();
+            for (Order o : paidOrders) {
+                for (OrderItem item : orderItemRepository.findByOrder(o)) {
+                    if (item.getProduct().getId().equals(stat.getProductId())) {
+                        uniqueOrderIds.add(o.getId());
+                    }
+                }
+            }
+            stat.setTotalOrders((long) uniqueOrderIds.size());
+        }
+        
         return statsMap.values().stream()
                 .sorted(Comparator.comparing(ProductSalesStatisticsDTO::getTotalQuantitySold).reversed())
                 .limit(limit).collect(Collectors.toList());

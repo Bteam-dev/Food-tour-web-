@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public interface ProductRepository extends JpaRepository<Product, Integer> {
@@ -27,8 +28,9 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
     @Query("SELECT p FROM Product p WHERE p.category.id = :categoryId AND p.isAvailable = true")
     Page<Product> findByCategoryId(@Param("categoryId") Integer categoryId, Pageable pageable);
 
-    // Tìm product theo tên (search keyword) - WITH PAGINATION
-    Page<Product> findByNameContainingIgnoreCase(String keyword, Pageable pageable);
+    // Tìm product theo tên (search keyword) - WITH PAGINATION - CHỈ LẤY SẢN PHẨM AVAILABLE
+    @Query("SELECT p FROM Product p WHERE p.isAvailable = true AND LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))")
+    Page<Product> findByNameContainingIgnoreCase(@Param("keyword") String keyword, Pageable pageable);
 
     // ── Lọc nâng cao ──────────────────────────────────────────────────────────
 
@@ -72,4 +74,47 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
            "GROUP BY p " +
            "ORDER BY COALESCE(SUM(oi.quantity), 0) DESC")
     Page<Product> findBestSellingByCity(@Param("city") String city, Pageable pageable);
+
+    // ── Lọc nâng cao với keyword + price range ─────────────────────────────────
+
+    /**
+     * Tìm kiếm full-text theo tên + lọc theo khoảng giá (sử dụng discountPrice nếu có, ngược lại dùng price).
+     * Tất cả params đều optional (null = bỏ qua điều kiện đó).
+     */
+    @Query("SELECT p FROM Product p WHERE p.isAvailable = true " +
+           "AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "AND (:minPrice IS NULL OR COALESCE(p.discountPrice, p.price) >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR COALESCE(p.discountPrice, p.price) <= :maxPrice) " +
+           "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
+           "AND (:city IS NULL OR LOWER(p.shop.city) = LOWER(:city))")
+    Page<Product> findWithFilters(
+            @Param("keyword") String keyword,
+            @Param("minPrice") BigDecimal minPrice,
+            @Param("maxPrice") BigDecimal maxPrice,
+            @Param("categoryId") Integer categoryId,
+            @Param("city") String city,
+            Pageable pageable);
+
+    /**
+     * Best-selling với keyword + price range + city + category.
+     */
+    @Query("SELECT p FROM Product p " +
+           "LEFT JOIN OrderItem oi ON oi.product = p " +
+           "LEFT JOIN Order o ON oi.order = o " +
+           "WHERE p.isAvailable = true " +
+           "AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+           "AND (:minPrice IS NULL OR COALESCE(p.discountPrice, p.price) >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR COALESCE(p.discountPrice, p.price) <= :maxPrice) " +
+           "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
+           "AND (:city IS NULL OR LOWER(p.shop.city) = LOWER(:city)) " +
+           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered) " +
+           "GROUP BY p " +
+           "ORDER BY COALESCE(SUM(oi.quantity), 0) DESC")
+    Page<Product> findBestSellingWithFilters(
+            @Param("keyword") String keyword,
+            @Param("minPrice") BigDecimal minPrice,
+            @Param("maxPrice") BigDecimal maxPrice,
+            @Param("categoryId") Integer categoryId,
+            @Param("city") String city,
+            Pageable pageable);
 }

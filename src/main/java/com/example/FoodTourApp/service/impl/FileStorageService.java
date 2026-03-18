@@ -1,6 +1,7 @@
 package com.example.FoodTourApp.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -15,16 +16,9 @@ import java.util.UUID;
 @Slf4j
 public class FileStorageService {
 
-    // Các thư mục lưu trữ cố định - chia theo loại file rõ ràng
-    private static final String BASE_DIR = "D:\\Project\\BackEnd\\FoodTourApp_BE\\StorageFile";
-    private static final String PRODUCT_IMAGE_DIR = BASE_DIR + "\\ProductImage";
-    private static final String SHOP_LOGO_DIR = BASE_DIR + "\\ShopLogo";
-    private static final String SHOP_BANNER_DIR = BASE_DIR + "\\ShopBanner";
-    private static final String REVIEW_IMAGE_DIR = BASE_DIR + "\\ReviewImage";
-    private static final String USER_AVATAR_DIR = BASE_DIR + "\\UserAvatar";
-    private static final String FILE_MESSAGE_DIR = BASE_DIR + "\\FileMessage";
-    private static final String BUSINESS_LICENSE_DIR = BASE_DIR + "\\BusinessLicense";
-    private static final String ID_CARD_DIR = BASE_DIR + "\\IdCard";
+    // Các thư mục lưu trữ - sử dụng baseDir từ environment variable
+    @Value("${FILE_STORAGE_BASE_DIR}")
+    private String baseDir;
 
     // Base URL để truy cập file từ frontend
     private static final String BASE_URL = "/uploads";
@@ -236,7 +230,7 @@ public class FileStorageService {
         String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
 
         // D:\...\FileMessage/user_{userId}\conversation_{conversationId}\
-        String targetDir = FILE_MESSAGE_DIR
+        String targetDir = baseDir + "\\FileMessage"
                 + "\\user_" + userId
                 + "\\conversation_" + conversationId;
 
@@ -276,7 +270,7 @@ public class FileStorageService {
         if (dotIndex > 0) extension = originalFilename.substring(dotIndex).toLowerCase();
 
         String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
-        String targetDir = FILE_MESSAGE_DIR + (subfolderId != null ? "\\" + subfolderId : "");
+        String targetDir = baseDir + "\\FileMessage" + (subfolderId != null ? "\\" + subfolderId : "");
         Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
         Files.createDirectories(targetFolder);
         Path targetPath = targetFolder.resolve(filename);
@@ -301,23 +295,23 @@ public class FileStorageService {
     private String getDirectoryByCategory(FileCategory category) {
         switch (category) {
             case PRODUCT_IMAGE:
-                return PRODUCT_IMAGE_DIR;
+                return baseDir + "\\ProductImage";
             case SHOP_LOGO:
-                return SHOP_LOGO_DIR;
+                return baseDir + "\\ShopLogo";
             case SHOP_BANNER:
-                return SHOP_BANNER_DIR;
+                return baseDir + "\\ShopBanner";
             case REVIEW_IMAGE:
-                return REVIEW_IMAGE_DIR;
+                return baseDir + "\\ReviewImage";
             case USER_AVATAR:
-                return USER_AVATAR_DIR;
+                return baseDir + "\\UserAvatar";
             case FILE_MESSAGE:
-                return FILE_MESSAGE_DIR;
+                return baseDir + "\\FileMessage";
             case BUSINESS_LICENSE:
-                return BUSINESS_LICENSE_DIR;
+                return baseDir + "\\BusinessLicense";
             case ID_CARD:
-                return ID_CARD_DIR;
+                return baseDir + "\\IdCard";
             default:
-                return PRODUCT_IMAGE_DIR;
+                return baseDir + "\\ProductImage";
         }
     }
 
@@ -359,11 +353,18 @@ public class FileStorageService {
             return null;
         }
 
-        // Loại bỏ BASE_DIR và thêm BASE_URL
-        String relativePath = fullPath.replace(BASE_DIR, "")
-                                      .replace("\\", "/");
+        Path full = Paths.get(fullPath).toAbsolutePath().normalize();
+        Path base = Paths.get(baseDir).toAbsolutePath().normalize();
 
-        return BASE_URL + relativePath;
+        Path relative = base.relativize(full);
+        String relativeStr = relative.toString().replace("\\", "/");
+
+        // Đảm bảo bắt đầu bằng /
+        if (!relativeStr.startsWith("/")) {
+            relativeStr = "/" + relativeStr;
+        }
+
+        return BASE_URL + relativeStr;
     }
 
     /**
@@ -376,11 +377,10 @@ public class FileStorageService {
             return null;
         }
 
-        // Loại bỏ BASE_URL và thêm BASE_DIR
         String path = relativeUrl.replace(BASE_URL, "")
-                                 .replace("/", "\\");
+                .replace("/", "\\");  // Windows dùng \, nhưng Paths sẽ xử lý
 
-        return BASE_DIR + path;
+        return baseDir + path;
     }
 
     /**
@@ -390,5 +390,107 @@ public class FileStorageService {
      */
     public String getRelativePath(String fullPath) {
         return convertToRelativeUrl(fullPath);
+    }
+
+    /**
+     * Lưu file nhạy cảm (IdCard, BusinessLicense) và trả về relative path
+     * (không phải public URL) để sau này tạo signed URL
+     *
+     * @param files Mảng các file cần lưu
+     * @param category Loại file (ID_CARD hoặc BUSINESS_LICENSE)
+     * @param subfolderId ID của user/shop
+     * @return Danh sách relative path (vd: "IdCard/user_3/abc.jpg")
+     */
+    public List<String> storeSensitiveFiles(MultipartFile[] files, FileCategory category, String subfolderId) throws IOException {
+        if (files == null || files.length == 0) {
+            return new ArrayList<>();
+        }
+
+        // Chỉ cho phép ID_CARD và BUSINESS_LICENSE
+        if (category != FileCategory.ID_CARD && category != FileCategory.BUSINESS_LICENSE) {
+            throw new IllegalArgumentException("This method only supports ID_CARD and BUSINESS_LICENSE");
+        }
+
+        List<String> relativePaths = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file != null && !file.isEmpty()) {
+                String relativePath = storeSensitiveFile(file, category, subfolderId);
+                relativePaths.add(relativePath);
+            }
+        }
+        return relativePaths;
+    }
+
+    /**
+     * Lưu một file nhạy cảm và trả về relative path
+     */
+    private String storeSensitiveFile(MultipartFile file, FileCategory category, String subfolderId) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return null;
+        }
+
+        // Validate file type - chỉ chấp nhận ảnh
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, etc.)");
+        }
+
+        // Validate file size (tối đa 5MB)
+        long maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.getSize() > maxSize) {
+            throw new IOException("Kích thước file không được vượt quá 5MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.isEmpty()) {
+            throw new IOException("Tên file không hợp lệ");
+        }
+
+        originalFilename = StringUtils.cleanPath(originalFilename);
+        String extension = "";
+
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = originalFilename.substring(dotIndex);
+        }
+
+        // Tạo tên file unique
+        String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
+
+        // Chọn thư mục dựa trên category
+        String targetDir = getDirectoryByCategory(category);
+
+        // Nếu có subfolderId, tạo thêm thư mục con (VD: IdCard/user_3/)
+        if (subfolderId != null && !subfolderId.isEmpty()) {
+            targetDir = targetDir + "\\" + subfolderId;
+        }
+
+        Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
+
+        // Tạo thư mục nếu chưa tồn tại
+        Files.createDirectories(targetFolder);
+
+        Path targetPath = targetFolder.resolve(filename);
+
+        try {
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new IOException("Không thể lưu file " + originalFilename, e);
+        }
+
+        // Trả về relative path (không phải public URL)
+        // VD: "IdCard/user_3/abc.jpg" hoặc "BusinessLicense/shop_5/xyz.jpg"
+        String categoryName = category == FileCategory.ID_CARD ? "IdCard" : "BusinessLicense";
+        String relativePath = categoryName + "/" + (subfolderId != null ? subfolderId + "/" : "") + filename;
+
+        return relativePath;
+    }
+
+    /**
+     * Lấy base directory (từ env hoặc fallback)
+     * Dùng cho FileAccessTokenService để validate path
+     */
+    public String getBaseDirectory() {
+        return baseDir;
     }
 }

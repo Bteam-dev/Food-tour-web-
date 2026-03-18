@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -67,6 +68,28 @@ public class PublicShopController {
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "Failed to fetch shops");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    /**
+     * Lấy danh sách thành phố có shop đang hoạt động (PUBLIC)
+     * GET /api/public/shops/cities
+     */
+    @GetMapping("/cities")
+    public ResponseEntity<?> getAvailableCities() {
+        log.info("Getting available cities");
+        try {
+            List<String> cities = shopService.getAvailableCities();
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", cities);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error fetching cities: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch cities");
             return ResponseEntity.internalServerError().body(error);
         }
     }

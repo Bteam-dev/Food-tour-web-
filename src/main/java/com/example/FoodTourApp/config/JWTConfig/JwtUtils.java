@@ -5,9 +5,11 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
 import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.List;
@@ -15,10 +17,25 @@ import java.util.List;
 @Component
 @Slf4j
 public class JwtUtils {
-    private final SecretKey key = Keys.hmacShaKeyFor(Decoders.BASE64.decode("YourBase64EncodedSecretKeyHereMustBeAtLeast512BitsLongForHS512Algorithm=="));
-    private final long JWT_EXPIRATION = 1000 * 60 * 60 * 24; // 24 hours
-    private final long REFRESH_TOKEN_EXPIRATION = 1000L * 60 * 60 * 24 * 7; // 7 days
+    @Value("${JWT_SECRET}")
+    private String jwtSecret;
+    
+    private SecretKey key;
+    
+    @Value("${JWT_EXPIRATION}")
+    private long JWT_EXPIRATION;
+    
+    @Value("${JWT_REFRESH_EXPIRATION}")
+    private long REFRESH_TOKEN_EXPIRATION;
+    
     private final String JWT_COOKIE_NAME = "jwt";
+    
+    @PostConstruct
+    public void init() {
+        this.key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+        log.info("JwtUtils initialized with JWT_EXPIRATION: {}ms, REFRESH_EXPIRATION: {}ms", 
+                 JWT_EXPIRATION, REFRESH_TOKEN_EXPIRATION);
+    }
 
     /**
      * Tạo Access Token với userId, username và roles (truyền qua Header)

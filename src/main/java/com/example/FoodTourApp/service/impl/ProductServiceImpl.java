@@ -439,7 +439,7 @@ public class ProductServiceImpl implements ProductService {
             var hoursMap = objectMapper.readValue(openingHoursJson, 
                 new TypeReference<java.util.Map<String, java.util.Map<String, String>>>() {});
             
-            var todayHours = hoursMap.get(today.name());
+            var todayHours = hoursMap.get(today.name().toLowerCase());
             if (todayHours == null) {
                 return false; // No hours for today = closed
             }
@@ -549,37 +549,54 @@ public class ProductServiceImpl implements ProductService {
      *   null / ""       → mặc định createdAt DESC
      */
     @Override
-    public Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId, Pageable pageable) {
-        // Xác định sort direction
-        org.springframework.data.domain.Sort sort;
+    public Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId,
+                                                         String keyword, java.math.BigDecimal minPrice, java.math.BigDecimal maxPrice,
+                                                         Pageable pageable) {
         boolean isBestSelling = "best_selling".equalsIgnoreCase(sortBy);
 
+        // Chuẩn hóa params
+        String normalizedKeyword = (keyword != null && !keyword.isBlank()) ? keyword.trim() : null;
+        String normalizedCity    = (city    != null && !city.isBlank())    ? city.trim()    : null;
+
         if (!isBestSelling) {
-            sort = switch (sortBy == null ? "" : sortBy.toLowerCase()) {
+            org.springframework.data.domain.Sort sort = switch (sortBy == null ? "" : sortBy.toLowerCase()) {
                 case "rating_desc" -> org.springframework.data.domain.Sort.by("rating").descending();
                 case "rating_asc"  -> org.springframework.data.domain.Sort.by("rating").ascending();
                 case "price_asc"   -> org.springframework.data.domain.Sort.by("price").ascending();
                 case "price_desc"  -> org.springframework.data.domain.Sort.by("price").descending();
-                default            -> org.springframework.data.domain.Sort.by("createdAt").descending(); // newest
+                default            -> org.springframework.data.domain.Sort.by("createdAt").descending();
             };
-            // Rebuild pageable với sort mới
             pageable = org.springframework.data.domain.PageRequest.of(
                     pageable.getPageNumber(), pageable.getPageSize(), sort);
         }
 
-        // Lấy dữ liệu theo city + category + sortBy
+        // Nếu có bất kỳ filter nâng cao (keyword / price range) → dùng query tổng hợp
+        boolean hasAdvancedFilter = normalizedKeyword != null || minPrice != null || maxPrice != null;
+
         if (isBestSelling) {
-            if (city != null && !city.isBlank()) {
-                return productRepository.findBestSellingByCity(city, pageable).map(this::mapToProductResponseDTO);
+            if (hasAdvancedFilter) {
+                return productRepository.findBestSellingWithFilters(
+                        normalizedKeyword, minPrice, maxPrice, categoryId, normalizedCity, pageable)
+                        .map(this::mapToProductResponseDTO);
+            }
+            if (normalizedCity != null) {
+                return productRepository.findBestSellingByCity(normalizedCity, pageable).map(this::mapToProductResponseDTO);
             }
             return productRepository.findBestSelling(pageable).map(this::mapToProductResponseDTO);
         }
 
-        if (city != null && !city.isBlank() && categoryId != null) {
-            return productRepository.findAvailableByCityAndCategory(city, categoryId, pageable).map(this::mapToProductResponseDTO);
+        if (hasAdvancedFilter) {
+            return productRepository.findWithFilters(
+                    normalizedKeyword, minPrice, maxPrice, categoryId, normalizedCity, pageable)
+                    .map(this::mapToProductResponseDTO);
         }
-        if (city != null && !city.isBlank()) {
-            return productRepository.findAvailableByCity(city, pageable).map(this::mapToProductResponseDTO);
+
+        // Legacy path (không có keyword/price) — giữ nguyên logic cũ
+        if (normalizedCity != null && categoryId != null) {
+            return productRepository.findAvailableByCityAndCategory(normalizedCity, categoryId, pageable).map(this::mapToProductResponseDTO);
+        }
+        if (normalizedCity != null) {
+            return productRepository.findAvailableByCity(normalizedCity, pageable).map(this::mapToProductResponseDTO);
         }
         if (categoryId != null) {
             return productRepository.findByCategoryId(categoryId, pageable).map(this::mapToProductResponseDTO);

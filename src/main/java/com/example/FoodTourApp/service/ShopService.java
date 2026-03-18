@@ -104,4 +104,9 @@ public interface ShopService {
      * Admin lấy tất cả shops (kể cả chưa verified).
      */
     Page<ShopResponseDTO> getAllShopsForAdmin(Pageable pageable);
+
+    /**
+     * Lấy danh sách thành phố có shop đang hoạt động (đã verified + active).
+     */
+    List<String> getAvailableCities();
 }

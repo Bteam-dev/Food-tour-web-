@@ -7,6 +7,7 @@ import com.example.FoodTourApp.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,21 @@ public class DataInitializer implements CommandLineRunner {
     private final RoleRepository roleRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    
+    @Value("${ADMIN_USERNAME}")
+    private String adminUsername;
+    
+    @Value("${ADMIN_EMAIL}")
+    private String adminEmail;
+    
+    @Value("${ADMIN_PASSWORD}")
+    private String adminPassword;
+    
+    @Value("${ADMIN_FULLNAME}")
+    private String adminFullName;
+    
+    @Value("${ADMIN_PHONE}")
+    private String adminPhone;
 
     public DataInitializer(RoleRepository roleRepository, UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.roleRepository = roleRepository;
@@ -60,14 +76,14 @@ public class DataInitializer implements CommandLineRunner {
         }
 
         // Initialize admin user
-        if (userRepository.findByEmail("pheuconbattai@gmail.com").isEmpty()) {
-            logger.info("No admin user found, creating admin user...");
+        if (userRepository.findByEmail(adminEmail).isEmpty()) {
+            logger.info("No admin user found, creating admin user with email: {}", adminEmail);
             User admin = new User();
-            admin.setUsername("pheuconbattai196");
-            admin.setEmail("pheuconbattai@gmail.com");
-            admin.setPasswordHash(passwordEncoder.encode("Minhngosen196@"));
-            admin.setFullName("Admin Tổng");
-            admin.setPhone("1234567890");
+            admin.setUsername(adminUsername);
+            admin.setEmail(adminEmail);
+            admin.setPasswordHash(passwordEncoder.encode(adminPassword));
+            admin.setFullName(adminFullName);
+            admin.setPhone(adminPhone);
             admin.setAvatarUrl(null); // Admin không cần avatar lúc khởi tạo
             admin.setDateOfBirth(null); // Có thể cập nhật sau
             admin.setGender(null); // Có thể cập nhật sau

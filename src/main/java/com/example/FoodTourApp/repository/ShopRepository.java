@@ -5,6 +5,7 @@ import com.example.FoodTourApp.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -26,4 +27,8 @@ public interface ShopRepository extends JpaRepository<Shop, Integer> {
 
     // Admin: tất cả shop (kể cả chưa verified)
     Page<Shop> findByIsActiveTrue(Pageable pageable);
+
+    // Lấy danh sách thành phố distinct của các shop đã verified và đang hoạt động
+    @Query("SELECT DISTINCT s.city FROM Shop s WHERE s.isVerified = true AND s.isActive = true AND s.city IS NOT NULL ORDER BY s.city ASC")
+    List<String> findDistinctCitiesByVerifiedAndActive();
 }

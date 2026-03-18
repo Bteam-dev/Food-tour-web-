@@ -28,7 +28,7 @@ public class VoucherResponse {
     private Integer createdById;
     private String createdByName;
     private String createdByAvatarUrl;
-    private String createdByRole; // ADMIN hoặc SELLER
+    private String createdByRole;
     private LocalDateTime createdAt;
 }
 

@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public interface ProductService {
@@ -75,10 +76,15 @@ public interface ProductService {
     /**
      * Lọc và sắp xếp sản phẩm nâng cao.
      *
-     * @param sortBy    "rating_desc" | "rating_asc" | "best_selling" | "newest" | "price_asc" | "price_desc"
-     * @param city      Tên thành phố (tùy chọn)
+     * @param sortBy     "rating_desc" | "rating_asc" | "best_selling" | "newest" | "price_asc" | "price_desc"
+     * @param city       Tên thành phố (tùy chọn)
      * @param categoryId ID danh mục (tùy chọn)
-     * @param pageable  Phân trang
+     * @param keyword    Từ khóa tìm kiếm theo tên sản phẩm (tùy chọn)
+     * @param minPrice   Giá tối thiểu (tùy chọn)
+     * @param maxPrice   Giá tối đa (tùy chọn)
+     * @param pageable   Phân trang
      */
-    Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId, Pageable pageable);
+    Page<ProductResponseDTO> getFilteredProducts(String sortBy, String city, Integer categoryId,
+                                                  String keyword, BigDecimal minPrice, BigDecimal maxPrice,
+                                                  Pageable pageable);
 }

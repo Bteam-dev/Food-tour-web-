@@ -16,6 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -33,19 +35,22 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
     private final FCMService fcmService;
+    private final FileAccessTokenService fileAccessTokenService;
 
     public SellerApprovalServiceImpl(SellerApprovalRepository sellerApprovalRepository,
                                      UserRepository userRepository,
                                      RoleRepository roleRepository,
                                      FileStorageService fileStorageService,
                                      ObjectMapper objectMapper,
-                                     FCMService fcmService) {
+                                     FCMService fcmService,
+                                     FileAccessTokenService fileAccessTokenService) {
         this.sellerApprovalRepository = sellerApprovalRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.fileStorageService = fileStorageService;
         this.objectMapper = objectMapper;
         this.fcmService = fcmService;
+        this.fileAccessTokenService = fileAccessTokenService;
     }
 
     @Override
@@ -64,10 +69,11 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new IllegalArgumentException("You already have a pending approval request");
         }
 
-        // Upload ảnh CCCD
-        List<String> idCardImageUrls;
+        // Upload ảnh CCCD - Lưu dưới dạng relative path (không phải public URL)
+        // để sau này generate signed URL khi trả response
+        List<String> idCardImagePaths;
         try {
-            idCardImageUrls = fileStorageService.storeFiles(
+            idCardImagePaths = fileStorageService.storeSensitiveFiles(
                     idCardImages,
                     FileStorageService.FileCategory.ID_CARD,
                     "user_" + userId
@@ -76,14 +82,14 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new RuntimeException("Không thể upload ảnh căn cước công dân: " + e.getMessage(), e);
         }
 
-        if (idCardImageUrls.isEmpty()) {
+        if (idCardImagePaths.isEmpty()) {
             throw new IllegalArgumentException("Ảnh căn cước công dân là bắt buộc");
         }
 
-        // Lưu danh sách URL dưới dạng JSON
+        // Lưu danh sách relative paths dưới dạng JSON
         String idCardImageUrlsJson;
         try {
-            idCardImageUrlsJson = objectMapper.writeValueAsString(idCardImageUrls);
+            idCardImageUrlsJson = objectMapper.writeValueAsString(idCardImagePaths);
         } catch (Exception e) {
             throw new RuntimeException("Lỗi khi xử lý dữ liệu ảnh: " + e.getMessage(), e);
         }
@@ -229,13 +235,45 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
         response.setUserAvatarUrl(user.getAvatarUrl());
         response.setUserPhone(user.getPhone());
 
-        // Parse JSON array thành List<String>
+        // Lấy thông tin user đang request từ Security Context
+        Integer requestUserId = null;
+        String requestUserRole = "GUEST";
         try {
-            List<String> imageUrls = objectMapper.readValue(
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.getPrincipal() instanceof User) {
+                User requestUser = (User) authentication.getPrincipal();
+                requestUserId = requestUser.getId();
+                requestUserRole = requestUser.getRole().getRoleName().name();
+            }
+        } catch (Exception e) {
+            // Nếu không lấy được user từ context, có thể là API public
+        }
+
+        // Parse JSON array thành List<String> và convert sang signed URLs
+        try {
+            List<String> relativePaths = objectMapper.readValue(
                     approval.getIdCardImageUrls(),
                     new TypeReference<List<String>>() {}
             );
-            response.setIdCardImageUrls(imageUrls);
+            
+            // Convert relative paths thành signed URLs với ownership validation
+            // fileOwnerId = user.getId() (user nộp đơn)
+            // requestUserId = người đang xem (từ security context)
+            // requestUserRole = role của người xem (ADMIN/USER/SELLER)
+            Integer fileOwnerId = user.getId();
+            Integer finalRequestUserId = requestUserId != null ? requestUserId : fileOwnerId;
+            String finalRequestUserRole = requestUserRole;
+            
+            List<String> signedUrls = relativePaths.stream()
+                    .map(relativePath -> fileAccessTokenService.generateSignedUrl(
+                            relativePath, 
+                            fileOwnerId, 
+                            finalRequestUserId, 
+                            finalRequestUserRole
+                    ))
+                    .toList();
+            
+            response.setIdCardImageUrls(signedUrls);
         } catch (Exception e) {
             response.setIdCardImageUrls(List.of());
         }
