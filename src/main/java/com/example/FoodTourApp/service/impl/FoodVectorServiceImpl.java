@@ -364,6 +364,13 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                         results.add(Content.from(TextSegment.from(text, metadata)));
                     }
                 }
+                
+                log.info("📝 ContentRetriever returning {} results for CONTEXT injection", results.size());
+                if (!results.isEmpty()) {
+                    log.info("📄 CONTEXT preview (first result): {}", 
+                             results.get(0).textSegment().text().substring(0, Math.min(100, results.get(0).textSegment().text().length())));
+                }
+                
                 return results;
             } catch (Exception e) {
                 log.error("ContentRetriever search failed: {}", e.getMessage());
