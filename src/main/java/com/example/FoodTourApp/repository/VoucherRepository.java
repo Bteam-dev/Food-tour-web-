@@ -10,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -51,5 +52,9 @@ public interface VoucherRepository extends JpaRepository<Voucher, Integer> {
 
     // Tất cả voucher toàn sàn (admin quản lý)
     Page<Voucher> findByScopeAndIsActiveTrue(Voucher.VoucherScope scope, Pageable pageable);
+
+    // Tìm tất cả voucher còn active nhưng đã hết hạn (để tự động vô hiệu hóa)
+    @Query("SELECT v FROM Voucher v WHERE v.isActive = true AND v.endDate < :now")
+    List<Voucher> findExpiredActiveVouchers(@Param("now") LocalDateTime now);
 }
 

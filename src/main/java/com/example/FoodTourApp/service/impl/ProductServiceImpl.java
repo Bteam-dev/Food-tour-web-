@@ -492,10 +492,28 @@ public class ProductServiceImpl implements ProductService {
         request.setShopId(shopId);
         if (images != null && images.length > 0) {
             try {
-                String subfolderId = "shop_" + shopId;
-                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
-                request.setImageUrls(imageUrls);
-                log.info("Uploaded {} images for product in shop {}", imageUrls.size(), shopId);
+                // Temporary product ID will be available after save, so we'll store images after creation
+                // For now, we'll create product first, then update with images
+                ProductResponseDTO productResponse = createProduct(request, user);
+                
+                // Now store images with full hierarchy: user_id/shop_id/product_id
+                String hierarchyPath = "user_" + user.getId() + "/shop_" + shopId + "/product_" + productResponse.getId();
+                List<String> imageUrls = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.PRODUCT_IMAGE, 
+                    hierarchyPath
+                );
+                
+                // Update product with image URLs
+                Product product = productRepository.findById(productResponse.getId())
+                    .orElseThrow(() -> new RuntimeException("Product not found after creation"));
+                product.setImageUrls(toJsonArray(imageUrls));
+                productRepository.save(product);
+                
+                productResponse.setImageUrls(imageUrls);
+                log.info("Uploaded {} images for product {} in shop {} with hierarchy: {}", 
+                    imageUrls.size(), productResponse.getId(), shopId, hierarchyPath);
+                return productResponse;
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
             }
@@ -515,12 +533,30 @@ public class ProductServiceImpl implements ProductService {
         } catch (Exception e) {
             throw new RuntimeException("Dữ liệu cập nhật không hợp lệ: " + e.getMessage(), e);
         }
+        
+        // Delete old images if new images are being uploaded
         if (images != null && images.length > 0) {
             try {
-                String subfolderId = "shop_" + shopId + "/product_" + productId;
-                List<String> imageUrls = fileStorageService.storeFiles(images, FileStorageService.FileCategory.PRODUCT_IMAGE, subfolderId);
+                Product product = productRepository.findById(productId)
+                    .orElseThrow(() -> new RuntimeException("Product not found"));
+                
+                // Delete old images
+                List<String> oldImageUrls = fromJsonArray(product.getImageUrls());
+                if (!oldImageUrls.isEmpty()) {
+                    log.info("Deleting {} old images for product {}", oldImageUrls.size(), productId);
+                    fileStorageService.deleteFiles(oldImageUrls);
+                }
+                
+                // Upload new images with hierarchy: user_id/shop_id/product_id
+                String hierarchyPath = "user_" + user.getId() + "/shop_" + shopId + "/product_" + productId;
+                List<String> imageUrls = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.PRODUCT_IMAGE, 
+                    hierarchyPath
+                );
                 request.setImageUrls(imageUrls);
-                log.info("Uploaded {} images for product {}", imageUrls.size(), productId);
+                log.info("Uploaded {} new images for product {} with hierarchy: {}", 
+                    imageUrls.size(), productId, hierarchyPath);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload ảnh sản phẩm: " + e.getMessage(), e);
             }

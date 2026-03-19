@@ -179,52 +179,12 @@ public class ShopServiceImpl implements ShopService {
             throw new RuntimeException("Mã số thuế đã được sử dụng");
         }
 
-        // Dùng temp folder để upload ảnh trước khi có shopId
-        String tempFolder = "temp_" + seller.getId() + "_" + System.currentTimeMillis();
-
-        // Upload ảnh giấy phép kinh doanh TRƯỚC - Lưu dưới dạng relative path
-        List<String> businessLicensePaths;
-        try {
-            businessLicensePaths = fileStorageService.storeSensitiveFiles(
-                    businessLicenseImages,
-                    FileStorageService.FileCategory.BUSINESS_LICENSE,
-                    tempFolder
-            );
-            if (businessLicensePaths.isEmpty()) {
-                throw new RuntimeException("Ảnh giấy phép kinh doanh là bắt buộc");
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Không thể upload ảnh giấy phép kinh doanh: " + e.getMessage(), e);
-        }
-
-        // Upload logo (nếu có)
-        String logoUrl = request.getLogoUrl();
-        if (logo != null && !logo.isEmpty()) {
-            try {
-                logoUrl = fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, tempFolder);
-            } catch (IOException e) {
-                throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
-            }
-        }
-
-        // Upload banner (nếu có)
-        String bannerUrl = request.getBannerUrl();
-        if (banner != null && !banner.isEmpty()) {
-            try {
-                bannerUrl = fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, tempFolder);
-            } catch (IOException e) {
-                throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
-            }
-        }
-
-        // Tạo Shop entity với đầy đủ dữ liệu, save 1 lần duy nhất
+        // Tạo Shop entity trước để có shopId, sau đó upload file với hierarchy đúng
         log.info("Creating shop for seller: {}", seller.getId());
         Shop shop = new Shop();
         shop.setSeller(seller);
         shop.setShopName(request.getShopName());
         shop.setDescription(request.getDescription());
-        shop.setLogoUrl(logoUrl);
-        shop.setBannerUrl(bannerUrl);
         shop.setPhone(request.getPhone());
         shop.setEmail(request.getEmail() != null ? request.getEmail() : seller.getEmail());
         shop.setTaxCode(request.getTaxCode());
@@ -248,6 +208,53 @@ public class ShopServiceImpl implements ShopService {
             shop.setLongitude(addr.getLongitude());
         }
 
+        // Save shop first to get shopId
+        shop = shopRepository.save(shop);
+        Integer shopId = shop.getId();
+        log.info("Shop created with id: {}, now uploading files", shopId);
+
+        // Now upload files with proper hierarchy: user_id/shop_id
+        String hierarchyPath = "user_" + seller.getId() + "/shop_" + shopId;
+
+        // Upload ảnh giấy phép kinh doanh - Lưu dưới dạng relative path
+        List<String> businessLicensePaths;
+        try {
+            businessLicensePaths = fileStorageService.storeSensitiveFilesWithHierarchy(
+                    businessLicenseImages,
+                    FileStorageService.FileCategory.BUSINESS_LICENSE,
+                    hierarchyPath
+            );
+            if (businessLicensePaths.isEmpty()) {
+                throw new RuntimeException("Ảnh giấy phép kinh doanh là bắt buộc");
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Không thể upload ảnh giấy phép kinh doanh: " + e.getMessage(), e);
+        }
+
+        // Upload logo (nếu có)
+        String logoUrl = null;
+        if (logo != null && !logo.isEmpty()) {
+            try {
+                logoUrl = fileStorageService.storeFileWithHierarchy(logo, FileStorageService.FileCategory.SHOP_LOGO, hierarchyPath);
+            } catch (IOException e) {
+                throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
+            }
+        }
+
+        // Upload banner (nếu có)
+        String bannerUrl = null;
+        if (banner != null && !banner.isEmpty()) {
+            try {
+                bannerUrl = fileStorageService.storeFileWithHierarchy(banner, FileStorageService.FileCategory.SHOP_BANNER, hierarchyPath);
+            } catch (IOException e) {
+                throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
+            }
+        }
+
+        // Update shop with file URLs
+        shop.setLogoUrl(logoUrl);
+        shop.setBannerUrl(bannerUrl);
+
         try {
             shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicensePaths));
         } catch (IOException e) {
@@ -255,7 +262,7 @@ public class ShopServiceImpl implements ShopService {
         }
 
         shop = shopRepository.save(shop);
-        log.info("Shop created successfully with id: {}", shop.getId());
+        log.info("Shop files uploaded successfully with hierarchy: {}", hierarchyPath);
         return mapToShopResponseDTO(shop);
     }
 
@@ -264,39 +271,85 @@ public class ShopServiceImpl implements ShopService {
     public ShopResponseDTO updateShopWithImages(Integer shopId, UpdateShopRequestDTO request, User seller,
                                                 MultipartFile logo, MultipartFile banner,
                                                 MultipartFile[] businessLicenseImages) {
-        String subfolderId = "shop_" + shopId;
+        Shop shop = shopRepository.findById(shopId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
+        
+        String hierarchyPath = "user_" + seller.getId() + "/shop_" + shopId;
 
-        // Upload logo mới
+        // Delete old logo and upload new one
         if (logo != null && !logo.isEmpty()) {
             try {
-                request.setLogoUrl(fileStorageService.storeFile(logo, FileStorageService.FileCategory.SHOP_LOGO, subfolderId));
+                // Delete old logo if exists
+                if (shop.getLogoUrl() != null && !shop.getLogoUrl().isEmpty()) {
+                    log.info("Deleting old logo for shop {}", shopId);
+                    fileStorageService.deleteFile(shop.getLogoUrl());
+                }
+                
+                String logoUrl = fileStorageService.storeFileWithHierarchy(
+                    logo, 
+                    FileStorageService.FileCategory.SHOP_LOGO, 
+                    hierarchyPath
+                );
+                request.setLogoUrl(logoUrl);
+                log.info("Uploaded new logo for shop {} with hierarchy: {}", shopId, hierarchyPath);
             } catch (IOException e) {
                 throw new RuntimeException("Không thể upload logo: " + e.getMessage(), e);
             }
         }
 
-        // Upload banner mới
+        // Delete old banner and upload new one
         if (banner != null && !banner.isEmpty()) {
             try {
-                request.setBannerUrl(fileStorageService.storeFile(banner, FileStorageService.FileCategory.SHOP_BANNER, subfolderId));
+                // Delete old banner if exists
+                if (shop.getBannerUrl() != null && !shop.getBannerUrl().isEmpty()) {
+                    log.info("Deleting old banner for shop {}", shopId);
+                    fileStorageService.deleteFile(shop.getBannerUrl());
+                }
+                
+                String bannerUrl = fileStorageService.storeFileWithHierarchy(
+                    banner, 
+                    FileStorageService.FileCategory.SHOP_BANNER, 
+                    hierarchyPath
+                );
+                request.setBannerUrl(bannerUrl);
+                log.info("Uploaded new banner for shop {} with hierarchy: {}", shopId, hierarchyPath);
             } catch (IOException e) {
                 throw new RuntimeException("Không thể upload banner: " + e.getMessage(), e);
             }
         }
 
-        // Upload ảnh giấy phép kinh doanh mới (nếu có) - Lưu dưới dạng relative path
+        // Delete old business license images and upload new ones (nếu có)
         if (businessLicenseImages != null && businessLicenseImages.length > 0) {
             try {
-                List<String> businessLicensePaths = fileStorageService.storeSensitiveFiles(
+                // Delete old business license images
+                String oldBusinessLicenseUrls = shop.getBusinessLicenseImageUrls();
+                if (oldBusinessLicenseUrls != null && !oldBusinessLicenseUrls.isEmpty()) {
+                    try {
+                        List<String> oldPaths = objectMapper.readValue(oldBusinessLicenseUrls, 
+                            new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+                        if (!oldPaths.isEmpty()) {
+                            log.info("Deleting {} old business license images for shop {}", oldPaths.size(), shopId);
+                            // For sensitive files, we need to construct full path from relative path
+                            for (String relativePath : oldPaths) {
+                                String fullPath = fileStorageService.getBaseDirectory() + "\\" + relativePath.replace("/", "\\");
+                                fileStorageService.deleteFile(fullPath);
+                            }
+                        }
+                    } catch (IOException e) {
+                        log.warn("Failed to parse old business license URLs: {}", e.getMessage());
+                    }
+                }
+                
+                List<String> businessLicensePaths = fileStorageService.storeSensitiveFilesWithHierarchy(
                         businessLicenseImages,
                         FileStorageService.FileCategory.BUSINESS_LICENSE,
-                        subfolderId
+                        hierarchyPath
                 );
                 if (!businessLicensePaths.isEmpty()) {
-                    Shop shop = shopRepository.findById(shopId)
-                            .orElseThrow(() -> new RuntimeException("Không tìm thấy cửa hàng"));
                     shop.setBusinessLicenseImageUrls(objectMapper.writeValueAsString(businessLicensePaths));
                     shopRepository.save(shop);
+                    log.info("Uploaded {} new business license images for shop {} with hierarchy: {}", 
+                        businessLicensePaths.size(), shopId, hierarchyPath);
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Không thể upload ảnh giấy phép kinh doanh: " + e.getMessage(), e);

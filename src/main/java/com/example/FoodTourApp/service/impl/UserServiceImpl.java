@@ -92,10 +92,25 @@ public class UserServiceImpl implements UserService {
     public UserResponse updateProfileWithAvatar(Integer userId, UpdateProfileRequest request, MultipartFile avatar) {
         if (avatar != null && !avatar.isEmpty()) {
             try {
-                String subfolderId = "user_" + userId;
-                String avatarUrl = fileStorageService.storeFile(avatar, FileStorageService.FileCategory.USER_AVATAR, subfolderId);
+                // Get current user to check for old avatar
+                User user = userRepository.findById(userId)
+                        .orElseThrow(() -> new EntityNotFoundException("User not found"));
+                
+                // Delete old avatar if exists
+                if (user.getAvatarUrl() != null && !user.getAvatarUrl().isEmpty()) {
+                    log.info("Deleting old avatar for user {}", userId);
+                    fileStorageService.deleteFile(user.getAvatarUrl());
+                }
+                
+                // Upload new avatar with hierarchy: user_id only (no subdirectories needed for avatar)
+                String hierarchyPath = "user_" + userId;
+                String avatarUrl = fileStorageService.storeFileWithHierarchy(
+                    avatar, 
+                    FileStorageService.FileCategory.USER_AVATAR, 
+                    hierarchyPath
+                );
                 request.setAvatarUrl(avatarUrl);
-                log.info("Avatar uploaded for user {}: {}", userId, avatarUrl);
+                log.info("Avatar uploaded for user {} with hierarchy: {}", userId, hierarchyPath);
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Không thể upload avatar: " + e.getMessage(), e);
             }

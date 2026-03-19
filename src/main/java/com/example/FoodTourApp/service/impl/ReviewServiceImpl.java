@@ -98,27 +98,34 @@ public class ReviewServiceImpl implements ReviewService {
             review.setOrder(order);
         }
 
-        // Upload images nếu có - lưu vào thư mục ReviewImage/user_X/
+        // Save review first to get review ID
+        review.setCreatedAt(LocalDateTime.now());
+        review.setUpdatedAt(LocalDateTime.now());
+        Review savedReview = reviewRepository.save(review);
+        log.info("Review created with ID {}", savedReview.getId());
+
+        // Upload images nếu có với hierarchy: user_id/reviewable_id/review_id
         if (images != null && images.length > 0) {
             try {
-                // Tạo subfolder ID dựa trên user ID - để phân biệt review của từng user
-                String subfolderId = "user_" + user.getId();
-                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
-                review.setImages(objectMapper.writeValueAsString(imagePaths));
+                // Build hierarchy path based on reviewable type
+                String reviewablePrefix = (type == Review.ReviewableType.product) ? "product_" : "shop_";
+                String hierarchyPath = "user_" + user.getId() + "/" + reviewablePrefix + request.getReviewableId() + "/review_" + savedReview.getId();
+                List<String> imagePaths = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.REVIEW_IMAGE, 
+                    hierarchyPath
+                );
+                savedReview.setImages(objectMapper.writeValueAsString(imagePaths));
+                savedReview = reviewRepository.save(savedReview);
+                log.info("Uploaded {} images for review {} with hierarchy: {}", imagePaths.size(), savedReview.getId(), hierarchyPath);
             } catch (IOException e) {
                 log.error("Error uploading review images: {}", e.getMessage());
                 throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());
             }
         }
 
-        review.setCreatedAt(LocalDateTime.now());
-        review.setUpdatedAt(LocalDateTime.now());
-
-        Review savedReview = reviewRepository.save(review);
-        log.info("Review created successfully with ID {}", savedReview.getId());
-
-        if (review.getHasRefundRequest() && review.getOrder() != null) {
-            Order order = review.getOrder();
+        if (savedReview.getHasRefundRequest() && savedReview.getOrder() != null) {
+            Order order = savedReview.getOrder();
             order.setHasRefundRequest(true);
             order.setUpdatedAt(LocalDateTime.now());
             orderRepository.save(order);
@@ -187,16 +194,22 @@ public class ReviewServiceImpl implements ReviewService {
             }
         }
 
-        // Upload images mới nếu có - lưu vào thư mục ReviewImage/user_X/
+        // Upload images mới nếu có với hierarchy: user_id/reviewable_id/review_id
         if (images != null && images.length > 0) {
             // Xóa ảnh cũ
             deleteOldImages(review.getImages());
 
             try {
-                // Tạo subfolder ID dựa trên user ID
-                String subfolderId = "user_" + user.getId();
-                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
+                // Build hierarchy path based on reviewable type
+                String reviewablePrefix = (review.getReviewableType() == Review.ReviewableType.product) ? "product_" : "shop_";
+                String hierarchyPath = "user_" + user.getId() + "/" + reviewablePrefix + review.getReviewableId() + "/review_" + reviewId;
+                List<String> imagePaths = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.REVIEW_IMAGE, 
+                    hierarchyPath
+                );
                 review.setImages(objectMapper.writeValueAsString(imagePaths));
+                log.info("Uploaded {} new images for review {} with hierarchy: {}", imagePaths.size(), reviewId, hierarchyPath);
             } catch (IOException e) {
                 log.error("Error uploading review images: {}", e.getMessage());
                 throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());
@@ -337,24 +350,32 @@ public class ReviewServiceImpl implements ReviewService {
         reviewReply.setUser(user);
         reviewReply.setReplyText(request.getReply());
         reviewReply.setReplyType(isShopOwner ? ReviewReply.ReplyType.SHOP_OWNER : ReviewReply.ReplyType.USER);
+        reviewReply.setCreatedAt(LocalDateTime.now());
+        reviewReply.setUpdatedAt(LocalDateTime.now());
+        
+        // Save reply first to get reply ID
+        ReviewReply savedReply = reviewReplyRepository.save(reviewReply);
+        log.info("Review reply created with ID {}", savedReply.getId());
 
-        // Upload ảnh nếu có - lưu vào thư mục ReviewImage/user_X/
+        // Upload ảnh nếu có với hierarchy: user_id/reviewable_id/review_id/reply_id
         if (images != null && images.length > 0) {
             try {
-                String subfolderId = "user_" + user.getId();
-                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
-                reviewReply.setImages(objectMapper.writeValueAsString(imagePaths));
-                log.info("Uploaded {} images for reply", imagePaths.size());
+                // Build hierarchy path based on reviewable type
+                String reviewablePrefix = (review.getReviewableType() == Review.ReviewableType.product) ? "product_" : "shop_";
+                String hierarchyPath = "user_" + user.getId() + "/" + reviewablePrefix + review.getReviewableId() + "/review_" + reviewId + "/reply_" + savedReply.getId();
+                List<String> imagePaths = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.REVIEW_REPLY_IMAGE, 
+                    hierarchyPath
+                );
+                savedReply.setImages(objectMapper.writeValueAsString(imagePaths));
+                reviewReplyRepository.save(savedReply);
+                log.info("Uploaded {} images for reply {} with hierarchy: {}", imagePaths.size(), savedReply.getId(), hierarchyPath);
             } catch (IOException e) {
                 log.error("Error uploading reply images: {}", e.getMessage());
                 throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());
             }
         }
-
-        reviewReply.setCreatedAt(LocalDateTime.now());
-        reviewReply.setUpdatedAt(LocalDateTime.now());
-
-        reviewReplyRepository.save(reviewReply);
 
         // Update review timestamp
         review.setUpdatedAt(LocalDateTime.now());
@@ -456,16 +477,23 @@ public class ReviewServiceImpl implements ReviewService {
         // Update reply text
         reply.setReplyText(request.getReply());
 
-        // Update images nếu có - lưu vào thư mục ReviewImage/user_X/
+        // Update images nếu có với hierarchy: user_id/reviewable_id/review_id/reply_id
         if (images != null && images.length > 0) {
             // Xóa ảnh cũ
             deleteOldImages(reply.getImages());
 
             try {
-                String subfolderId = "user_" + user.getId();
-                List<String> imagePaths = fileStorageService.storeFiles(images, FileStorageService.FileCategory.REVIEW_IMAGE, subfolderId);
+                Review review = reply.getReview();
+                // Build hierarchy path based on reviewable type
+                String reviewablePrefix = (review.getReviewableType() == Review.ReviewableType.product) ? "product_" : "shop_";
+                String hierarchyPath = "user_" + user.getId() + "/" + reviewablePrefix + review.getReviewableId() + "/review_" + review.getId() + "/reply_" + replyId;
+                List<String> imagePaths = fileStorageService.storeFilesWithHierarchy(
+                    images, 
+                    FileStorageService.FileCategory.REVIEW_REPLY_IMAGE, 
+                    hierarchyPath
+                );
                 reply.setImages(objectMapper.writeValueAsString(imagePaths));
-                log.info("Updated {} images for reply", imagePaths.size());
+                log.info("Updated {} images for reply {} with hierarchy: {}", imagePaths.size(), replyId, hierarchyPath);
             } catch (IOException e) {
                 log.error("Error uploading reply images: {}", e.getMessage());
                 throw new RuntimeException("Không thể upload ảnh: " + e.getMessage());

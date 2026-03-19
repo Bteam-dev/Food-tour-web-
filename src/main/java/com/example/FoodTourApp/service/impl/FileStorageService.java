@@ -32,6 +32,7 @@ public class FileStorageService {
         SHOP_LOGO,          // Logo cửa hàng
         SHOP_BANNER,        // Banner cửa hàng
         REVIEW_IMAGE,       // Ảnh đánh giá (review)
+        REVIEW_REPLY_IMAGE, // Ảnh phản hồi đánh giá (review reply)
         USER_AVATAR,        // Avatar người dùng
         FILE_MESSAGE,       // File gửi trong chat
         BUSINESS_LICENSE,   // Ảnh giấy phép kinh doanh
@@ -52,9 +53,10 @@ public class FileStorageService {
      * Lưu file theo category và subfolder ID (để phân biệt theo product/shop/user)
      * @param file File cần lưu
      * @param category Loại file
-     * @param subfolderId ID của product/shop/user (để tạo thư mục con)
+     * @param subfolderId ID của product/shop/user (để tạo thư mục con) - DEPRECATED, use storeFileWithHierarchy
      * @return URL tương đối có thể truy cập từ frontend
      */
+    @Deprecated
     public String storeFile(MultipartFile file, FileCategory category, String subfolderId) throws IOException {
         if (file == null || file.isEmpty()) {
             return null;
@@ -302,6 +304,8 @@ public class FileStorageService {
                 return baseDir + "\\ShopBanner";
             case REVIEW_IMAGE:
                 return baseDir + "\\ReviewImage";
+            case REVIEW_REPLY_IMAGE:
+                return baseDir + "\\ReviewReplyImage";
             case USER_AVATAR:
                 return baseDir + "\\UserAvatar";
             case FILE_MESSAGE:
@@ -398,9 +402,10 @@ public class FileStorageService {
      *
      * @param files Mảng các file cần lưu
      * @param category Loại file (ID_CARD hoặc BUSINESS_LICENSE)
-     * @param subfolderId ID của user/shop
+     * @param subfolderId ID của user/shop - DEPRECATED, use storeSensitiveFilesWithHierarchy
      * @return Danh sách relative path (vd: "IdCard/user_3/abc.jpg")
      */
+    @Deprecated
     public List<String> storeSensitiveFiles(MultipartFile[] files, FileCategory category, String subfolderId) throws IOException {
         if (files == null || files.length == 0) {
             return new ArrayList<>();
@@ -422,8 +427,9 @@ public class FileStorageService {
     }
 
     /**
-     * Lưu một file nhạy cảm và trả về relative path
+     * Lưu một file nhạy cảm và trả về relative path - DEPRECATED
      */
+    @Deprecated
     private String storeSensitiveFile(MultipartFile file, FileCategory category, String subfolderId) throws IOException {
         if (file == null || file.isEmpty()) {
             return null;
@@ -487,10 +493,220 @@ public class FileStorageService {
     }
 
     /**
+     * Lưu file nhạy cảm (IdCard, BusinessLicense) với cấu trúc phân cấp
+     * Trả về relative path để tạo signed URL sau
+     * 
+     * @param files Mảng các file cần lưu
+     * @param category Loại file (ID_CARD hoặc BUSINESS_LICENSE)
+     * @param hierarchyPath Cấu trúc thư mục phân cấp (VD: "123/456" cho user_id/seller_approval_id)
+     * @return Danh sách relative path (vd: "IdCard/123/456/abc.jpg")
+     */
+    public List<String> storeSensitiveFilesWithHierarchy(MultipartFile[] files, FileCategory category, String hierarchyPath) throws IOException {
+        if (files == null || files.length == 0) {
+            return new ArrayList<>();
+        }
+
+        // Chỉ cho phép ID_CARD và BUSINESS_LICENSE
+        if (category != FileCategory.ID_CARD && category != FileCategory.BUSINESS_LICENSE) {
+            throw new IllegalArgumentException("This method only supports ID_CARD and BUSINESS_LICENSE");
+        }
+
+        List<String> relativePaths = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file != null && !file.isEmpty()) {
+                String relativePath = storeSensitiveFileWithHierarchy(file, category, hierarchyPath);
+                relativePaths.add(relativePath);
+            }
+        }
+        return relativePaths;
+    }
+
+    /**
+     * Lưu một file nhạy cảm với cấu trúc phân cấp và trả về relative path
+     */
+    private String storeSensitiveFileWithHierarchy(MultipartFile file, FileCategory category, String hierarchyPath) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return null;
+        }
+
+        // Validate file type - chỉ chấp nhận ảnh
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, etc.)");
+        }
+
+        // Validate file size (tối đa 5MB)
+        long maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.getSize() > maxSize) {
+            throw new IOException("Kích thước file không được vượt quá 5MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.isEmpty()) {
+            throw new IOException("Tên file không hợp lệ");
+        }
+
+        originalFilename = StringUtils.cleanPath(originalFilename);
+        String extension = "";
+
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = originalFilename.substring(dotIndex);
+        }
+
+        // Tạo tên file unique
+        String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
+
+        // Chọn thư mục dựa trên category
+        String targetDir = getDirectoryByCategory(category);
+
+        // Thêm hierarchy path
+        if (hierarchyPath != null && !hierarchyPath.isEmpty()) {
+            targetDir = targetDir + "\\" + hierarchyPath;
+        }
+
+        Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
+
+        // Tạo thư mục nếu chưa tồn tại
+        Files.createDirectories(targetFolder);
+
+        Path targetPath = targetFolder.resolve(filename);
+
+        try {
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("Sensitive file saved to {} (hierarchy: {}): {}", category, hierarchyPath, targetPath);
+        } catch (IOException e) {
+            log.error("Could not store sensitive file {}: {}", originalFilename, e.getMessage());
+            throw new IOException("Không thể lưu file " + originalFilename, e);
+        }
+
+        // Trả về relative path (không phải public URL)
+        // VD: "IdCard/123/456/abc.jpg" hoặc "BusinessLicense/123/456/xyz.jpg"
+        String categoryName = category == FileCategory.ID_CARD ? "IdCard" : "BusinessLicense";
+        String relativePath = categoryName + "/" + (hierarchyPath != null && !hierarchyPath.isEmpty() ? hierarchyPath + "/" : "") + filename;
+
+        log.info("Sensitive file relative path: {}", relativePath);
+        return relativePath;
+    }
+
+    /**
      * Lấy base directory (từ env hoặc fallback)
      * Dùng cho FileAccessTokenService để validate path
      */
     public String getBaseDirectory() {
         return baseDir;
+    }
+
+    /**
+     * Lưu file với cấu trúc phân cấp theo ownership hierarchy
+     * VD: ProductImage/user_id/shop_id/product_id
+     * 
+     * @param file File cần lưu
+     * @param category Loại file
+     * @param hierarchyPath Cấu trúc thư mục phân cấp (VD: "123/456/789" cho user_id/shop_id/product_id)
+     * @return URL tương đối có thể truy cập từ frontend
+     */
+    public String storeFileWithHierarchy(MultipartFile file, FileCategory category, String hierarchyPath) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return null;
+        }
+
+        // FILE_MESSAGE handled separately
+        if (category == FileCategory.FILE_MESSAGE) {
+            throw new IllegalArgumentException("Use storeChatFile() for FILE_MESSAGE category");
+        }
+
+        // Validate file type - chỉ chấp nhận ảnh
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IOException("Chỉ chấp nhận file ảnh (JPG, JPEG, PNG, WEBP, GIF, BMP, SVG, etc.)");
+        }
+
+        // Validate file size (tối đa 5MB)
+        long maxSize = 5 * 1024 * 1024; // 5MB
+        if (file.getSize() > maxSize) {
+            throw new IOException("Kích thước file không được vượt quá 5MB");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.isEmpty()) {
+            throw new IOException("Tên file không hợp lệ");
+        }
+
+        originalFilename = StringUtils.cleanPath(originalFilename);
+        String extension = "";
+
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex > 0) {
+            extension = originalFilename.substring(dotIndex);
+        }
+
+        // Tạo tên file unique
+        String filename = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension;
+
+        // Chọn thư mục base dựa trên category
+        String targetDir = getDirectoryByCategory(category);
+
+        // Thêm hierarchy path nếu có
+        if (hierarchyPath != null && !hierarchyPath.isEmpty()) {
+            targetDir = targetDir + "\\" + hierarchyPath;
+        }
+
+        Path targetFolder = Paths.get(targetDir).toAbsolutePath().normalize();
+
+        // Tạo thư mục nếu chưa tồn tại
+        Files.createDirectories(targetFolder);
+
+        Path targetPath = targetFolder.resolve(filename);
+
+        try {
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("File saved successfully to {} (hierarchy: {}): {}", category, hierarchyPath, targetPath);
+        } catch (IOException e) {
+            log.error("Could not store file {} to {}: {}", originalFilename, category, e.getMessage());
+            throw new IOException("Không thể lưu file " + originalFilename, e);
+        }
+
+        // Trả về URL tương đối thay vì đường dẫn tuyệt đối
+        String relativePath = convertToRelativeUrl(targetPath.toString());
+        log.info("File URL for frontend: {}", relativePath);
+        return relativePath;
+    }
+
+    /**
+     * Lưu nhiều file với cấu trúc phân cấp
+     * 
+     * @param files Mảng các file cần lưu
+     * @param category Loại file
+     * @param hierarchyPath Cấu trúc thư mục phân cấp
+     * @return Danh sách URL tương đối
+     */
+    public List<String> storeFilesWithHierarchy(MultipartFile[] files, FileCategory category, String hierarchyPath) throws IOException {
+        if (files == null || files.length == 0) {
+            return new ArrayList<>();
+        }
+
+        List<String> paths = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file != null && !file.isEmpty()) {
+                String url = storeFileWithHierarchy(file, category, hierarchyPath);
+                paths.add(url);
+            }
+        }
+        return paths;
+    }
+
+    /**
+     * Xóa nhiều file cùng lúc (dùng khi update)
+     * @param filePathsOrUrls Danh sách đường dẫn hoặc URL cần xóa
+     */
+    public void deleteFiles(List<String> filePathsOrUrls) {
+        if (filePathsOrUrls == null || filePathsOrUrls.isEmpty()) {
+            return;
+        }
+
+        for (String filePathOrUrl : filePathsOrUrls) {
+            deleteFile(filePathOrUrl);
+        }
     }
 }

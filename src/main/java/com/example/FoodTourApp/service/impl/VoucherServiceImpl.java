@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -231,6 +232,42 @@ public class VoucherServiceImpl implements VoucherService {
             case FIXED     -> "Giảm " + v.getDiscountValue().toPlainString() + "đ";
             case FREE_SHIP -> "Miễn phí vận chuyển";
         };
+    }
+
+    /**
+     * Tự động vô hiệu hóa (soft-delete) các voucher đã hết hạn
+     * Chạy mỗi 6 giờ để tránh voucher hết hạn vẫn hiển thị
+     */
+    @Scheduled(cron = "0 0 */6 * * *") // Chạy vào 0h, 6h, 12h, 18h mỗi ngày
+    @Transactional
+    public void deactivateExpiredVouchers() {
+        log.info("Starting automatic deactivation of expired vouchers...");
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            
+            // Tìm tất cả voucher còn active nhưng đã hết hạn
+            List<Voucher> expiredVouchers = voucherRepository.findExpiredActiveVouchers(now);
+            
+            if (expiredVouchers.isEmpty()) {
+                log.info("No expired vouchers found to deactivate");
+                return;
+            }
+            
+            // Vô hiệu hóa từng voucher
+            int deactivatedCount = 0;
+            for (Voucher voucher : expiredVouchers) {
+                voucher.setIsActive(false);
+                voucher.setUpdatedAt(now);
+                voucherRepository.save(voucher);
+                deactivatedCount++;
+                log.info("Deactivated expired voucher: {} (code: {}, ended: {})", 
+                        voucher.getId(), voucher.getCode(), voucher.getEndDate());
+            }
+            
+            log.info("Successfully deactivated {} expired vouchers", deactivatedCount);
+        } catch (Exception e) {
+            log.error("Error during expired voucher cleanup: {}", e.getMessage(), e);
+        }
     }
 }
 

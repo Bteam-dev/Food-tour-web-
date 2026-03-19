@@ -14,6 +14,7 @@ import com.example.FoodTourApp.service.SellerApprovalService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -27,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
+@Slf4j
 public class SellerApprovalServiceImpl implements SellerApprovalService {
 
     private final SellerApprovalRepository sellerApprovalRepository;
@@ -69,15 +71,28 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new IllegalArgumentException("You already have a pending approval request");
         }
 
-        // Upload ảnh CCCD - Lưu dưới dạng relative path (không phải public URL)
-        // để sau này generate signed URL khi trả response
+        // Save approval first to get approval ID
+        SellerApproval approval = new SellerApproval();
+        approval.setUser(user);
+        approval.setFacebookUrl(request.getFacebookUrl());
+        approval.setZaloUrl(request.getZaloUrl());
+        approval.setStatus(SellerApproval.ApprovalStatus.PENDING);
+        approval.setSubmittedAt(LocalDateTime.now());
+        
+        SellerApproval savedApproval = sellerApprovalRepository.save(approval);
+        log.info("SellerApproval created with ID {}", savedApproval.getId());
+
+        // Upload ảnh CCCD với hierarchy: user_id/seller_approval_id
+        // Lưu dưới dạng relative path để sau này generate signed URL
         List<String> idCardImagePaths;
         try {
-            idCardImagePaths = fileStorageService.storeSensitiveFiles(
+            String hierarchyPath = "user_" + userId + "/seller_approval_" + savedApproval.getId();
+            idCardImagePaths = fileStorageService.storeSensitiveFilesWithHierarchy(
                     idCardImages,
                     FileStorageService.FileCategory.ID_CARD,
-                    "user_" + userId
+                    hierarchyPath
             );
+            log.info("Uploaded {} ID card images with hierarchy: {}", idCardImagePaths.size(), hierarchyPath);
         } catch (IOException e) {
             throw new RuntimeException("Không thể upload ảnh căn cước công dân: " + e.getMessage(), e);
         }
@@ -94,15 +109,8 @@ public class SellerApprovalServiceImpl implements SellerApprovalService {
             throw new RuntimeException("Lỗi khi xử lý dữ liệu ảnh: " + e.getMessage(), e);
         }
 
-        SellerApproval approval = new SellerApproval();
-        approval.setUser(user);
-        approval.setIdCardImageUrls(idCardImageUrlsJson);
-        approval.setFacebookUrl(request.getFacebookUrl());
-        approval.setZaloUrl(request.getZaloUrl());
-        approval.setStatus(SellerApproval.ApprovalStatus.PENDING);
-        approval.setSubmittedAt(LocalDateTime.now());
-
-        SellerApproval savedApproval = sellerApprovalRepository.save(approval);
+        savedApproval.setIdCardImageUrls(idCardImageUrlsJson);
+        savedApproval = sellerApprovalRepository.save(savedApproval);
         return mapToResponse(savedApproval);
     }
 
