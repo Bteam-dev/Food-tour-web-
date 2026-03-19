@@ -155,8 +155,15 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             return;
         }
         try {
-            List<Product> products = productRepository.findAll();
-            if (products.isEmpty()) return;
+            // CHỈ lấy products có isAvailable = true (không lấy soft-deleted)
+            List<Product> products = productRepository.findAll().stream()
+                    .filter(p -> p.getIsAvailable() != null && p.getIsAvailable())
+                    .toList();
+            
+            if (products.isEmpty()) {
+                log.info("No available products to sync.");
+                return;
+            }
 
             List<TextSegment> segments = new ArrayList<>();
             for (Product p : products) {
@@ -185,7 +192,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             }
 
             esClient.bulk(BulkRequest.of(b -> b.operations(ops)));
-            log.info("Synced {} products to vector store.", segments.size());
+            log.info("Synced {} available products to vector store.", segments.size());
         } catch (Exception e) {
             log.error("syncAllProducts failed: {}", e.getMessage());
         }
@@ -198,6 +205,14 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             return;
         }
         try {
+            // Nếu product bị soft-delete (isAvailable = false), XÓA khỏi ES thay vì index
+            if (product.getIsAvailable() == null || !product.getIsAvailable()) {
+                deleteProduct(product.getId());
+                log.info("Product [{}] is unavailable → deleted from ES.", product.getId());
+                return;
+            }
+            
+            // Nếu product available, index/update vào ES
             String text = buildProductText(product);
             float[] vector = embeddingModel.embed(TextSegment.from(text)).content().vector();
 
@@ -207,7 +222,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             doc.put("vector", vector);
 
             esClient.index(i -> i.index(esIndex).id(product.getId().toString()).document(doc));
-            log.info("Synced product [{}] to ES.", product.getId());
+            log.info("Synced available product [{}] to ES.", product.getId());
         } catch (Exception e) {
             log.error("syncProduct failed: {}", e.getMessage());
         }
@@ -234,6 +249,69 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             return query -> List.of();
         }
         return contentRetriever; // trả về instance cố định, không tạo mới
+    }
+    
+    @Override
+    public List<Integer> retrieveProductIds(String query) {
+        if (embeddingModel == null || esClient == null) {
+            log.warn("retrieveProductIds skipped: not initialized.");
+            return List.of();
+        }
+        
+        try {
+            log.info("🔍 retrieveProductIds called with query: {}", query);
+            
+            // Embed query và tìm products tương tự
+            float[] queryVector = embeddingModel.embed(
+                    TextSegment.from(query)
+            ).content().vector();
+
+            String vectorJson = Arrays.toString(queryVector);
+            String queryBody = String.format("""
+                {
+                  "size": %d,
+                  "query": {
+                    "script_score": {
+                      "query": { "match_all": {} },
+                      "script": {
+                        "source": "cosineSimilarity(params.query_vector, 'vector') + 1.0",
+                        "params": { "query_vector": %s }
+                      }
+                    }
+                  }
+                }
+                """, maxResults, vectorJson);
+
+            SearchResponse<Map<String, Object>> response = esClient.search(
+                    s -> s.index(esIndex).withJson(new StringReader(queryBody)),
+                    (Class<Map<String, Object>>) (Class<?>) Map.class
+            );
+
+            log.info("📊 ES returned {} hits", response.hits().hits().size());
+            
+            // Extract product IDs từ kết quả
+            List<Integer> productIds = new ArrayList<>();
+            for (Hit<Map<String, Object>> hit : response.hits().hits()) {
+                double score = hit.score() != null ? hit.score() - 1.0 : 0.0;
+                log.info("   Hit: product_id={}, score={}, minScore={}", 
+                         hit.source() != null ? hit.source().get("product_id") : "null", 
+                         score, minScore);
+                
+                if (score >= minScore && hit.source() != null) {
+                    String productIdStr = (String) hit.source().get("product_id");
+                    if (productIdStr != null) {
+                        productIds.add(Integer.parseInt(productIdStr));
+                        log.info("   ✅ Added product ID: {}", productIdStr);
+                    }
+                }
+            }
+            
+            log.info("✅ retrieveProductIds returning {} product IDs: {}", productIds.size(), productIds);
+            return productIds;
+        } catch (Exception e) {
+            log.error("❌ retrieveProductIds failed: {}", e.getMessage(), e);
+            return List.of();
+        }
     }
 
     /**
@@ -273,12 +351,17 @@ public class FoodVectorServiceImpl implements FoodVectorService {
 
                 // Lọc theo minScore và trả về text thô
                 // LangChain4j sẽ tự inject các text này vào prompt dưới dạng CONTEXT
+                // QUAN TRỌNG: Thêm product_id vào metadata để extract navigation URLs
                 List<Content> results = new ArrayList<>();
                 for (Hit<Map<String, Object>> hit : response.hits().hits()) {
                     double score = hit.score() != null ? hit.score() - 1.0 : 0.0;
                     if (score >= minScore && hit.source() != null) {
                         String text = (String) hit.source().get("text");
-                        results.add(Content.from(TextSegment.from(text)));
+                        String productId = (String) hit.source().get("product_id");
+                        
+                        // Lưu product_id vào metadata để sau này extract navigation URL
+                        Metadata metadata = Metadata.from("product_id", productId);
+                        results.add(Content.from(TextSegment.from(text, metadata)));
                     }
                 }
                 return results;
@@ -291,12 +374,24 @@ public class FoodVectorServiceImpl implements FoodVectorService {
 
     /**
      * Tách ra method riêng để tránh duplicate code giữa syncAllProducts và syncProduct
+     * Build full text bao gồm TẤT CẢ thông tin quan trọng để chatbot có thể suy luận
      */
     private String buildProductText(Product p) {
         return String.format(
-                "Món: %s. Quán: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. Giá: %s. Rating: %.1f (%d đánh giá).",
-                p.getName(), p.getShop().getShopName(), p.getDescription(), p.getIngredients(), p.getTags(),
-                p.getEffectivePrice(), p.getRating(), p.getTotalReviews()
+                "Món: %s. Quán: %s (shopId: %d). Danh mục: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. " +
+                "Dinh dưỡng: %s. Thời gian chuẩn bị: %d phút. Giá: %s VNĐ. Rating: %.1f/5.0 (%d đánh giá).",
+                p.getName(),
+                p.getShop().getShopName(),
+                p.getShop().getId(),
+                p.getCategory().getName(),
+                p.getDescription(),
+                p.getIngredients(),
+                p.getTags() != null ? p.getTags() : "không có",
+                p.getNutritionInfo() != null ? p.getNutritionInfo() : "không có",
+                p.getPreparationTime() != null ? p.getPreparationTime() : 0,
+                p.getEffectivePrice(),
+                p.getRating(),
+                p.getTotalReviews()
         );
     }
 }
