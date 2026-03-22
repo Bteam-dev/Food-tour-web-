@@ -42,11 +42,13 @@ public class Product {
     @Column(name = "image_urls", columnDefinition = "TEXT")
     private String imageUrls; // JSON array: ["url1","url2","url3"]
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "ingredients", columnDefinition = "TEXT")
-    private String ingredients;
+    private String ingredients; // JSON array: ["bánh phở","thịt bò","hành"]
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "nutrition_info", columnDefinition = "TEXT")
-    private String nutritionInfo;
+    private String nutritionInfo; // JSON object: {"calories":350,"protein":"25g","fat":"10g","carbs":"40g"}
 
     @Column(name = "preparation_time")
     private Integer preparationTime;
@@ -69,8 +71,9 @@ public class Product {
     @Column(name = "total_reviews")
     private Long totalReviews = 0L;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "tags", columnDefinition = "TEXT")
-    private String tags; // Lưu dạng: "spicy,vegetarian,bestseller"
+    private String tags; // JSON array: ["spicy","vegetarian","bestseller"]
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

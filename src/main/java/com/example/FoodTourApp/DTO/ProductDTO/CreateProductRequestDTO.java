@@ -8,6 +8,7 @@ import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class CreateProductRequestDTO {
@@ -24,9 +25,9 @@ public class CreateProductRequestDTO {
 
     private List<String> imageUrls;
 
-    private String ingredients;
+    private List<String> ingredients; // Đổi từ String sang List<String>
 
-    private String nutritionInfo;
+    private Map<String, Object> nutritionInfo; // Đổi từ String sang Map (JSON object)
 
     private Integer preparationTime;
 

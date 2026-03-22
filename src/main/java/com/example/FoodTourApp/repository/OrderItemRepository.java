@@ -34,4 +34,39 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Integer> {
             @Param("shop") Shop shop,
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
+
+
+    @Query("""
+    SELECT oi.product.id
+    FROM OrderItem oi
+    JOIN oi.order o
+    WHERE o.user.id = :userId
+    AND o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered
+    ORDER BY o.createdAt DESC
+    LIMIT :limit
+    """)
+    List<Integer> findRecentProductIdsByUser(
+            @Param("userId") Integer userId,
+            @Param("limit") int limit
+    );
+
+    @Query("""
+    SELECT DISTINCT oi.product.id
+    FROM OrderItem oi
+    WHERE oi.order.user.id = :userId
+    """)
+    List<Integer> findProductIdsByUser(@Param("userId") Integer userId);
+
+    @Query("""
+    SELECT p.name
+    FROM OrderItem oi
+    JOIN oi.order o
+    JOIN oi.product p
+    WHERE o.user.id = :userId
+    AND o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered
+    GROUP BY p.id, p.name
+    ORDER BY COUNT(oi.id) DESC
+    LIMIT 1
+    """)
+    String findMostBoughtProductName(@Param("userId") Integer userId);
 }

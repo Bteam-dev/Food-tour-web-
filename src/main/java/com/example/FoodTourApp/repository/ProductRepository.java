@@ -117,4 +117,29 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
             @Param("categoryId") Integer categoryId,
             @Param("city") String city,
             Pageable pageable);
+
+    // Thêm vào cuối interface ProductRepository
+
+    @Query("""
+    SELECT p FROM Product p
+    WHERE p.isAvailable = true
+    ORDER BY (p.rating * LOG(p.totalReviews + 1)) DESC
+    LIMIT :limit
+    """)
+    List<Product> findTopRatedAvailable(@Param("limit") int limit);
+
+    @Query("""
+    SELECT p FROM Product p
+    WHERE p.category.id = (
+        SELECT p2.category.id FROM Product p2 WHERE p2.id = :productId
+    )
+    AND p.id != :productId
+    AND p.isAvailable = true
+    ORDER BY p.rating DESC
+    LIMIT :limit
+    """)
+    List<Product> findSimilarByCategory(
+            @Param("productId") Integer productId,
+            @Param("limit") int limit
+    );
 }

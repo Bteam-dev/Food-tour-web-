@@ -26,6 +26,7 @@ import java.time.LocalTime;
 import java.time.DayOfWeek;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -60,6 +61,28 @@ public class ProductServiceImpl implements ProductService {
         } catch (IOException e) {
             log.warn("Failed to parse JSON array: {}, raw value: {}", e.getMessage(), json);
             return new ArrayList<>();
+        }
+    }
+
+    // ── Helper: Map<String, Object> → JSON string ────────────────────────────
+    private String toJsonObject(Map<String, Object> map) {
+        if (map == null || map.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (IOException e) {
+            log.error("Failed to serialize map to JSON: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    // ── Helper: JSON string → Map<String, Object> ────────────────────────────
+    private Map<String, Object> fromJsonObject(String json) {
+        if (json == null || json.isBlank()) return new java.util.HashMap<>();
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
+        } catch (IOException e) {
+            log.warn("Failed to parse JSON object: {}, raw value: {}", e.getMessage(), json);
+            return new java.util.HashMap<>();
         }
     }
 
@@ -106,8 +129,12 @@ public class ProductServiceImpl implements ProductService {
         // ── imageUrls: lưu JSON array ["url1","url2"] ──────────────────────
         product.setImageUrls(toJsonArray(request.getImageUrls()));
 
-        product.setIngredients(request.getIngredients());
-        product.setNutritionInfo(request.getNutritionInfo());
+        // ── ingredients: lưu JSON array ["nguyên liệu 1","nguyên liệu 2"] ───
+        product.setIngredients(toJsonArray(request.getIngredients()));
+
+        // ── nutritionInfo: lưu JSON object {"calories":350,"protein":"25g"} ───
+        product.setNutritionInfo(toJsonObject(request.getNutritionInfo()));
+
         product.setPreparationTime(request.getPreparationTime());
         product.setStockQuantity(request.getStockQuantity());
         product.setMinOrderQuantity(request.getMinOrderQuantity());
@@ -169,8 +196,16 @@ public class ProductServiceImpl implements ProductService {
             product.setImageUrls(request.getImageUrls().isEmpty() ? null : toJsonArray(request.getImageUrls()));
         }
 
-        if (request.getIngredients() != null) product.setIngredients(request.getIngredients());
-        if (request.getNutritionInfo() != null) product.setNutritionInfo(request.getNutritionInfo());
+        // ── ingredients: lưu JSON array ────────────────────────────────────
+        if (request.getIngredients() != null) {
+            product.setIngredients(request.getIngredients().isEmpty() ? null : toJsonArray(request.getIngredients()));
+        }
+
+        // ── nutritionInfo: lưu JSON object ─────────────────────────────────
+        if (request.getNutritionInfo() != null) {
+            product.setNutritionInfo(request.getNutritionInfo().isEmpty() ? null : toJsonObject(request.getNutritionInfo()));
+        }
+
         if (request.getPreparationTime() != null) product.setPreparationTime(request.getPreparationTime());
         if (request.getIsAvailable() != null) product.setIsAvailable(request.getIsAvailable());
         if (request.getStockQuantity() != null) product.setStockQuantity(request.getStockQuantity());
@@ -397,8 +432,14 @@ public class ProductServiceImpl implements ProductService {
         List<String> imageUrls = fromJsonArray(product.getImageUrls());
         dto.setImageUrls(imageUrls.isEmpty() ? null : imageUrls);
 
-        dto.setIngredients(product.getIngredients());
-        dto.setNutritionInfo(product.getNutritionInfo());
+        // ── ingredients: parse từ JSON array ───────────────────────────────
+        List<String> ingredients = fromJsonArray(product.getIngredients());
+        dto.setIngredients(ingredients.isEmpty() ? null : ingredients);
+
+        // ── nutritionInfo: parse từ JSON object ────────────────────────────
+        Map<String, Object> nutritionInfo = fromJsonObject(product.getNutritionInfo());
+        dto.setNutritionInfo(nutritionInfo.isEmpty() ? null : nutritionInfo);
+
         dto.setPreparationTime(product.getPreparationTime());
         dto.setIsAvailable(product.getIsAvailable());
         dto.setStockQuantity(product.getStockQuantity());

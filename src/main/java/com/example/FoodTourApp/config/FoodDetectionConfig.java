@@ -16,7 +16,7 @@ public class FoodDetectionConfig {
 
     @PostConstruct
     public void loadClassNames() {
-        String yamlPath = "/models/data.yaml";
+        String yamlPath = "/models/FoodDetectByImage/data.yaml";
 
         try (InputStream input = getClass().getResourceAsStream(yamlPath)) {
             if (input == null) {

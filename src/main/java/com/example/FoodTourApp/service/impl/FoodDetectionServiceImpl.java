@@ -49,9 +49,9 @@ public class FoodDetectionServiceImpl implements FoodDetectionService {
 
         // Copy best.onnx ra file tạm để lấy đường dẫn Windows hợp lệ
         // getResource().getPath() trả về "/D:/..." không hợp lệ trên Windows
-        try (InputStream modelStream = getClass().getResourceAsStream("/models/best.onnx")) {
+        try (InputStream modelStream = getClass().getResourceAsStream("/models/FoodDetectByImage/best.onnx")) {
             if (modelStream == null) {
-                throw new RuntimeException("Không tìm thấy file best.onnx trong resources/models/");
+                throw new RuntimeException("Không tìm thấy file best.onnx trong resources/models/FoodDetectByImage/");
             }
             File tempModel = File.createTempFile("best_model", ".onnx");
             tempModel.deleteOnExit();

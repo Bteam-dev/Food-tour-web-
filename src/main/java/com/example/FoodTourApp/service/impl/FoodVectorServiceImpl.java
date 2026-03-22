@@ -159,7 +159,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             List<Product> products = productRepository.findAll().stream()
                     .filter(p -> p.getIsAvailable() != null && p.getIsAvailable())
                     .toList();
-            
+
             if (products.isEmpty()) {
                 log.info("No available products to sync.");
                 return;
@@ -211,7 +211,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                 log.info("Product [{}] is unavailable → deleted from ES.", product.getId());
                 return;
             }
-            
+
             // Nếu product available, index/update vào ES
             String text = buildProductText(product);
             float[] vector = embeddingModel.embed(TextSegment.from(text)).content().vector();
@@ -250,17 +250,17 @@ public class FoodVectorServiceImpl implements FoodVectorService {
         }
         return contentRetriever; // trả về instance cố định, không tạo mới
     }
-    
+
     @Override
     public List<Integer> retrieveProductIds(String query) {
         if (embeddingModel == null || esClient == null) {
             log.warn("retrieveProductIds skipped: not initialized.");
             return List.of();
         }
-        
+
         try {
             log.info("🔍 retrieveProductIds called with query: {}", query);
-            
+
             // Embed query và tìm products tương tự
             float[] queryVector = embeddingModel.embed(
                     TextSegment.from(query)
@@ -288,15 +288,15 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             );
 
             log.info("📊 ES returned {} hits", response.hits().hits().size());
-            
+
             // Extract product IDs từ kết quả
             List<Integer> productIds = new ArrayList<>();
             for (Hit<Map<String, Object>> hit : response.hits().hits()) {
                 double score = hit.score() != null ? hit.score() - 1.0 : 0.0;
-                log.info("   Hit: product_id={}, score={}, minScore={}", 
-                         hit.source() != null ? hit.source().get("product_id") : "null", 
-                         score, minScore);
-                
+                log.info("   Hit: product_id={}, score={}, minScore={}",
+                        hit.source() != null ? hit.source().get("product_id") : "null",
+                        score, minScore);
+
                 if (score >= minScore && hit.source() != null) {
                     String productIdStr = (String) hit.source().get("product_id");
                     if (productIdStr != null) {
@@ -305,7 +305,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                     }
                 }
             }
-            
+
             log.info("✅ retrieveProductIds returning {} product IDs: {}", productIds.size(), productIds);
             return productIds;
         } catch (Exception e) {
@@ -358,19 +358,19 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                     if (score >= minScore && hit.source() != null) {
                         String text = (String) hit.source().get("text");
                         String productId = (String) hit.source().get("product_id");
-                        
+
                         // Lưu product_id vào metadata để sau này extract navigation URL
                         Metadata metadata = Metadata.from("product_id", productId);
                         results.add(Content.from(TextSegment.from(text, metadata)));
                     }
                 }
-                
+
                 log.info("📝 ContentRetriever returning {} results for CONTEXT injection", results.size());
                 if (!results.isEmpty()) {
-                    log.info("📄 CONTEXT preview (first result): {}", 
-                             results.get(0).textSegment().text().substring(0, Math.min(100, results.get(0).textSegment().text().length())));
+                    log.info("📄 CONTEXT preview (first result): {}",
+                            results.get(0).textSegment().text().substring(0, Math.min(100, results.get(0).textSegment().text().length())));
                 }
-                
+
                 return results;
             } catch (Exception e) {
                 log.error("ContentRetriever search failed: {}", e.getMessage());
@@ -386,7 +386,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
     private String buildProductText(Product p) {
         return String.format(
                 "Món: %s. Quán: %s (shopId: %d). Danh mục: %s. Mô tả: %s. Nguyên liệu: %s. Tags: %s. " +
-                "Dinh dưỡng: %s. Thời gian chuẩn bị: %d phút. Giá: %s VNĐ. Rating: %.1f/5.0 (%d đánh giá).",
+                        "Dinh dưỡng: %s. Thời gian chuẩn bị: %d phút. Giá: %s VNĐ. Rating: %.1f/5.0 (%d đánh giá).",
                 p.getName(),
                 p.getShop().getShopName(),
                 p.getShop().getId(),

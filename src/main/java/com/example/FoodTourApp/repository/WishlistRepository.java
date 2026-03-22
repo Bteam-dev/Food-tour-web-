@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -41,4 +42,25 @@ public interface WishlistRepository extends JpaRepository<Wishlist, Integer> {
            "WHERE w.user.id = :userId " +
            "ORDER BY w.createdAt DESC")
     Page<Wishlist> findByUserIdWithProductAndShop(@Param("userId") Integer userId, Pageable pageable);
+
+
+
+    @Query("""
+    SELECT w.product.id
+    FROM Wishlist w
+    WHERE w.user.id = :userId
+    ORDER BY w.createdAt DESC
+    LIMIT :limit
+    """)
+    List<Integer> findRecentProductIdsByUser(
+            @Param("userId") Integer userId,
+            @Param("limit") int limit
+    );
+
+    @Query("""
+    SELECT w.product.id
+    FROM Wishlist w
+    WHERE w.user.id = :userId
+    """)
+    List<Integer> findProductIdsByUser(@Param("userId") Integer userId);
 }
