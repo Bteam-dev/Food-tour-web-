@@ -1,10 +1,11 @@
 package com.example.FoodTourApp.service.impl;
 
-import com.example.FoodTourApp.DTO.RecommendDTO.ProductRecommendDTO;
+import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.entity.Product;
 import com.example.FoodTourApp.repository.OrderItemRepository;
 import com.example.FoodTourApp.repository.ProductRepository;
 import com.example.FoodTourApp.repository.WishlistRepository;
+import com.example.FoodTourApp.service.ProductService;
 import com.example.FoodTourApp.service.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,7 @@ public class RecommendationServiceImpl implements RecommendationService {
     private final OrderItemRepository orderItemRepository;
     private final WishlistRepository wishlistRepository;
     private final ObjectMapper objectMapper;
+    private final ProductService productService;
 
     private Map<Integer, List<Integer>> precomputedRecs = new HashMap<>();
     private Map<Integer, Integer> productShopCache = new HashMap<>();
@@ -49,7 +51,7 @@ public class RecommendationServiceImpl implements RecommendationService {
     }
 
     @Override
-    public List<ProductRecommendDTO> getForYou(Integer userId, int limit) {
+    public List<ProductResponseDTO> getForYou(Integer userId, int limit) {
 
         Set<Integer> seenProducts = getSeenProductIds(userId);
 
@@ -84,11 +86,11 @@ public class RecommendationServiceImpl implements RecommendationService {
             merged.addAll(topRated);
         }
 
-        return buildDTOs(merged, userId);
+        return convertToProductResponseDTOs(merged);
     }
 
     @Override
-    public List<ProductRecommendDTO> getSimilar(Integer productId, int limit) {
+    public List<ProductResponseDTO> getSimilar(Integer productId, int limit) {
         List<Integer> similarIds = callESKNN(
                 productId,
                 Set.of(productId),
@@ -97,25 +99,13 @@ public class RecommendationServiceImpl implements RecommendationService {
         );
 
         if (similarIds.isEmpty()) {
-            return productRepository
-                    .findSimilarByCategory(productId, limit).stream()
-                    .map(p -> ProductRecommendDTO.builder()
-                            .id(p.getId())
-                            .name(p.getName())
-                            .price(p.getEffectivePrice())
-                            .discountPrice(p.getDiscountPrice())
-                            .rating(p.getRating())
-                            .totalReviews(p.getTotalReviews())
-                            .imageUrls(p.getImageUrls())
-                            .shopId(p.getShop().getId())
-                            .shopName(p.getShop().getShopName())
-                            .categoryName(p.getCategory().getName())
-                            .recommendReason("Cùng danh mục")
-                            .build())
+            List<Product> similarProducts = productRepository.findSimilarByCategory(productId, limit);
+            return similarProducts.stream()
+                    .map(p -> productService.getProductById(p.getId()))
                     .collect(Collectors.toList());
         }
 
-        return buildDTOs(similarIds, null);
+        return convertToProductResponseDTOs(similarIds);
     }
 
     // ====== PRIVATE METHODS (GIỮ NGUYÊN) ======
@@ -216,84 +206,27 @@ public class RecommendationServiceImpl implements RecommendationService {
         return result;
     }
 
-    private List<ProductRecommendDTO> buildDTOs(List<Integer> productIds, Integer userId) {
+    private List<ProductResponseDTO> convertToProductResponseDTOs(List<Integer> productIds) {
         if (productIds.isEmpty()) return List.of();
 
-        List<Product> products = productRepository.findAllById(productIds);
-        Map<Integer, Product> productMap = products.stream()
-                .collect(Collectors.toMap(Product::getId, p -> p));
-
-        String favoriteName = userId != null
-                ? orderItemRepository.findMostBoughtProductName(userId)
-                : null;
-
         return productIds.stream()
-                .filter(productMap::containsKey)
-                .map(pid -> {
-                    Product p = productMap.get(pid);
-                    return ProductRecommendDTO.builder()
-                            .id(p.getId())
-                            .name(p.getName())
-                            .price(p.getEffectivePrice())
-                            .discountPrice(p.getDiscountPrice())
-                            .rating(p.getRating())
-                            .totalReviews(p.getTotalReviews())
-                            .imageUrls(p.getImageUrls())
-                            .shopId(p.getShop().getId())
-                            .shopName(p.getShop().getShopName())
-                            .categoryName(p.getCategory().getName())
-                            .recommendReason(buildReason(p, favoriteName))
-                            .build();
+                .map(productId -> {
+                    try {
+                        return productService.getProductById(productId);
+                    } catch (Exception e) {
+                        log.warn("Failed to get product {}: {}", productId, e.getMessage());
+                        return null;
+                    }
                 })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-    }
-
-    private String buildReason(Product p, String favoriteName) {
-        if (favoriteName != null && !favoriteName.isBlank()) {
-            String keyword = favoriteName.split(" ")[0].toLowerCase();
-            if (p.getName().toLowerCase().contains(keyword)) {
-                return "Vì bạn hay mua " + favoriteName;
-            }
-            // Parse ingredients JSON array
-            List<String> ingredients = parseJsonArray(p.getIngredients());
-            if (!ingredients.isEmpty()) {
-                String ingredientsText = String.join(" ", ingredients).toLowerCase();
-                if (ingredientsText.contains(keyword)) {
-                    return "Nguyên liệu tương tự " + favoriteName;
-                }
-            }
-        }
-        if (p.getRating() >= 4.5 && p.getTotalReviews() >= 10) {
-            return "Được đánh giá cao";
-        }
-        // Parse tags JSON array
-        List<String> tags = parseJsonArray(p.getTags());
-        if (tags.contains("bestseller")) {
-            return "Bán chạy nhất";
-        }
-        if (tags.contains("healthy")) {
-            return "Lựa chọn healthy";
-        }
-        return "Có thể bạn sẽ thích";
-    }
-
-    /**
-     * Helper: Parse JSON array string to List<String>
-     */
-    private List<String> parseJsonArray(String json) {
-        if (json == null || json.isBlank()) return List.of();
-        try {
-            return objectMapper.readValue(json, new TypeReference<List<String>>() {});
-        } catch (Exception e) {
-            log.warn("Failed to parse JSON array: {}", json);
-            return List.of();
-        }
     }
 
     private Integer getShopId(Integer productId) {
         return productShopCache.computeIfAbsent(productId, pid ->
                 productRepository.findById(pid)
-                        .map(p -> p.getShop().getId())
+                        .map(Product::getShop)
+                        .map(shop -> shop.getId())
                         .orElse(-1)
         );
     }

@@ -1,6 +1,6 @@
 package com.example.FoodTourApp.controller.UserController;
 
-import com.example.FoodTourApp.DTO.RecommendDTO.ProductRecommendDTO;
+import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +23,7 @@ public class RecommendationController {
     private static final Logger logger = LoggerFactory.getLogger(RecommendationController.class);
 
     /**
-     * GET /api/user/recommendations/for-you?limit=10
+     * GET /api/user/recommendations/for-user?limit=10
      * YouTube-style: 70% precomputed + 30% ES realtime
      * Mỗi 30 phút thứ tự xáo trộn 1 lần
      * Vừa đặt đơn xong gọi lại → thấy món liên quan mới ngay
@@ -35,7 +35,7 @@ public class RecommendationController {
     ) {
         logger.info("User {} getting recommendations", user.getId());
         try {
-            List<ProductRecommendDTO> recs = recommendationService.getForYou(user.getId(), limit);
+            List<ProductResponseDTO> recs = recommendationService.getForYou(user.getId(), limit);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", recs);
@@ -60,7 +60,7 @@ public class RecommendationController {
     ) {
         logger.info("User {} getting similar products for product {}", user.getId(), productId);
         try {
-            List<ProductRecommendDTO> similar = recommendationService.getSimilar(productId, limit);
+            List<ProductResponseDTO> similar = recommendationService.getSimilar(productId, limit);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", similar);
