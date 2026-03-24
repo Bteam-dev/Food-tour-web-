@@ -48,7 +48,7 @@ public class Product {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "nutrition_info", columnDefinition = "TEXT")
-    private String nutritionInfo; // JSON object: {"calories":350,"protein":"25g","fat":"10g","carbs":"40g"}
+    private String nutritionInfo; // JSON array: ["calories: 350","protein: 25g","fat: 10g","carbs: 40g"]
 
     @Column(name = "preparation_time")
     private Integer preparationTime;

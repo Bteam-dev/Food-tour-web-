@@ -47,29 +47,4 @@ public class RecommendationController {
             );
         }
     }
-
-    /**
-     * GET /api/user/recommendations/similar/{productId}?limit=6
-     * Gợi ý món tương tự trên trang chi tiết sản phẩm
-     */
-    @GetMapping("/similar/{productId}")
-    public ResponseEntity<?> getSimilar(
-            @AuthenticationPrincipal User user,
-            @PathVariable Integer productId,
-            @RequestParam(defaultValue = "6") int limit
-    ) {
-        logger.info("User {} getting similar products for product {}", user.getId(), productId);
-        try {
-            List<ProductResponseDTO> similar = recommendationService.getSimilar(productId, limit);
-            Map<String, Object> result = new HashMap<>();
-            result.put("success", true);
-            result.put("data", similar);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            logger.error("Error getting similar products {}: {}", productId, e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                    Map.of("success", false, "message", e.getMessage())
-            );
-        }
-    }
 }

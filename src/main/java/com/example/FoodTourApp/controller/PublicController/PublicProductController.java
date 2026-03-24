@@ -4,6 +4,7 @@ import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.service.FoodDetectionService;
 import com.example.FoodTourApp.service.ProductService;
+import com.example.FoodTourApp.service.RecommendationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -25,6 +26,7 @@ public class PublicProductController {
     private static final Logger logger = LoggerFactory.getLogger(PublicProductController.class);
     private final ProductService productService;
     private final FoodDetectionService foodDetectionService;
+    private final RecommendationService recommendationService;
 
     // Mapping từ class name của YOLO sang các từ khóa tìm kiếm tiếng Việt
     private static final Map<String, List<String>> FOOD_CLASS_KEYWORDS = new HashMap<>();
@@ -36,9 +38,10 @@ public class PublicProductController {
         FOOD_CLASS_KEYWORDS.put("Pho", Arrays.asList("phở", "pho"));
     }
 
-    public PublicProductController(ProductService productService, FoodDetectionService foodDetectionService) {
+    public PublicProductController(ProductService productService, FoodDetectionService foodDetectionService, RecommendationService recommendationService) {
         this.productService = productService;
         this.foodDetectionService = foodDetectionService;
+        this.recommendationService = recommendationService;
     }
 
     /**
@@ -188,5 +191,27 @@ public class PublicProductController {
             return ResponseEntity.internalServerError().body(response);
         }
     }
-
+    /**
+     * GET /api/public/products/similar/{productId}?limit=6
+     * Gợi ý món tương tự trên trang chi tiết sản phẩm (Public API - không cần authentication)
+     */
+    @GetMapping("/similar/{productId}")
+    public ResponseEntity<?> getSimilar(
+            @PathVariable Integer productId,
+            @RequestParam(defaultValue = "6") int limit
+    ) {
+        logger.info("Getting similar products for product {} (limit={})", productId, limit);
+        try {
+            List<ProductResponseDTO> similar = recommendationService.getSimilar(productId, limit);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", similar);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error getting similar products {}: {}", productId, e.getMessage(), e);
+            return ResponseEntity.badRequest().body(
+                    Map.of("success", false, "message", e.getMessage())
+            );
+        }
+    }
 }

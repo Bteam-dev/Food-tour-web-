@@ -5,7 +5,6 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 @Data
 public class UpdateProductRequestDTO {
@@ -15,7 +14,7 @@ public class UpdateProductRequestDTO {
     private BigDecimal discountPrice;
     private List<String> imageUrls;
     private List<String> ingredients; // Đổi từ String sang List<String>
-    private Map<String, Object> nutritionInfo; // Đổi từ String sang Map (JSON object)
+    private List<String> nutritionInfo; // Đổi từ Map sang List<String> (JSON array)
     private Integer preparationTime;
     private Boolean isAvailable;
     private Integer stockQuantity;
