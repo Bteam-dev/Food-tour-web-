@@ -42,7 +42,7 @@ public void syncAllProducts() {
 
 **Code:**
 ```java
-// ProductListenerConfig.java
+// ProductEsSyncListener.java
 @PostPersist  // Khi INSERT vào DB
 @PostUpdate   // Khi UPDATE trong DB
 public void onSave(Product product) {

@@ -7,19 +7,17 @@ import java.util.List;
 
 public interface FoodVectorService {
 
-    void syncAllProducts();
-
-    void syncProduct(Product product);
-
-    void deleteProduct(Integer productId);
-
     ContentRetriever getContentRetriever();
-    
-    /**
-     * Retrieve relevant product IDs based on user query
-     * Used to generate navigation URLs for chatbot responses
-     * @param query User's question
-     * @return List of product IDs that match the query
-     */
+
     List<Integer> retrieveProductIds(String query);
+
+    /**
+     * Sync một món ăn cụ thể khi có thay đổi (thêm/sửa/xóa)
+     */
+    void syncProductToEs(Integer productId);
+
+    /**
+     * Full sync toàn bộ món ăn (dùng cho admin hoặc khi cần reset)
+     */
+    void fullSyncToEs();
 }

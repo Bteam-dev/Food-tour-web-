@@ -1,6 +1,6 @@
 package com.example.FoodTourApp.entity;
 
-import com.example.FoodTourApp.config.ProductListenerConfig;
+import com.example.FoodTourApp.config.ProductEsSyncListener;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.math.RoundingMode;
 
-@EntityListeners(ProductListenerConfig.class)
+@EntityListeners(ProductEsSyncListener.class)
 @Entity
 @Table(name = "products")
 @Data

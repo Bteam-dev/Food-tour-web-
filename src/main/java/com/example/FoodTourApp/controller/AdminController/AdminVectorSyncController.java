@@ -47,7 +47,7 @@ public class AdminVectorSyncController {
         Map<String, Object> response = new HashMap<>();
         try {
             log.info("Admin triggered full vector index resync");
-            vectorService.syncAllProducts();
+            vectorService.fullSyncToEs();
             response.put("success", true);
             response.put("message", "Started full vector index resync. Check server logs for progress.");
             return ResponseEntity.ok(response);
