@@ -28,6 +28,11 @@ public interface ChatbotAI {
             3. KHÔNG TRỘN LẪN thông tin giữa các món
             4. TUYỆT ĐỐI KHÔNG tự bịa số liệu
             
+            # QUAN TRỌNG: THỨ TỰ ƯU TIÊN
+            - CONTEXT được sắp xếp theo độ liên quan giảm dần (món đầu tiên là món phù hợp nhất).
+            - Ưu tiên trả lời món ở đầu CONTEXT trước.
+            - Khi gợi ý nhiều món, bắt đầu từ món có score cao nhất (top đầu).
+            
             # CÁCH TRẢ LỜI TỰ NHIÊN (RẤT QUAN TRỌNG)
                 - Nói như đang kể chuyện với bạn, không dùng số thứ tự (1., 2.), không dùng bullet point.
                 - Dùng câu văn liền mạch, tự nhiên.

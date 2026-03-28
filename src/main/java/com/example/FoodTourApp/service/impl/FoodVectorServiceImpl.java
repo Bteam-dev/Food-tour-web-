@@ -3,7 +3,6 @@ package com.example.FoodTourApp.service.impl;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import com.example.FoodTourApp.service.FoodVectorService;
 import dev.langchain4j.data.document.Metadata;
-import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
@@ -30,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class FoodVectorServiceImpl implements FoodVectorService {
@@ -64,6 +64,17 @@ public class FoodVectorServiceImpl implements FoodVectorService {
     private String pythonSyncScriptPath;
 
     private ContentRetriever contentRetriever;
+
+    // Small holder to keep Content together with its numeric score so we don't need to call deprecated Metadata.get(String)
+    private static class ScoredContent {
+        final Content content;
+        final double score;
+
+        ScoredContent(Content content, double score) {
+            this.content = content;
+            this.score = score;
+        }
+    }
 
     @PostConstruct
     public void init() {
@@ -119,10 +130,18 @@ public class FoodVectorServiceImpl implements FoodVectorService {
             );
 
             List<Integer> ids = new ArrayList<>();
-            for (Hit<Map<String, Object>> hit : response.hits().hits()) {
+
+            List<Hit<Map<String, Object>>> hits = response.hits() == null || response.hits().hits() == null
+                    ? List.of()
+                    : response.hits().hits();
+
+            for (Hit<Map<String, Object>> hit : hits) {
+                Map<String, Object> src = hit.source();
+                if (src == null) continue;
+
                 double score = hit.score() != null ? hit.score() - 1.0 : 0.0;
-                if (score >= minScore && hit.source() != null) {
-                    Object idObj = hit.source().get("id");
+                if (score >= minScore) {
+                    Object idObj = src.get("id");
                     if (idObj != null) ids.add(Integer.valueOf(idObj.toString()));
                 }
             }
@@ -176,7 +195,6 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                 log.info("🔍 [RAG] User query: '{}'", userQuery);
 
                 float[] queryVector = embeddingModel.embed(TextSegment.from(userQuery)).content().vector();
-
                 String vectorJson = Arrays.toString(queryVector);
 
                 String queryBody = String.format("""
@@ -199,51 +217,71 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                         (Class<Map<String, Object>>) (Class<?>) Map.class
                 );
 
-                List<Content> results = new ArrayList<>();
+                // Use a holder that keeps Content together with its numeric score to avoid using deprecated Metadata.get(String)
+                List<ScoredContent> scoredResults = new ArrayList<>();
 
-                log.info("📊 [RAG] Found {} hits from Elasticsearch", response.hits().hits().size());
+                List<Hit<Map<String, Object>>> hits = response.hits() == null || response.hits().hits() == null
+                        ? List.of()
+                        : response.hits().hits();
 
-                for (Hit<Map<String, Object>> hit : response.hits().hits()) {
+                log.info("📊 [RAG] Found {} hits from Elasticsearch", hits.size());
+
+                for (Hit<Map<String, Object>> hit : hits) {
+                    Map<String, Object> src = hit.source();
+                    if (src == null) continue;
+
                     double rawScore = hit.score() != null ? hit.score() : 0.0;
-                    double cosineScore = rawScore - 1.0;   // vì ta cộng +1.0 trong script
+                    double cosineScore = rawScore - 1.0;
 
-                    String contextText = (String) hit.source().get("context_text");
-                    Object idObj = hit.source().get("id");
-                    String productName = "Unknown";
+                    String contextText = (String) src.get("context_text");
+                    Object idObj = src.get("id");
 
-                    // Trích xuất tên món từ context_text để log dễ nhìn
-                    if (contextText != null) {
-                        int nameStart = contextText.indexOf("Món: ");
-                        if (nameStart != -1) {
-                            int nameEnd = contextText.indexOf("\n", nameStart);
-                            if (nameEnd == -1) nameEnd = contextText.indexOf("Quán:", nameStart);
-                            productName = contextText.substring(nameStart + 5, nameEnd != -1 ? nameEnd : nameStart + 50).trim();
-                        }
-                    }
-
-                    log.info("   → Product ID: {} | Name: '{}' | Score: {:.4f} (raw: {:.4f})",
-                            idObj, productName, cosineScore, rawScore);
-
-                    if (cosineScore >= minScore && contextText != null && idObj != null) {
+                    if (contextText != null && idObj != null) {
                         Metadata metadata = Metadata.from("product_id", idObj.toString());
-                        results.add(Content.from(TextSegment.from(contextText, metadata)));
 
-                        log.info("   ✅ ACCEPTED - ID: {} | Score: {:.4f} >= minScore {}",
-                                idObj, cosineScore, minScore);
-                    } else {
-                        log.info("   ❌ REJECTED - ID: {} | Score: {:.4f} < minScore {}",
-                                idObj, cosineScore, minScore);
+                        // Thêm score vào metadata (dùng put thay vì getDouble với default)
+                        metadata.put("score", String.valueOf(cosineScore));   // lưu dưới dạng String vì Metadata hay bị lỗi với Double
+
+                        Content content = Content.from(TextSegment.from(contextText, metadata));
+
+                        scoredResults.add(new ScoredContent(content, cosineScore));
+
+                        log.info("   → ID: {} | Score: {}", idObj, cosineScore);
                     }
                 }
 
-                log.info("🎯 [RAG] Finally returned {} products to LLM (after filtering minScore)", results.size());
+                // Sắp xếp theo score giảm dần (ưu tiên món liên quan nhất lên đầu)
+                scoredResults.sort((a, b) -> Double.compare(b.score, a.score));
+
+                List<Content> results = scoredResults.stream().map(sc -> sc.content).collect(Collectors.toList());
+
+                log.info("🎯 [RAG] Sorted and returned {} products to LLM (highest score first)", results.size());
+
+                // Log Top 3 món tốt nhất để debug
+                for (int i = 0; i < Math.min(4, scoredResults.size()); i++) {
+                    ScoredContent sc = scoredResults.get(i);
+                    Content content = sc.content;
+                    String text = content.textSegment().text();
+                    String productName = "Unknown";
+
+                    if (text.contains("Món:")) {
+                        int start = text.indexOf("Món:") + 5;
+                        int end = text.indexOf("\n", start);
+                        if (end == -1) end = text.length();
+                        productName = text.substring(start, end).trim();
+                    }
+
+                    double score = sc.score;
+                    log.info("   Top {}: '{}' | Score: {}", i + 1, productName, score);
+                }
 
                 return results;
 
             } catch (Exception e) {
-                log.error("❌ ContentRetriever search failed for query: {}", queryObj.text(), e);
+                log.error("❌ ContentRetriever search failed", e);
                 return List.of();
             }
         };
     }
 }
+
