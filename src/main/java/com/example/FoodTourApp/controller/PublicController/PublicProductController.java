@@ -3,30 +3,29 @@ package com.example.FoodTourApp.controller.PublicController;
 import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.service.FoodDetectionService;
+import com.example.FoodTourApp.service.ProductSearchService;
 import com.example.FoodTourApp.service.ProductService;
-import com.example.FoodTourApp.service.RecommendationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/public/products")
 public class PublicProductController {
 
     private static final Logger logger = LoggerFactory.getLogger(PublicProductController.class);
+    
     private final ProductService productService;
+    private final ProductSearchService productSearchService;
     private final FoodDetectionService foodDetectionService;
-    private final RecommendationService recommendationService;
 
     // Mapping từ class name của YOLO sang các từ khóa tìm kiếm tiếng Việt
     private static final Map<String, List<String>> FOOD_CLASS_KEYWORDS = new HashMap<>();
@@ -38,22 +37,27 @@ public class PublicProductController {
         FOOD_CLASS_KEYWORDS.put("Pho", Arrays.asList("phở", "pho"));
     }
 
-    public PublicProductController(ProductService productService, FoodDetectionService foodDetectionService, RecommendationService recommendationService) {
+    public PublicProductController(
+            ProductService productService,
+            ProductSearchService productSearchService,
+            FoodDetectionService foodDetectionService
+    ) {
         this.productService = productService;
+        this.productSearchService = productSearchService;
         this.foodDetectionService = foodDetectionService;
-        this.recommendationService = recommendationService;
     }
 
     /**
      * GET /api/public/products
-     * Lấy danh sách sản phẩm, hỗ trợ lọc tùy chọn:
-     *   ?city=HCM                          lọc theo thành phố
-     *   ?categoryId=1                      lọc theo danh mục
-     *   ?keyword=gà                        tìm kiếm theo tên sản phẩm
+     * Tìm kiếm sản phẩm với Elasticsearch (ONLY - no fallback).
+     * 
+     * Params:
+     *   ?keyword=phở                        full-text search (tên, mô tả, nguyên liệu, tags)
+     *   ?city=HCM                           lọc theo thành phố
+     *   ?categoryId=1                       lọc theo danh mục
      *   ?minPrice=10000&maxPrice=100000     lọc theo khoảng giá
      *   ?sortBy=rating_desc|best_selling|newest|price_asc|price_desc
      *   ?page=0&size=20
-     * Nếu không truyền param nào thì trả về tất cả sản phẩm active (sắp xếp theo createdAt DESC).
      */
     @GetMapping
     public ResponseEntity<?> getAllActiveProducts(
@@ -65,24 +69,94 @@ public class PublicProductController {
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        logger.info("Fetching active products - city={}, categoryId={}, sortBy={}, keyword={}, minPrice={}, maxPrice={}, page={}, size={}",
-                city, categoryId, sortBy, keyword, minPrice, maxPrice, page, size);
+        
+        logger.info("ES Search - keyword={}, city={}, categoryId={}, sortBy={}, minPrice={}, maxPrice={}, page={}, size={}",
+                keyword, city, categoryId, sortBy, minPrice, maxPrice, page, size);
 
         try {
             Pageable pageable = PageRequest.of(page, size);
-            Page<ProductResponseDTO> products = productService.getFilteredProducts(sortBy, city, categoryId, keyword, minPrice, maxPrice, pageable);
+            
+            Page<ProductResponseDTO> products = productSearchService.searchProducts(
+                    keyword, city, categoryId, minPrice, maxPrice, sortBy, pageable
+            );
+
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", pageResponse);
             return ResponseEntity.ok(result);
+            
         } catch (Exception e) {
-            logger.error("Error fetching active products: {}", e.getMessage(), e);
+            logger.error("ES Search error: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", e.getMessage());
+            error.put("message", "Elasticsearch error: " + e.getMessage());
             return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    /**
+     * GET /api/public/products/suggest?q=ph&limit=5
+     * Autocomplete/gợi ý sản phẩm khi người dùng gõ.
+     */
+    @GetMapping("/suggest")
+    public ResponseEntity<?> suggestProducts(
+            @RequestParam("q") String query,
+            @RequestParam(defaultValue = "5") int limit) {
+        
+        logger.debug("Suggest products for query: {}", query);
+        
+        try {
+            List<Map<String, Object>> suggestions = productSearchService.suggestProducts(query, limit);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", suggestions);
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            logger.error("Error suggesting products: {}", e.getMessage(), e);
+            return ResponseEntity.ok(Map.of("success", true, "data", List.of()));
+        }
+    }
+
+    /**
+     * GET /api/public/products/cities
+     * Lấy danh sách thành phố có sản phẩm (cho filter dropdown).
+     */
+    @GetMapping("/cities")
+    public ResponseEntity<?> getAvailableCities() {
+        try {
+            List<String> cities = productSearchService.getAvailableCities();
+            return ResponseEntity.ok(Map.of("success", true, "data", cities));
+        } catch (Exception e) {
+            logger.error("Error getting cities: {}", e.getMessage(), e);
+            return ResponseEntity.ok(Map.of("success", true, "data", List.of()));
+        }
+    }
+
+    /**
+     * GET /api/public/products/price-range?city=HCM&categoryId=1
+     * Lấy thống kê giá (min, max, avg) cho price slider.
+     */
+    @GetMapping("/price-range")
+    public ResponseEntity<?> getPriceRange(
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) Integer categoryId) {
+        
+        try {
+            ProductSearchService.PriceRangeStats stats = productSearchService.getPriceRangeStats(city, categoryId);
+            
+            Map<String, Object> data = new HashMap<>();
+            data.put("minPrice", stats.minPrice());
+            data.put("maxPrice", stats.maxPrice());
+            data.put("avgPrice", stats.avgPrice());
+            
+            return ResponseEntity.ok(Map.of("success", true, "data", data));
+        } catch (Exception e) {
+            logger.error("Error getting price range: {}", e.getMessage(), e);
+            return ResponseEntity.ok(Map.of("success", true, "data", Map.of()));
         }
     }
 
@@ -109,18 +183,20 @@ public class PublicProductController {
     @GetMapping("/shop/{shopId}")
     public ResponseEntity<?> getActiveProductsByShop(
             @PathVariable Integer shopId,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "DESC") String sortDir) {
-        logger.info("Fetching active products for shop: {} with pagination", shopId);
+            @RequestParam(defaultValue = "newest") String sortBy) {
+        
+        logger.info("ES Search for shop: {} with keyword={}", shopId, keyword);
 
         try {
-            Sort sort = sortDir.equalsIgnoreCase("ASC") ?
-                    Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
-            Pageable pageable = PageRequest.of(page, size, sort);
+            Pageable pageable = PageRequest.of(page, size);
+            
+            Page<ProductResponseDTO> products = productSearchService.searchProductsByShop(
+                    shopId, keyword, sortBy, pageable
+            );
 
-            Page<ProductResponseDTO> products = productService.getActiveProductsByShop(shopId, pageable);
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
             Map<String, Object> result = new HashMap<>();
@@ -128,10 +204,10 @@ public class PublicProductController {
             result.put("data", pageResponse);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            logger.error("Error fetching products for shop {}: {}", shopId, e.getMessage(), e);
+            logger.error("ES Search for shop {} error: {}", shopId, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
-            error.put("message", "Failed to fetch products");
+            error.put("message", "Elasticsearch error: " + e.getMessage());
             return ResponseEntity.internalServerError().body(error);
         }
     }
@@ -143,7 +219,7 @@ public class PublicProductController {
         Map<String, Object> response = new HashMap<>();
 
         try {
-            // Gọi service để detect (toàn bộ logic detect ở đây)
+            // Gọi service để detect
             List<String> detectedFoods = foodDetectionService.detectFoodNames(image);
 
             if (detectedFoods.isEmpty()) {
@@ -155,22 +231,21 @@ public class PublicProductController {
             // Chuyển đổi class names sang keywords tìm kiếm
             Set<String> searchKeywords = new LinkedHashSet<>();
             for (String food : detectedFoods) {
-                // Lấy keywords từ mapping, nếu không có thì dùng chính class name đã normalize
                 List<String> keywords = FOOD_CLASS_KEYWORDS.get(food);
                 if (keywords != null) {
                     searchKeywords.addAll(keywords);
                 } else {
-                    // Normalize class name: bỏ dấu gạch, lowercase
                     searchKeywords.add(food.replace("-", " ").toLowerCase());
                 }
             }
 
-            // Gọi service Product để tìm sản phẩm matching với TẤT CẢ keywords
+            // Tìm kiếm bằng ES only
             Map<Integer, ProductResponseDTO> uniqueProducts = new LinkedHashMap<>();
             for (String keyword : searchKeywords) {
-                Page<ProductResponseDTO> page = productService.getProductsByNameContaining(keyword, PageRequest.of(0, 50));
+                Page<ProductResponseDTO> page = productSearchService.searchProducts(
+                        keyword, null, null, null, null, null, PageRequest.of(0, 50)
+                );
                 for (ProductResponseDTO product : page.getContent()) {
-                    // Dùng Map để tránh trùng lặp sản phẩm
                     uniqueProducts.putIfAbsent(product.getId(), product);
                 }
             }
@@ -179,7 +254,7 @@ public class PublicProductController {
 
             response.put("success", true);
             response.put("detected", detectedFoods);
-            response.put("searchKeywords", searchKeywords); // Trả về để debug
+            response.put("searchKeywords", searchKeywords);
             response.put("products", matchedProducts);
             logger.info("Detect thành công: {} món ăn, {} keywords, {} sản phẩm matching", 
                     detectedFoods.size(), searchKeywords.size(), matchedProducts.size());
@@ -191,9 +266,10 @@ public class PublicProductController {
             return ResponseEntity.internalServerError().body(response);
         }
     }
+
     /**
      * GET /api/public/products/similar/{productId}?limit=6
-     * Gợi ý món tương tự trên trang chi tiết sản phẩm (Public API - không cần authentication)
+     * Gợi ý món tương tự - dùng ES only
      */
     @GetMapping("/similar/{productId}")
     public ResponseEntity<?> getSimilar(
@@ -202,7 +278,8 @@ public class PublicProductController {
     ) {
         logger.info("Getting similar products for product {} (limit={})", productId, limit);
         try {
-            List<ProductResponseDTO> similar = recommendationService.getSimilar(productId, limit);
+            List<ProductResponseDTO> similar = productSearchService.findSimilarProducts(productId, limit);
+            
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", similar);

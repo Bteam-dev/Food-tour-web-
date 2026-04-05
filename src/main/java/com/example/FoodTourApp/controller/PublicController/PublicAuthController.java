@@ -3,6 +3,7 @@ package com.example.FoodTourApp.controller.PublicController;
 import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
 import com.example.FoodTourApp.service.AuthService;
+import com.example.FoodTourApp.service.RateLimitService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,13 @@ import java.util.Map;
 
 /**
  * Public Auth Controller - Các endpoint authentication không cần đăng nhập trước
+ * 
+ * Rate Limiting applied:
+ * - Login: 5 attempts per 15 minutes per email
+ * - Register: 10 accounts per hour per IP
+ * - Forgot Password: 3 requests per hour per email
+ * - Verify OTP: 5 attempts per 5 minutes per email
+ * - Send OTP: 3 requests per minute per email
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -24,13 +32,59 @@ public class PublicAuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(PublicAuthController.class);
     private final AuthService authService;
+    private final RateLimitService rateLimitService;
 
-    public PublicAuthController(AuthService authService) {
+    public PublicAuthController(AuthService authService, RateLimitService rateLimitService) {
         this.authService = authService;
+        this.rateLimitService = rateLimitService;
+    }
+    
+    /**
+     * Get client IP address from request, considering proxy headers
+     */
+    private String getClientIP(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            // X-Forwarded-For can contain multiple IPs, take the first one
+            return xForwardedFor.split(",")[0].trim();
+        }
+        
+        String xRealIP = request.getHeader("X-Real-IP");
+        if (xRealIP != null && !xRealIP.isEmpty()) {
+            return xRealIP;
+        }
+        
+        return request.getRemoteAddr();
+    }
+    
+    /**
+     * Create rate limit error response
+     */
+    private ResponseEntity<?> rateLimitExceeded(String message, long timeUntilReset) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", false);
+        response.put("error", "RATE_LIMIT_EXCEEDED");
+        response.put("message", message);
+        response.put("retryAfterSeconds", timeUntilReset);
+        
+        return ResponseEntity.status(429).body(response);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest, 
+                                              HttpServletRequest request) {
+        String identifier = loginRequest.getUsername(); // Use username as identifier
+        
+        // Rate limit: 5 attempts per 15 minutes (900 seconds)
+        if (!rateLimitService.isAllowed(identifier, "login", 5, 900)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(identifier, "login");
+            logger.warn("Rate limit exceeded for login attempt: {}", identifier);
+            return rateLimitExceeded(
+                "Too many login attempts. Please try again in " + (timeLeft / 60) + " minutes.", 
+                timeLeft
+            );
+        }
+        
         try {
             Map<String, Object> result = authService.login(loginRequest);
             logger.info("Login processed for username: {}", loginRequest.getUsername());
@@ -44,11 +98,23 @@ public class PublicAuthController {
 
     // API xác thực 2FA
     @PostMapping("/verify-2fa")
-    public ResponseEntity<?> verify2FA(@RequestBody Map<String, String> request) {
+    public ResponseEntity<?> verify2FA(@RequestBody Map<String, String> request, 
+                                       HttpServletRequest httpRequest) {
+        String email = request.get("email");
+        String code = request.get("code");
+        String password = request.get("password");
+        
+        // Rate limit: 5 attempts per 5 minutes (300 seconds)
+        if (!rateLimitService.isAllowed(email, "verify-2fa", 5, 300)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(email, "verify-2fa");
+            logger.warn("Rate limit exceeded for 2FA verification: {}", email);
+            return rateLimitExceeded(
+                "Too many 2FA verification attempts. Please try again in " + (timeLeft / 60) + " minutes.", 
+                timeLeft
+            );
+        }
+        
         try {
-            String email = request.get("email");
-            String code = request.get("code");
-            String password = request.get("password");
             Map<String, Object> result = authService.verify2FA(email, code, password);
             logger.info("2FA verification processed for email: {}", email);
             return ResponseEntity.ok(result);
@@ -62,8 +128,21 @@ public class PublicAuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<?> registerUser(@Valid @RequestBody RegisterRequest registerRequest) {
+    public ResponseEntity<?> registerUser(@Valid @RequestBody RegisterRequest registerRequest,
+                                          HttpServletRequest request) {
         logger.info("Received registration request for username: {}", registerRequest.getUsername());
+        
+        // Rate limit by IP: 10 registrations per hour (3600 seconds)
+        String clientIP = getClientIP(request);
+        if (!rateLimitService.isAllowed(clientIP, "register", 10, 3600)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(clientIP, "register");
+            logger.warn("Rate limit exceeded for registration from IP: {}", clientIP);
+            return rateLimitExceeded(
+                "Too many registration attempts from this IP. Please try again in " + (timeLeft / 60) + " minutes.", 
+                timeLeft
+            );
+        }
+        
         try {
             AuthResponse authResponse = authService.register(registerRequest);
 
@@ -105,8 +184,21 @@ public class PublicAuthController {
     }
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+    public ResponseEntity<?> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request,
+                                            HttpServletRequest httpRequest) {
         logger.info("Received forgot-password request for email: {}", request.getEmail());
+        
+        // Rate limit: 3 requests per hour (3600 seconds) per email
+        String email = request.getEmail();
+        if (!rateLimitService.isAllowed(email, "forgot-password", 3, 3600)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(email, "forgot-password");
+            logger.warn("Rate limit exceeded for forgot-password: {}", email);
+            return rateLimitExceeded(
+                "Too many password reset requests. Please try again in " + (timeLeft / 60) + " minutes.", 
+                timeLeft
+            );
+        }
+        
         try {
             authService.forgotPassword(request);
             return ResponseEntity.ok(Map.of("success", true,
@@ -118,8 +210,21 @@ public class PublicAuthController {
     }
 
     @PostMapping("/verify-otp")
-    public ResponseEntity<?> verifyOtp(@Valid @RequestBody VerifyOtpRequest request) {
+    public ResponseEntity<?> verifyOtp(@Valid @RequestBody VerifyOtpRequest request,
+                                       HttpServletRequest httpRequest) {
         logger.info("Received verify-otp request for email: {}", request.getEmail());
+        
+        // Rate limit: 5 attempts per 5 minutes (300 seconds) per email
+        String email = request.getEmail();
+        if (!rateLimitService.isAllowed(email, "verify-otp", 5, 300)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(email, "verify-otp");
+            logger.warn("Rate limit exceeded for verify-otp: {}", email);
+            return rateLimitExceeded(
+                "Too many OTP verification attempts. Please try again in " + (timeLeft / 60) + " minutes.", 
+                timeLeft
+            );
+        }
+        
         try {
             authService.verifyOtp(request);
             return ResponseEntity.ok(Map.of("success", true,

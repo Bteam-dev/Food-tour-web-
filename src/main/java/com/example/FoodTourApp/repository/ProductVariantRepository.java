@@ -22,6 +22,10 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     @Query("SELECT v FROM ProductVariant v WHERE v.product.id = :productId")
     List<ProductVariant> findByProductId(@Param("productId") Integer productId);
 
+    // Tìm variants active theo productId
+    @Query("SELECT v FROM ProductVariant v WHERE v.product.id = :productId AND v.isActive = true")
+    List<ProductVariant> findActiveByProductId(@Param("productId") Integer productId);
+
     // Xóa tất cả variants của một product (for hard delete)
     @Modifying
     @Query("DELETE FROM ProductVariant v WHERE v.product.id = :productId")
