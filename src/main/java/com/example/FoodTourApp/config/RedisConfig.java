@@ -48,9 +48,9 @@ public class RedisConfig {
     /**
      * Generic String RedisTemplate - for token blacklist and rate limiting
      */
-    @Bean
+    @Bean(name = "customStringRedisTemplate")
     @Primary
-    public RedisTemplate<String, String> stringRedisTemplate(RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, String> customStringRedisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, String> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         

@@ -1,10 +1,13 @@
 package com.example.FoodTourApp.config.JWTConfig;
 
+import com.example.FoodTourApp.service.impl.TokenStorageService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
@@ -15,8 +18,9 @@ import java.util.Date;
 import java.util.List;
 
 @Component
-@Slf4j
 public class JwtUtils {
+    private static final Logger log = LoggerFactory.getLogger(JwtUtils.class);
+    
     @Value("${JWT_SECRET}")
     private String jwtSecret;
     
@@ -30,6 +34,9 @@ public class JwtUtils {
     
     private final String JWT_COOKIE_NAME = "jwt";
     
+    @Autowired
+    private TokenStorageService tokenStorageService;
+    
     @PostConstruct
     public void init() {
         this.key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
@@ -40,31 +47,60 @@ public class JwtUtils {
     /**
      * Tạo Access Token với userId, username và roles (truyền qua Header)
      * Subject của token là userId thay vì username
+     * 🔥 NEW: Lưu token vào Redis để tăng cường bảo mật
      */
-    public String generateAccessToken(Integer userId, String username, List<String> roles) {
-        return Jwts.builder()
+    public String generateAccessToken(Integer userId, String username, List<String> roles, String deviceInfo) {
+        long expiryTime = System.currentTimeMillis() + JWT_EXPIRATION;
+        
+        String token = Jwts.builder()
                 .subject(userId.toString())  // Dùng userId làm subject
                 .claim("username", username)  // Lưu username vào claim
                 .claim("roles", roles)
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION))
+                .expiration(new Date(expiryTime))
                 .signWith(key)
                 .compact();
+
+        // 🔥 NEW: Lưu token vào Redis
+        String tokenId = tokenStorageService.storeAccessToken(userId, token, roles, expiryTime, deviceInfo);
+        if (tokenId == null) {
+            log.error("❌ Failed to store access token in Redis for userId: {}", userId);
+        }
+
+        return token;
+    }
+
+    /**
+     * Compatibility method for backward compatibility
+     */
+    public String generateAccessToken(Integer userId, String username, List<String> roles) {
+        return generateAccessToken(userId, username, roles, "unknown");
     }
 
     /**
      * Tạo Refresh Token với userId và roles
      * ✅ Thêm roles để bảo mật hơn - tránh refresh token bị lạm dụng
+     * 🔥 NEW: Lưu refresh token vào Redis để kiểm soát session
      */
     public String generateRefreshToken(Integer userId, List<String> roles) {
-        return Jwts.builder()
+        long expiryTime = System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION;
+        
+        String token = Jwts.builder()
                 .subject(userId.toString())  // Dùng userId làm subject
                 .claim("roles", roles)        // ✅ Thêm roles để bảo mật hơn
                 .claim("type", "refresh")     // ✅ Đánh dấu đây là refresh token
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXPIRATION))
+                .expiration(new Date(expiryTime))
                 .signWith(key)
                 .compact();
+
+        // 🔥 NEW: Lưu refresh token vào Redis
+        String tokenId = tokenStorageService.storeRefreshToken(userId, token, roles, expiryTime);
+        if (tokenId == null) {
+            log.error("❌ Failed to store refresh token in Redis for userId: {}", userId);
+        }
+
+        return token;
     }
 
     /**
@@ -168,6 +204,9 @@ public class JwtUtils {
         }
     }
 
+    /**
+     * Validate JWT token signature và expiry (basic validation)
+     */
     public boolean validateToken(String token) {
         try {
             Jwts.parser()
@@ -193,6 +232,79 @@ public class JwtUtils {
         } catch (Exception e) {
             log.error("JWT token validation error: {}", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * 🔥 NEW: Validate token thông qua Redis (bảo mật cao hơn)
+     * Kiểm tra token có tồn tại trong Redis không
+     */
+    public TokenStorageService.TokenValidationResult validateTokenWithRedis(String token) {
+        try {
+            // Validate JWT signature và expiry trước
+            if (!validateToken(token)) {
+                return TokenStorageService.TokenValidationResult.invalid();
+            }
+
+            // Kiểm tra token có tồn tại trong Redis không
+            return tokenStorageService.validateAccessToken(token);
+        } catch (Exception e) {
+            log.error("❌ Error validating token with Redis", e);
+            return TokenStorageService.TokenValidationResult.invalid();
+        }
+    }
+
+    /**
+     * 🔥 NEW: Validate refresh token thông qua Redis
+     */
+    public TokenStorageService.RefreshTokenValidationResult validateRefreshTokenWithRedis(String token) {
+        try {
+            // Validate JWT signature và expiry trước
+            if (!validateToken(token) || !isRefreshToken(token)) {
+                return TokenStorageService.RefreshTokenValidationResult.invalid();
+            }
+
+            // Kiểm tra refresh token có tồn tại trong Redis không
+            return tokenStorageService.validateRefreshToken(token);
+        } catch (Exception e) {
+            log.error("❌ Error validating refresh token with Redis", e);
+            return TokenStorageService.RefreshTokenValidationResult.invalid();
+        }
+    }
+
+    /**
+     * 🔥 NEW: Logout token (revoke from Redis)
+     */
+    public boolean logoutToken(String token) {
+        try {
+            return tokenStorageService.revokeToken(token);
+        } catch (Exception e) {
+            log.error("❌ Error logging out token", e);
+            return false;
+        }
+    }
+
+    /**
+     * 🔥 NEW: Logout all tokens của user (logout all devices)
+     */
+    public boolean logoutAllUserTokens(Integer userId) {
+        try {
+            return tokenStorageService.revokeAllUserTokens(userId);
+        } catch (Exception e) {
+            log.error("❌ Error logging out all user tokens for userId: {}", userId, e);
+            return false;
+        }
+    }
+
+    /**
+     * 🔥 NEW: Get user active sessions
+     */
+    public List<TokenStorageService.SessionInfo> getUserActiveSessions(Integer userId) {
+        try {
+            return tokenStorageService.getUserActiveSessions(userId);
+        } catch (Exception e) {
+            log.error("❌ Error getting user active sessions for userId: {}", userId, e);
+            return List.of();
         }
     }
 
@@ -251,7 +363,6 @@ public class JwtUtils {
                 .getPayload();
         return claims.get("type", String.class);
     }
-
 
     /**
      * @deprecated Dùng getEmailFromSpecialToken thay thế

@@ -3,6 +3,7 @@ package com.example.FoodTourApp.config.JWTConfig;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.impl.TokenBlacklistService;
+import com.example.FoodTourApp.service.impl.TokenStorageService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -67,20 +68,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         if (token != null) {
-            // Kiểm tra token có bị blacklist không (đã logout)
-            if (tokenBlacklistService.isTokenBlacklisted(token)) {
-                logger.warn("Token is blacklisted (user logged out), rejecting request to {}", requestUri);
-                chain.doFilter(request, response);
-                return;
-            }
+            // 🔥 NEW: Validate token với Redis (bảo mật cao hơn)
+            logger.info("Validating token with Redis...");
+            TokenStorageService.TokenValidationResult validationResult = jwtUtils.validateTokenWithRedis(token);
+            
+            if (validationResult.isValid()) {
+                Integer userId = validationResult.getUserId();
+                List<String> roles = validationResult.getRoles();
+                String tokenId = validationResult.getTokenId();
+                String deviceInfo = validationResult.getDeviceInfo();
 
-            // Kiểm tra token có hợp lệ không
-            logger.info("Validating token...");
-            if (jwtUtils.validateToken(token)) {
-                Integer userId = jwtUtils.getUserIdFromToken(token);
-                List<String> roles = jwtUtils.getRolesFromToken(token);
-
-                logger.info("Token valid! UserId: {}, Roles from token: {}", userId, roles);
+                logger.info("✅ Token valid in Redis! UserId: {}, TokenId: {}, Roles: {}, Device: {}", 
+                           userId, tokenId, roles, deviceInfo);
 
                 if (userId != null && roles != null && !roles.isEmpty()) {
                     // Load the actual User object from database by userId
@@ -100,6 +99,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         // ⚠️ KIỂM TRA USER BỊ KHÓA HOẶC KHÔNG ACTIVE
                         if (!user.getIsActive()) {
                             logger.warn("❌ User {} is INACTIVE or BLOCKED - Rejecting authentication", userId);
+                            // 🔥 NEW: Revoke all user tokens khi user bị block
+                            jwtUtils.logoutAllUserTokens(userId);
                             chain.doFilter(request, response);
                             return;
                         }
@@ -113,8 +114,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 })
                                 .collect(Collectors.toList());
 
-                        logger.info("Setting authentication for userId: {}, roles: {}, authorities: {}",
-                                   userId, roles, authorities);
+                        logger.info("Setting authentication for userId: {}, tokenId: {}, roles: {}, authorities: {}",
+                                   userId, tokenId, roles, authorities);
 
                         // Set the User object as principal instead of email String
                         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
@@ -122,20 +123,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(auth);
 
-                        logger.info("✅ Authentication SET successfully for userId: {}", userId);
+                        logger.info("✅ Authentication SET successfully for userId: {}, tokenId: {}", userId, tokenId);
                     } else {
                         logger.error("❌ USER NOT FOUND in database for userId: {} - THIS WILL CAUSE 403!", userId);
                         logger.error("Token is valid but user doesn't exist in DB. Possible causes:");
                         logger.error("1. Database connection issue");
                         logger.error("2. User was deleted");
                         logger.error("3. Hibernate/JPA cache issue");
+                        
+                        // 🔥 NEW: Revoke all tokens của user không tồn tại
+                        jwtUtils.logoutAllUserTokens(userId);
                     }
                 } else {
-                    logger.warn("UserId or roles are null/empty in token for request to {}", requestUri);
+                    logger.warn("UserId or roles are null/empty in Redis validation for request to {}", requestUri);
                     logger.warn("UserId: {}, Roles: {}", userId, roles);
                 }
             } else {
-                logger.warn("Invalid JWT token for request to {}", requestUri);
+                logger.warn("❌ Token invalid or not found in Redis for request to {}", requestUri);
+                logger.warn("This could mean: token expired, revoked, or Redis is down");
+                
+                // Fallback: Nếu Redis down, vẫn check blacklist (legacy)
+                if (tokenBlacklistService.isTokenBlacklisted(token)) {
+                    logger.warn("Token is blacklisted (legacy check), rejecting request to {}", requestUri);
+                } else {
+                    logger.warn("Token not in blacklist but Redis validation failed - this needs investigation");
+                }
             }
         } else {
             logger.info("No JWT token found in request to {}", requestUri);
