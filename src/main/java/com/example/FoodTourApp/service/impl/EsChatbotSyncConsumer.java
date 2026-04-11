@@ -10,7 +10,7 @@ import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import com.example.FoodTourApp.entity.*;
-import com.example.FoodTourApp.event.EsProductSyncEvent;
+import com.example.FoodTourApp.event.ProductSyncEvent;
 import com.example.FoodTourApp.repository.ProductRepository;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -56,7 +56,7 @@ public class EsChatbotSyncConsumer {
     private static final int BATCH_SIZE = 50;
     private static final long POLL_INTERVAL_MS = 5000; // 5 seconds
     
-    private final RedisTemplate<String, EsProductSyncEvent> redisTemplate;
+    private final RedisTemplate<String, ProductSyncEvent> redisTemplate;
     private final ProductRepository productRepository;
     
     @Value("${elasticsearch.host:localhost}")
@@ -119,9 +119,9 @@ public class EsChatbotSyncConsumer {
         
         try {
             // Pop batch of events from queue (FIFO)
-            List<EsProductSyncEvent> events = new ArrayList<>();
+            List<ProductSyncEvent> events = new ArrayList<>();
             for (int i = 0; i < BATCH_SIZE; i++) {
-                EsProductSyncEvent event = redisTemplate.opsForList()
+                ProductSyncEvent event = redisTemplate.opsForList()
                         .leftPop(REDIS_QUEUE_KEY, 100, TimeUnit.MILLISECONDS);
                 if (event == null) break;
                 events.add(event);
@@ -132,8 +132,8 @@ public class EsChatbotSyncConsumer {
             log.info("Polled {} chatbot sync events from Redis", events.size());
             
             // Deduplicate: keep latest event per productId
-            Map<Integer, EsProductSyncEvent> deduped = new LinkedHashMap<>();
-            for (EsProductSyncEvent event : events) {
+            Map<Integer, ProductSyncEvent> deduped = new LinkedHashMap<>();
+            for (ProductSyncEvent event : events) {
                 deduped.put(event.getProductId(), event);
             }
             
@@ -147,15 +147,15 @@ public class EsChatbotSyncConsumer {
         }
     }
     
-    private void processBatch(Collection<EsProductSyncEvent> events) {
+    private void processBatch(Collection<ProductSyncEvent> events) {
         if (events.isEmpty()) return;
         
         // Separate INDEX vs DELETE actions
         Set<Integer> toIndex = new HashSet<>();
         Set<Integer> toDelete = new HashSet<>();
         
-        for (EsProductSyncEvent event : events) {
-            if (EsProductSyncEvent.Action.DELETE.equals(event.getAction())) {
+        for (ProductSyncEvent event : events) {
+            if (ProductSyncEvent.Action.DELETE.equals(event.getAction())) {
                 toDelete.add(event.getProductId());
             } else {
                 toIndex.add(event.getProductId());

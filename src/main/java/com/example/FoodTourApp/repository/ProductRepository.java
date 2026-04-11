@@ -142,4 +142,16 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
             @Param("productId") Integer productId,
             @Param("limit") int limit
     );
+
+    /**
+     * Tìm sản phẩm available theo category ID
+     */
+    @Query("SELECT p FROM Product p WHERE p.category.id = :categoryId AND p.isAvailable = true ORDER BY p.rating DESC")
+    List<Product> findByCategoryIdAndIsAvailableTrue(@Param("categoryId") Integer categoryId, Pageable pageable);
+
+    /**
+     * Tìm sản phẩm available theo shop ID
+     */
+    @Query("SELECT p FROM Product p WHERE p.shop.id = :shopId AND p.isAvailable = true ORDER BY p.rating DESC")
+    List<Product> findByShopIdAndIsAvailableTrue(@Param("shopId") Integer shopId, Pageable pageable);
 }

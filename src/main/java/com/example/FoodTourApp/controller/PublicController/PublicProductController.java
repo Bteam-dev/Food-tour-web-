@@ -5,6 +5,7 @@ import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.service.FoodDetectionService;
 import com.example.FoodTourApp.service.ProductSearchService;
 import com.example.FoodTourApp.service.ProductService;
+import com.example.FoodTourApp.service.RealTimeRecommendationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -26,6 +27,7 @@ public class PublicProductController {
     private final ProductService productService;
     private final ProductSearchService productSearchService;
     private final FoodDetectionService foodDetectionService;
+    private final RealTimeRecommendationService recommendationService;
 
     // Mapping từ class name của YOLO sang các từ khóa tìm kiếm tiếng Việt
     private static final Map<String, List<String>> FOOD_CLASS_KEYWORDS = new HashMap<>();
@@ -40,11 +42,13 @@ public class PublicProductController {
     public PublicProductController(
             ProductService productService,
             ProductSearchService productSearchService,
-            FoodDetectionService foodDetectionService
+            FoodDetectionService foodDetectionService,
+            RealTimeRecommendationService recommendationService
     ) {
         this.productService = productService;
         this.productSearchService = productSearchService;
         this.foodDetectionService = foodDetectionService;
+        this.recommendationService = recommendationService;
     }
 
     /**
@@ -269,7 +273,7 @@ public class PublicProductController {
 
     /**
      * GET /api/public/products/similar/{productId}?limit=6
-     * Gợi ý món tương tự - dùng ES only
+     * Gợi ý món tương tự - sử dụng RealTimeRecommendationService với KNN
      */
     @GetMapping("/similar/{productId}")
     public ResponseEntity<?> getSimilar(
@@ -278,7 +282,8 @@ public class PublicProductController {
     ) {
         logger.info("Getting similar products for product {} (limit={})", productId, limit);
         try {
-            List<ProductResponseDTO> similar = productSearchService.findSimilarProducts(productId, limit);
+            // Sử dụng recommendation service với embedding-based similarity
+            List<ProductResponseDTO> similar = recommendationService.getSimilarProducts(productId, limit);
             
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -286,6 +291,27 @@ public class PublicProductController {
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             logger.error("Error getting similar products {}: {}", productId, e.getMessage(), e);
+            return ResponseEntity.badRequest().body(
+                    Map.of("success", false, "message", e.getMessage())
+            );
+        }
+    }
+
+    /**
+     * GET /api/public/products/also-bought/{productId}?limit=6
+     * "Người mua X cũng mua" - Collaborative filtering
+     */
+    @GetMapping("/also-bought/{productId}")
+    public ResponseEntity<?> getAlsoBought(
+            @PathVariable Integer productId,
+            @RequestParam(defaultValue = "6") int limit
+    ) {
+        logger.info("Getting 'also bought' for product {}", productId);
+        try {
+            List<ProductResponseDTO> recs = recommendationService.getAlsoBought(productId, limit);
+            return ResponseEntity.ok(Map.of("success", true, "data", recs));
+        } catch (Exception e) {
+            logger.error("Error getting also-bought: {}", e.getMessage(), e);
             return ResponseEntity.badRequest().body(
                     Map.of("success", false, "message", e.getMessage())
             );

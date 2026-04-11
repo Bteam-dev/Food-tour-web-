@@ -1,6 +1,6 @@
 package com.example.FoodTourApp.service.impl;
 
-import com.example.FoodTourApp.event.EsProductSyncEvent;
+import com.example.FoodTourApp.event.ProductSyncEvent;
 import com.example.FoodTourApp.service.EsProductSyncProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,24 +22,24 @@ public class EsProductSyncProducerImpl implements EsProductSyncProducer {
      */
     public static final String SYNC_QUEUE_KEY = "es:product:sync:queue";
     
-    private final RedisTemplate<String, EsProductSyncEvent> redisTemplate;
+    private final RedisTemplate<String, ProductSyncEvent> redisTemplate;
     
-    public EsProductSyncProducerImpl(RedisTemplate<String, EsProductSyncEvent> redisTemplate) {
+    public EsProductSyncProducerImpl(RedisTemplate<String, ProductSyncEvent> redisTemplate) {
         this.redisTemplate = redisTemplate;
     }
     
     @Override
     public void pushIndexEvent(Integer productId) {
-        pushEvent(EsProductSyncEvent.index(productId));
+        pushEvent(ProductSyncEvent.index(productId));
     }
     
     @Override
     public void pushDeleteEvent(Integer productId) {
-        pushEvent(EsProductSyncEvent.delete(productId));
+        pushEvent(ProductSyncEvent.delete(productId));
     }
     
     @Override
-    public void pushEvent(EsProductSyncEvent event) {
+    public void pushEvent(ProductSyncEvent event) {
         try {
             redisTemplate.opsForList().leftPush(SYNC_QUEUE_KEY, event);
             log.debug("Pushed ES sync event: {} for product {}", event.getAction(), event.getProductId());

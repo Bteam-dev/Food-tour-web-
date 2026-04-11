@@ -1,6 +1,6 @@
 package com.example.FoodTourApp.service;
 
-import com.example.FoodTourApp.event.EsProductSyncEvent;
+import com.example.FoodTourApp.event.ProductSyncEvent;
 
 /**
  * Producer interface for ES product sync events.
@@ -21,5 +21,5 @@ public interface EsProductSyncProducer {
     /**
      * Push a raw event
      */
-    void pushEvent(EsProductSyncEvent event);
+    void pushEvent(ProductSyncEvent event);
 }

@@ -1,6 +1,6 @@
 package com.example.FoodTourApp.service.impl;
 
-import com.example.FoodTourApp.event.EsProductSyncEvent;
+import com.example.FoodTourApp.event.ProductSyncEvent;
 import com.example.FoodTourApp.service.EsChatbotSyncProducer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,12 +20,12 @@ public class EsChatbotSyncProducerImpl implements EsChatbotSyncProducer {
     
     private static final String REDIS_QUEUE_KEY = "es:chatbot:sync:queue";
     
-    private final RedisTemplate<String, EsProductSyncEvent> redisTemplate;
+    private final RedisTemplate<String, ProductSyncEvent> redisTemplate;
     
     @Override
     public void pushIndexEvent(Integer productId) {
         try {
-            EsProductSyncEvent event = EsProductSyncEvent.index(productId);
+            ProductSyncEvent event = ProductSyncEvent.index(productId);
             redisTemplate.opsForList().rightPush(REDIS_QUEUE_KEY, event);
             log.debug("Pushed INDEX event to chatbot queue: productId={}", productId);
         } catch (Exception e) {
@@ -37,7 +37,7 @@ public class EsChatbotSyncProducerImpl implements EsChatbotSyncProducer {
     @Override
     public void pushDeleteEvent(Integer productId) {
         try {
-            EsProductSyncEvent event = EsProductSyncEvent.delete(productId);
+            ProductSyncEvent event = ProductSyncEvent.delete(productId);
             redisTemplate.opsForList().rightPush(REDIS_QUEUE_KEY, event);
             log.debug("Pushed DELETE event to chatbot queue: productId={}", productId);
         } catch (Exception e) {

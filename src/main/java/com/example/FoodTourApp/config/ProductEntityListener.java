@@ -14,22 +14,20 @@ import org.springframework.stereotype.Component;
 /**
  * JPA Entity Listener - Auto sync Product changes to Elasticsearch.
  * 
- * Syncs to 2 indexes via Redis queues:
+ * Triggers when Product entity is created/updated/deleted.
+ * Publishes events to Redis queues for async processing.
+ * 
+ * Syncs to 2 ES indexes:
  * 1. foodtour_products_chatbot - Vector index for RAG/chatbot (with embeddings)
  * 2. foodtour_products_search  - Search index for product listing
  * 
- * Architecture:
- * - Product change detected by JPA
- * - Push events to Redis queues (instant, non-blocking)
- * - Background consumers process events in batches
- * - Bulk sync to ES using Java client
- * 
- * NO MORE PYTHON SCRIPTS!
+ * Flow:
+ * Product change → this listener → Redis queue → Consumer → ES bulk sync
  */
 @Component
-public class ProductEsSyncListener {
+public class ProductEntityListener {
 
-    private static final Logger log = LoggerFactory.getLogger(ProductEsSyncListener.class);
+    private static final Logger log = LoggerFactory.getLogger(ProductEntityListener.class);
 
     @Autowired
     private EsChatbotSyncProducer esChatbotSyncProducer;

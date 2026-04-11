@@ -8,7 +8,7 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import com.example.FoodTourApp.entity.Product;
-import com.example.FoodTourApp.event.EsProductSyncEvent;
+import com.example.FoodTourApp.event.ProductSyncEvent;
 import com.example.FoodTourApp.repository.ProductRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -54,7 +54,7 @@ public class EsProductSyncConsumer {
     private static final int BATCH_SIZE = 50;           // Max events per batch
     private static final int BATCH_TIMEOUT_SECONDS = 2; // Wait time before processing smaller batch
     
-    private final RedisTemplate<String, EsProductSyncEvent> redisTemplate;
+    private final RedisTemplate<String, ProductSyncEvent> redisTemplate;
     private final ProductRepository productRepository;
     
     private ElasticsearchClient esClient;
@@ -71,7 +71,7 @@ public class EsProductSyncConsumer {
     private String searchIndex;
     
     public EsProductSyncConsumer(
-            RedisTemplate<String, EsProductSyncEvent> redisTemplate,
+            RedisTemplate<String, ProductSyncEvent> redisTemplate,
             ProductRepository productRepository
     ) {
         this.redisTemplate = redisTemplate;
@@ -128,7 +128,7 @@ public class EsProductSyncConsumer {
         while (running.get()) {
             try {
                 // Collect batch of events
-                List<EsProductSyncEvent> batch = collectBatch();
+                List<ProductSyncEvent> batch = collectBatch();
                 
                 if (!batch.isEmpty()) {
                     processBatch(batch);
@@ -152,14 +152,14 @@ public class EsProductSyncConsumer {
     /**
      * Collect events from Redis queue until batch is full or timeout
      */
-    private List<EsProductSyncEvent> collectBatch() {
-        List<EsProductSyncEvent> events = new ArrayList<>();
+    private List<ProductSyncEvent> collectBatch() {
+        List<ProductSyncEvent> events = new ArrayList<>();
         long deadline = System.currentTimeMillis() + (BATCH_TIMEOUT_SECONDS * 1000);
         
         while (events.size() < BATCH_SIZE && System.currentTimeMillis() < deadline) {
             try {
                 // BRPOP with timeout (blocking pop from right)
-                EsProductSyncEvent event = redisTemplate.opsForList()
+                ProductSyncEvent event = redisTemplate.opsForList()
                         .rightPop(SYNC_QUEUE_KEY, Duration.ofMillis(500));
                 
                 if (event != null) {
@@ -177,12 +177,12 @@ public class EsProductSyncConsumer {
     /**
      * Process a batch of events - deduplicate and bulk sync to ES
      */
-    private void processBatch(List<EsProductSyncEvent> events) {
+    private void processBatch(List<ProductSyncEvent> events) {
         log.info("Processing batch of {} events", events.size());
         
         // Deduplicate: keep only latest event per productId
-        Map<Integer, EsProductSyncEvent> dedupedMap = new LinkedHashMap<>();
-        for (EsProductSyncEvent event : events) {
+        Map<Integer, ProductSyncEvent> dedupedMap = new LinkedHashMap<>();
+        for (ProductSyncEvent event : events) {
             dedupedMap.put(event.getProductId(), event); // Later events overwrite earlier ones
         }
         
@@ -190,8 +190,8 @@ public class EsProductSyncConsumer {
         Set<Integer> toIndex = new HashSet<>();
         Set<Integer> toDelete = new HashSet<>();
         
-        for (EsProductSyncEvent event : dedupedMap.values()) {
-            if (event.getAction() == EsProductSyncEvent.Action.INDEX) {
+        for (ProductSyncEvent event : dedupedMap.values()) {
+            if (event.getAction() == ProductSyncEvent.Action.INDEX) {
                 toIndex.add(event.getProductId());
             } else {
                 toDelete.add(event.getProductId());

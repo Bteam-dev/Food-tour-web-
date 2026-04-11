@@ -360,9 +360,9 @@ def create_index_if_not_exists(es: Elasticsearch):
     """Create the search index if it doesn't exist"""
     if not es.indices.exists(index=ES_INDEX):
         es.indices.create(index=ES_INDEX, body=INDEX_SETTINGS)
-        print(f"✅ Created index: {ES_INDEX}")
+        print(f"Created index: {ES_INDEX}")
     else:
-        print(f"ℹ️  Index {ES_INDEX} already exists")
+        print(f"Index {ES_INDEX} already exists")
 
 
 def recreate_index(es: Elasticsearch):
@@ -372,7 +372,7 @@ def recreate_index(es: Elasticsearch):
         print(f"🗑️  Deleted index: {ES_INDEX}")
     
     es.indices.create(index=ES_INDEX, body=INDEX_SETTINGS)
-    print(f"✅ Created index: {ES_INDEX}")
+    print(f"[OK] Created index: {ES_INDEX}")
 
 
 def get_products_query(product_id: Optional[int] = None) -> str:
@@ -429,7 +429,7 @@ def get_products_query(product_id: Optional[int] = None) -> str:
 
 def sync_full(es: Elasticsearch):
     """Full sync all products to Elasticsearch"""
-    print("🔄 Starting full sync...")
+    print("[PROCESSING] Starting full sync...")
     
     conn = get_mysql_connection()
     try:
@@ -454,7 +454,7 @@ def sync_full(es: Elasticsearch):
         # Bulk index
         success, failed = helpers.bulk(es, actions, raise_on_error=False)
         
-        print(f"✅ Synced {success} products")
+        print(f"[OK] Synced {success} products")
         if failed:
             print(f"⚠️  Failed: {len(failed)} products")
             for item in failed[:5]:  # Show first 5 errors
@@ -469,7 +469,7 @@ def sync_full(es: Elasticsearch):
 
 def sync_product(es: Elasticsearch, product_id: int):
     """Sync a single product by ID"""
-    print(f"🔄 Syncing product ID: {product_id}")
+    print(f"[PROCESSING] Syncing product ID: {product_id}")
     
     conn = get_mysql_connection()
     try:
@@ -491,7 +491,7 @@ def sync_product(es: Elasticsearch, product_id: int):
             document=doc
         )
         
-        print(f"✅ Synced product: {row['name']} (ID: {product_id})")
+        print(f"[OK] Synced product: {row['name']} (ID: {product_id})")
         
     finally:
         conn.close()
@@ -501,14 +501,14 @@ def delete_product(es: Elasticsearch, product_id: int):
     """Delete a product from the index"""
     try:
         es.delete(index=ES_INDEX, id=str(product_id))
-        print(f"✅ Deleted product ID: {product_id}")
+        print(f"[OK] Deleted product ID: {product_id}")
     except NotFoundError:
-        print(f"ℹ️  Product {product_id} not found in index (already deleted)")
+        print(f"[INFO]  Product {product_id} not found in index (already deleted)")
 
 
 def update_sales_statistics(es: Elasticsearch):
     """Update sales statistics for all products"""
-    print("🔄 Updating sales statistics...")
+    print("[PROCESSING] Updating sales statistics...")
     
     conn = get_mysql_connection()
     try:
@@ -539,7 +539,7 @@ def update_sales_statistics(es: Elasticsearch):
         
         if actions:
             success, failed = helpers.bulk(es, actions, raise_on_error=False)
-            print(f"✅ Updated sales for {success} products")
+            print(f"[OK] Updated sales for {success} products")
             if failed:
                 print(f"⚠️  Failed: {len(failed)}")
         
@@ -552,7 +552,7 @@ def verify_index(es: Elasticsearch):
     try:
         # Get count
         count = es.count(index=ES_INDEX)['count']
-        print(f"\n📊 Index Statistics:")
+        print(f"\n[STATS] Index Statistics:")
         print(f"   Total documents: {count}")
         
         # Sample documents
@@ -565,14 +565,14 @@ def verify_index(es: Elasticsearch):
             }
         )
         
-        print(f"\n📋 Sample documents:")
+        print(f"\n[INFO] Sample documents:")
         for hit in result['hits']['hits']:
             src = hit['_source']
             print(f"   [{src['id']}] {src['name']}")
             print(f"       Shop: {src.get('shop_name')} | Price: {src.get('effective_price')} | Rating: {src.get('rating')} | Sold: {src.get('total_sold')}")
         
     except Exception as e:
-        print(f"❌ Verify failed: {e}")
+        print(f"[ERROR] Verify failed: {e}")
 
 
 def main():
@@ -590,10 +590,10 @@ def main():
     es = get_es_client()
     
     if not es.ping():
-        print("❌ Cannot connect to Elasticsearch")
+        print("Cannot connect to Elasticsearch")
         sys.exit(1)
     
-    print(f"✅ Connected to Elasticsearch at {ES_HOST}")
+    print(f"Connected to Elasticsearch at {ES_HOST}")
     
     # Handle commands
     if args.recreate_index:
@@ -619,7 +619,7 @@ def main():
     if not args.verify:
         verify_index(es)
     
-    print("\n🎉 Done!")
+    print("\n[DONE] Done!")
 
 
 if __name__ == "__main__":

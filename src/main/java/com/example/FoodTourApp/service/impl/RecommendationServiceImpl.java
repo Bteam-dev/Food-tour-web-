@@ -39,7 +39,7 @@ public class RecommendationServiceImpl implements RecommendationService {
     @PostConstruct
     public void loadPrecomputedRecs() {
         try {
-            var resource = new ClassPathResource("models/content/model_output/precomputed_recs.json");            Map<String, List<Integer>> raw = objectMapper.readValue(
+            var resource = new ClassPathResource("models/FoodRecommendSearchByBehavior/model_output/precomputed_recs.json");            Map<String, List<Integer>> raw = objectMapper.readValue(
                     resource.getInputStream(),
                     new TypeReference<>() {}
             );
