@@ -192,6 +192,12 @@
             <artifactId>langchain4j-ollama</artifactId>
             <version>0.36.2</version>
         </dependency>
+        <!-- Google Gemini API (free tier: 15 RPM, 1500 req/day) -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-google-ai-gemini</artifactId>
+            <version>0.36.2</version>
+        </dependency>
 
         <!-- Caffeine cache -->
         <dependency>

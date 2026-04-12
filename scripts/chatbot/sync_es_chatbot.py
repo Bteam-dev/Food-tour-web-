@@ -1,8 +1,10 @@
 import pymysql
 from elasticsearch import Elasticsearch, helpers
 from datetime import datetime
+from decimal import Decimal
 import json
-import requests
+import os
+from google import genai
 
 # ================== CONFIG ==================
 MYSQL_HOST = 'localhost'
@@ -13,20 +15,21 @@ MYSQL_DB = 'food_tour_app'
 ES_HOST = 'http://localhost:9200'
 ES_INDEX_PRODUCT = 'foodtour_products_chatbot'
 
-# Ollama embedding (giống Java)
-OLLAMA_URL = "http://localhost:11434/api/embeddings"
-EMBEDDING_MODEL = "nomic-embed-text"
+# Google Gemini Embedding API (free tier)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyAdYztJT2I_rPgKdBRbVOFtKTP3LdK2fd0")
+EMBEDDING_MODEL = "gemini-embedding-001"
 
-print("🔥 Đang kết nối Ollama embedding...")
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+print("Connecting to Google Embedding API...")
 
 def get_embedding(text):
     try:
-        resp = requests.post(OLLAMA_URL, json={"model": EMBEDDING_MODEL, "prompt": text})
-        resp.raise_for_status()
-        return resp.json()["embedding"]
+        result = client.models.embed_content(model=EMBEDDING_MODEL, contents=text)
+        return result.embeddings[0].values
     except Exception as e:
-        print(f"Lỗi embedding: {e}")
-        return [0.0] * 768
+        print(f"Embedding error: {e}")
+        return [0.0] * 3072
 
 # Kết nối
 def get_mysql_connection():
@@ -60,7 +63,7 @@ product_mapping = {
         "context_text": {"type": "text"},           # ← Quan trọng cho RAG
         "embedding": {
             "type": "dense_vector",
-            "dims": 768,
+            "dims": 3072,
             "index": True,
             "similarity": "cosine"
         }
@@ -89,48 +92,97 @@ def sync_products():
 
     actions = []
     for row in rows:
-        # Xử lý boolean & datetime
-        for field in ['is_available']:
-            if field in row and isinstance(row[field], bytes):
-                row[field] = bool(row[field])
+        # Convert Decimal to float, bytes to bool, datetime to string
         for key, value in row.items():
-            if isinstance(value, datetime):
+            if isinstance(value, Decimal):
+                row[key] = float(value)
+            elif isinstance(value, bytes):
+                row[key] = bool(value)
+            elif isinstance(value, datetime):
                 row[key] = value.isoformat()
+
+        # Parse JSON string fields
+        for field in ['tags', 'ingredients', 'nutrition_info']:
+            val = row.get(field)
+            if val and isinstance(val, str):
+                try:
+                    row[field] = json.loads(val)
+                except json.JSONDecodeError:
+                    pass
 
         # Tạo context_text theo đúng format system prompt
         price = row.get('discount_price') if row.get('discount_price') else row.get('price', 0)
+        rating = row.get('rating') or 0
+        tags = row.get('tags', '')
+        if isinstance(tags, list):
+            tags = ', '.join(tags)
+        ingredients = row.get('ingredients', '')
+        if isinstance(ingredients, list):
+            ingredients = ', '.join(ingredients)
+        nutrition_info = row.get('nutrition_info', '')
+        if isinstance(nutrition_info, list):
+            nutrition_info = ', '.join(nutrition_info)
+
         context_text = f"""===PRODUCT===
 Món: {row.get('name')}
 Quán: {row.get('shop_name', 'Không rõ')} (shopId: {row.get('shop_id')})
 Danh mục: {row.get('category_name', 'Không rõ')}
 Mô tả: {row.get('description', '')}
-Nguyên liệu: {row.get('ingredients', '')}
-Tags: {row.get('tags', 'không có')}
-Dinh dưỡng: {row.get('nutrition_info', 'không có')}
+Nguyên liệu: {ingredients}
+Tags: {tags or 'không có'}
+Dinh dưỡng: {nutrition_info or 'không có'}
 Thời gian chuẩn bị: {row.get('preparation_time', 0)} phút
 Giá: {price} VNĐ
-Rating: {row.get('rating', 0):.1f}/5.0 ({row.get('total_reviews', 0)} đánh giá)
+Rating: {rating:.1f}/5.0 ({row.get('total_reviews', 0)} đánh giá)
 ===END_PRODUCT==="""
-
-        row['context_text'] = context_text
 
         # Embedding rich text
         embedding = get_embedding(context_text)
-        row['embedding'] = embedding
+
+        # Chỉ đưa các field có trong ES mapping vào _source
+        doc = {
+            "id": row.get('id'),
+            "shop_id": row.get('shop_id'),
+            "category_id": row.get('category_id'),
+            "name": row.get('name'),
+            "description": row.get('description', ''),
+            "price": row.get('price', 0),
+            "discount_price": row.get('discount_price'),
+            "ingredients": ingredients,
+            "nutrition_info": nutrition_info,
+            "preparation_time": row.get('preparation_time', 0),
+            "is_available": bool(row.get('is_available', True)),
+            "rating": rating,
+            "total_reviews": row.get('total_reviews', 0),
+            "tags": row.get('tags') if isinstance(row.get('tags'), list) else [],
+            "shop_name": row.get('shop_name', ''),
+            "category_name": row.get('category_name', ''),
+            "context_text": context_text,
+            "embedding": embedding,
+        }
 
         actions.append({
             "_index": ES_INDEX_PRODUCT,
             "_id": str(row['id']),
-            "_source": row
+            "_source": doc
         })
 
     if actions:
-        helpers.bulk(es, actions)
-        print(f"✅ Synced {len(actions)} món ăn (có context_text + embedding)")
+        success, errors = helpers.bulk(es, actions, raise_on_error=False)
+        if errors:
+            print(f"❌ {len(errors)} document(s) failed:")
+            for err in errors[:5]:
+                print(json.dumps(err, indent=2, ensure_ascii=False))
+        else:
+            print(f"✅ Synced {success} món ăn (có context_text + embedding)")
     else:
         print("Không có món nào để sync")
 
 if __name__ == "__main__":
+    # Xóa index cũ và tạo lại để tránh mapping conflict
+    if es.indices.exists(index=ES_INDEX_PRODUCT):
+        es.indices.delete(index=ES_INDEX_PRODUCT)
+        print(f"🗑️ Đã xóa index cũ {ES_INDEX_PRODUCT}")
     create_index_if_not_exists(ES_INDEX_PRODUCT, product_mapping)
     sync_products()
     print("🎉 Sync ES hoàn tất! Chạy file này mỗi khi cần update full data.")

@@ -1,28 +1,27 @@
 package com.example.FoodTourApp.config;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
-
 @Configuration
 public class AiConfig {
 
-    @Value("${ollama.base-url}")
-    private String ollamaBaseUrl;
+    @Value("${gemini.api-key}")
+    private String geminiApiKey;
 
-    @Value("${ollama.chat-model}")
-    private String chatModelName;
+    @Value("${gemini.model:gemini-2.0-flash}")
+    private String geminiModel;
 
     @Bean
     public ChatLanguageModel chatModel() {
-        return OllamaChatModel.builder()
-                .baseUrl(ollamaBaseUrl)
-                .modelName(chatModelName)
-                .timeout(Duration.ofSeconds(120))
+        return GoogleAiGeminiChatModel.builder()
+                .apiKey(geminiApiKey)
+                .modelName(geminiModel)
+                .temperature(0.7)
+                .maxOutputTokens(1024)
                 .build();
     }
 }

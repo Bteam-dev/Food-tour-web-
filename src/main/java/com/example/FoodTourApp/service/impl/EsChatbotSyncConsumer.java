@@ -14,7 +14,7 @@ import com.example.FoodTourApp.event.ProductSyncEvent;
 import com.example.FoodTourApp.repository.ProductRepository;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -61,33 +61,32 @@ public class EsChatbotSyncConsumer {
     
     @Value("${elasticsearch.host:localhost}")
     private String esHost;
-    
+
     @Value("${elasticsearch.port:9200}")
     private int esPort;
-    
+
     @Value("${elasticsearch.index:foodtour_products_chatbot}")
     private String chatbotIndex;
-    
-    @Value("${ollama.base-url:http://localhost:11434}")
-    private String ollamaBaseUrl;
-    
-    @Value("${ollama.embedding-model:nomic-embed-text}")
+
+    @Value("${gemini.api-key}")
+    private String geminiApiKey;
+
+    @Value("${gemini.embedding-model:gemini-embedding-001}")
     private String embeddingModelName;
-    
+
     private ElasticsearchClient esClient;
     private EmbeddingModel embeddingModel;
     private volatile boolean running = true;
-    
+
     @PostConstruct
     public void init() {
         try {
-            // Initialize Ollama embedding model
-            this.embeddingModel = OllamaEmbeddingModel.builder()
-                    .baseUrl(ollamaBaseUrl)
+            // Initialize Google AI embedding model
+            this.embeddingModel = GoogleAiEmbeddingModel.builder()
+                    .apiKey(geminiApiKey)
                     .modelName(embeddingModelName)
-                    .timeout(Duration.ofSeconds(60))
                     .build();
-            
+
             // Initialize ES client
             RestClient restClient = RestClient.builder(
                 new HttpHost(esHost, esPort, "http")
@@ -96,9 +95,9 @@ public class EsChatbotSyncConsumer {
                 restClient, new JacksonJsonpMapper()
             );
             this.esClient = new ElasticsearchClient(transport);
-            
-            log.info("EsChatbotSyncConsumer initialized - Queue: {}, Index: {}, Ollama: {}", 
-                    REDIS_QUEUE_KEY, chatbotIndex, ollamaBaseUrl);
+
+            log.info("EsChatbotSyncConsumer initialized - Queue: {}, Index: {}, Embedding: Google {}",
+                    REDIS_QUEUE_KEY, chatbotIndex, embeddingModelName);
         } catch (Exception e) {
             log.error("Failed to initialize EsChatbotSyncConsumer", e);
         }
@@ -306,7 +305,7 @@ public class EsChatbotSyncConsumer {
     }
     
     /**
-     * Generate embedding vector using Ollama (768 dimensions)
+     * Generate embedding vector using Google gemini-embedding-001 (3072 dimensions)
      */
     private float[] generateEmbedding(String text) {
         try {
@@ -316,8 +315,7 @@ public class EsChatbotSyncConsumer {
             return embedding.vector();
         } catch (Exception e) {
             log.error("Failed to generate embedding, using zero vector: {}", e.getMessage());
-            // Return zero vector as fallback (768 dims)
-            float[] zeroVector = new float[768];
+            float[] zeroVector = new float[3072];
             Arrays.fill(zeroVector, 0.0f);
             return zeroVector;
         }
