@@ -6,6 +6,7 @@ import com.example.FoodTourApp.service.FoodDetectionService;
 import com.example.FoodTourApp.service.ProductSearchService;
 import com.example.FoodTourApp.service.ProductService;
 import com.example.FoodTourApp.service.RealTimeRecommendationService;
+import com.example.FoodTourApp.service.SearchSuggestionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -28,6 +29,7 @@ public class PublicProductController {
     private final ProductSearchService productSearchService;
     private final FoodDetectionService foodDetectionService;
     private final RealTimeRecommendationService recommendationService;
+    private final SearchSuggestionService searchSuggestionService;
 
     // Mapping từ class name của YOLO sang các từ khóa tìm kiếm tiếng Việt
     private static final Map<String, List<String>> FOOD_CLASS_KEYWORDS = new HashMap<>();
@@ -43,12 +45,14 @@ public class PublicProductController {
             ProductService productService,
             ProductSearchService productSearchService,
             FoodDetectionService foodDetectionService,
-            RealTimeRecommendationService recommendationService
+            RealTimeRecommendationService recommendationService,
+            SearchSuggestionService searchSuggestionService
     ) {
         this.productService = productService;
         this.productSearchService = productSearchService;
         this.foodDetectionService = foodDetectionService;
         this.recommendationService = recommendationService;
+        this.searchSuggestionService = searchSuggestionService;
     }
 
     /**
@@ -86,11 +90,16 @@ public class PublicProductController {
 
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
 
+            // Log search analytics (async - không ảnh hưởng response time)
+            if (keyword != null && !keyword.isBlank()) {
+                searchSuggestionService.logSearch(null, keyword, (int) products.getTotalElements(), null);
+            }
+
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("data", pageResponse);
             return ResponseEntity.ok(result);
-            
+
         } catch (Exception e) {
             logger.error("ES Search error: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();

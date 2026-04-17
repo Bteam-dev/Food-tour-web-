@@ -8,7 +8,6 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
 import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
 import co.elastic.clients.elasticsearch._types.query_dsl.*;
-import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
@@ -28,8 +27,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import java.util.concurrent.TimeUnit;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -43,17 +46,26 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * Elasticsearch Search Service Implementation.
- * 
- * - SYNC: Gọi Python script (scripts/search/sync_es_search.py)
- * - SEARCH: Dùng ES Java client trực tiếp
+ * Elasticsearch Hybrid Search Service.
+ *
+ * SEARCH MODES:
+ * 1. BM25 only (khi PhoBERT server offline) - full-text + fuzzy
+ * 2. Hybrid BM25 + PhoBERT cosine (khi PhoBERT server online) - semantic understanding
+ *
+ * PhoBERT chạy trên Google Colab, expose qua Cloudflare tunnel.
+ * Hiểu tiếng Việt, sai chính tả, không dấu (pho → phở, poh → phở)
  */
 @Service
 public class ProductSearchServiceImpl implements ProductSearchService {
 
     private static final Logger log = LoggerFactory.getLogger(ProductSearchServiceImpl.class);
 
+    private static final String EMB_CACHE_PREFIX = "phobert:emb:";
+    private static final int EMB_CACHE_TTL_MINUTES = 30;
+
     private final ProductVariantRepository variantRepository;
+    private final RestTemplate restTemplate;
+    private final RedisTemplate<String, Object> redisObjectTemplate;
     private ElasticsearchClient esClient;
 
     @Value("${elasticsearch.host:localhost}")
@@ -68,8 +80,27 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     @Value("${app.python-search-sync-script:scripts/search/sync_es_search.py}")
     private String pythonSyncScript;
 
-    public ProductSearchServiceImpl(ProductVariantRepository variantRepository) {
+    @Value("${phobert.server-url:}")
+    private String phobertServerUrl;
+
+    @Value("${phobert.enabled:false}")
+    private boolean phobertEnabled;
+
+    /** Weight cho BM25 score trong hybrid search (0.0 - 1.0) */
+    @Value("${search.hybrid.bm25-weight:0.3}")
+    private double bm25Weight;
+
+    /** Weight cho PhoBERT cosine score trong hybrid search (0.0 - 1.0) */
+    @Value("${search.hybrid.semantic-weight:0.7}")
+    private double semanticWeight;
+
+    public ProductSearchServiceImpl(
+            ProductVariantRepository variantRepository,
+            @Qualifier("redisObjectTemplate") RedisTemplate<String, Object> redisObjectTemplate
+    ) {
         this.variantRepository = variantRepository;
+        this.redisObjectTemplate = redisObjectTemplate;
+        this.restTemplate = new RestTemplate();
     }
 
     @PostConstruct
@@ -79,7 +110,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
             this.esClient = new ElasticsearchClient(transport);
 
-            log.info("ProductSearchService initialized - ES index: {}", searchIndex);
+            log.info("ProductSearchService initialized - index: {}, PhoBERT: {}",
+                    searchIndex, phobertEnabled ? phobertServerUrl : "disabled");
         } catch (Exception e) {
             log.error("Failed to initialize ProductSearchService", e);
         }
@@ -152,7 +184,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SEARCH OPERATIONS (ES Java client)
+    // HYBRID SEARCH (BM25 + PhoBERT cosine)
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
@@ -168,34 +200,16 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         checkElasticsearchAvailable();
 
         try {
-            // Build query
             BoolQuery.Builder boolQuery = new BoolQuery.Builder();
 
             // Base filter: chỉ sản phẩm available
             boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
 
-            // Keyword search (full-text)
+            // Keyword search
             if (keyword != null && !keyword.isBlank()) {
-                String normalizedKeyword = normalizeVietnamese(keyword.trim());
-                
-                boolQuery.must(MultiMatchQuery.of(m -> m
-                        .query(keyword.trim())
-                        .fields(
-                                "name^3",
-                                "name_normalized^3",
-                                "description^1.5",
-                                "description_normalized^1.5",
-                                "ingredients^1",
-                                "tags^2",
-                                "category_name^1.5",
-                                "shop_name^1",
-                                "search_text^1"
-                        )
-                        .type(TextQueryType.BestFields)
-                        .fuzziness("AUTO")
-                        .prefixLength(2)
-                        .minimumShouldMatch("70%")
-                )._toQuery());
+                String trimmed = keyword.trim();
+                Query keywordQuery = buildHybridKeywordQuery(trimmed);
+                boolQuery.must(keywordQuery);
             }
 
             // Filter by city
@@ -228,8 +242,12 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 )._toQuery());
             }
 
-            // Build sort
-            List<SortOptions> sortOptions = buildSortOptions(sortBy);
+            // Build sort: relevance score first when keyword present
+            List<SortOptions> sortOptions = new ArrayList<>();
+            if (keyword != null && !keyword.isBlank()) {
+                sortOptions.add(SortOptions.of(so -> so.score(sc -> sc.order(SortOrder.Desc))));
+            }
+            sortOptions.addAll(buildSortOptions(sortBy));
 
             // Execute search
             SearchResponse<Map> response = esClient.search(s -> s
@@ -242,7 +260,6 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                     Map.class
             );
 
-            // Convert results
             List<ProductResponseDTO> results = response.hits().hits().stream()
                     .map(Hit::source)
                     .filter(Objects::nonNull)
@@ -251,8 +268,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
 
             long totalHits = response.hits().total() != null ? response.hits().total().value() : 0;
 
-            log.debug("ES Search: keyword='{}', city='{}', categoryId={}, results={}, total={}",
-                    keyword, city, categoryId, results.size(), totalHits);
+            log.debug("Hybrid Search: keyword='{}', city='{}', categoryId={}, results={}, total={}, phobertUsed={}",
+                    keyword, city, categoryId, results.size(), totalHits, phobertEnabled);
 
             return new PageImpl<>(results, pageable, totalHits);
 
@@ -264,6 +281,114 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         }
     }
 
+    /**
+     * Build hybrid keyword query:
+     * - Nếu PhoBERT enabled + server online → BM25 + PhoBERT cosine (script_score)
+     * - Nếu PhoBERT offline → BM25 only (multi_match + fuzzy)
+     */
+    private Query buildHybridKeywordQuery(String keyword) {
+        // BM25 component: multi-match trên text fields (bỏ shop_name và description)
+        Query bm25Query = MultiMatchQuery.of(m -> m
+                .query(keyword)
+                .fields(
+                        "name^3",
+                        "name_normalized^3",
+                        "ingredients^1",
+                        "tags^2",
+                        "category_name^1.5",
+                        "search_text^1"
+                )
+                .type(TextQueryType.BestFields)
+                .fuzziness("AUTO")
+                .prefixLength(1)
+                .minimumShouldMatch("70%")
+        )._toQuery();
+
+        // Try PhoBERT semantic component
+        if (phobertEnabled && phobertServerUrl != null && !phobertServerUrl.isBlank()) {
+            List<Double> queryEmbedding = getPhoBertEmbedding(keyword);
+            if (queryEmbedding != null && !queryEmbedding.isEmpty()) {
+                // Hybrid BM25 + cosine similarity với null-safe script.
+                // Doc không có embedding → fallback về BM25 score (tránh script error).
+                return FunctionScoreQuery.of(fs -> fs
+                        .query(bm25Query)
+                        .boostMode(FunctionBoostMode.Replace)
+                        .functions(FunctionScore.of(fn -> fn
+                                .scriptScore(ScriptScoreFunction.of(ssf -> ssf
+                                        .script(sc -> sc.inline(i -> i
+                                                .source(
+                                                    "double bm25 = _score; " +
+                                                    "if (doc['embedding'].size() == 0) { return bm25; } " +
+                                                    "double semantic = cosineSimilarity(params.query_vector, 'embedding') + 1.0; " +
+                                                    "return params.bm25_w * bm25 + params.sem_w * semantic;"
+                                                )
+                                                .params("query_vector", JsonData.of(queryEmbedding))
+                                                .params("bm25_w", JsonData.of(bm25Weight))
+                                                .params("sem_w", JsonData.of(semanticWeight))
+                                        ))
+                                ))
+                        ))
+                )._toQuery();
+            }
+        }
+
+        // Fallback: BM25 only
+        return bm25Query;
+    }
+
+    /**
+     * Gọi PhoBERT server (Colab + Cloudflare tunnel) để lấy query embedding.
+     * POST /embed { "text": "phở bò" } → { "embedding": [0.1, -0.3, ...] }
+     *
+     * Có Redis cache (TTL 30 phút) để tránh gọi PhoBERT lặp lại với cùng query.
+     */
+    private List<Double> getPhoBertEmbedding(String text) {
+        String cacheKey = EMB_CACHE_PREFIX + normalizeVietnamese(text);
+
+        // 1. Check Redis cache
+        try {
+            @SuppressWarnings("unchecked")
+            List<Double> cached = (List<Double>) redisObjectTemplate.opsForValue().get(cacheKey);
+            if (cached != null && !cached.isEmpty()) {
+                log.debug("PhoBERT embedding cache hit for '{}'", text);
+                return cached;
+            }
+        } catch (Exception e) {
+            log.debug("Redis embedding cache miss for '{}'", text);
+        }
+
+        // 2. Gọi PhoBERT server
+        try {
+            Map<String, String> request = Map.of("text", text);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = restTemplate.postForObject(
+                    phobertServerUrl + "/embed", request, Map.class
+            );
+
+            if (response != null && response.containsKey("embedding")) {
+                @SuppressWarnings("unchecked")
+                List<Double> embedding = (List<Double>) response.get("embedding");
+
+                // Cache lại để dùng cho các request giống nhau
+                try {
+                    redisObjectTemplate.opsForValue().set(cacheKey, embedding,
+                            EMB_CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+                } catch (Exception ignored) {}
+
+                return embedding;
+            }
+        } catch (Exception e) {
+            log.warn("PhoBERT server unreachable for '{}': {} - falling back to BM25 only",
+                    text, e.getMessage());
+        }
+        return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // OTHER SEARCH OPERATIONS
+    // ═══════════════════════════════════════════════════════════════════════════
+
     @Override
     public Page<ProductResponseDTO> searchProductsByShop(
             Integer shopId,
@@ -272,7 +397,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             Pageable pageable
     ) {
         checkElasticsearchAvailable();
-        
+
         try {
             BoolQuery.Builder boolQuery = new BoolQuery.Builder();
             boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
@@ -319,26 +444,48 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     @Override
     public List<Map<String, Object>> suggestProducts(String prefix, int limit) {
         checkElasticsearchAvailable();
-        
+
         if (prefix == null || prefix.isBlank()) {
             return List.of();
         }
-        
+
         try {
+            // Hybrid suggest: autocomplete + PhoBERT semantic
+            BoolQuery.Builder boolQuery = new BoolQuery.Builder();
+
+            // Autocomplete match (edge_ngram)
+            boolQuery.should(MatchQuery.of(m -> m
+                    .field("name.autocomplete")
+                    .query(prefix.trim())
+            )._toQuery());
+
+            // Normalized match (handles no-diacritics input)
+            boolQuery.should(MatchQuery.of(m -> m
+                    .field("name_normalized")
+                    .query(prefix.trim())
+                    .fuzziness("AUTO")
+            )._toQuery());
+
+            // PhoBERT semantic boost (if available)
+            if (phobertEnabled) {
+                List<Double> emb = getPhoBertEmbedding(prefix.trim());
+                if (emb != null && !emb.isEmpty()) {
+                    boolQuery.should(ScriptScoreQuery.of(ss -> ss
+                            .query(q -> q.matchAll(m -> m))
+                            .script(sc -> sc.inline(i -> i
+                                    .source("cosineSimilarity(params.query_vector, 'embedding') + 1.0")
+                                    .params("query_vector", JsonData.of(emb))
+                            ))
+                    )._toQuery());
+                }
+            }
+
+            boolQuery.minimumShouldMatch("1");
+            boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
+
             SearchResponse<Map> response = esClient.search(s -> s
                             .index(searchIndex)
-                            .query(q -> q
-                                    .bool(b -> b
-                                            .must(MatchQuery.of(m -> m
-                                                    .field("name.autocomplete")
-                                                    .query(prefix.trim())
-                                            )._toQuery())
-                                            .filter(TermQuery.of(t -> t
-                                                    .field("is_available")
-                                                    .value(true)
-                                            )._toQuery())
-                                    )
-                            )
+                            .query(boolQuery.build()._toQuery())
                             .size(limit)
                             .source(sc -> sc.filter(f -> f.includes(
                                     "id", "name", "image_urls", "effective_price", "rating"
@@ -355,13 +502,12 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                         suggestion.put("name", source.get("name"));
                         suggestion.put("price", source.get("effective_price"));
                         suggestion.put("rating", source.get("rating"));
-                        
-                        // Get first image URL
+
                         Object imageUrls = source.get("image_urls");
                         if (imageUrls instanceof List && !((List<?>) imageUrls).isEmpty()) {
                             suggestion.put("imageUrl", ((List<?>) imageUrls).get(0));
                         }
-                        
+
                         return suggestion;
                     })
                     .collect(Collectors.toList());
@@ -377,9 +523,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     @Override
     public List<ProductResponseDTO> findSimilarProducts(Integer productId, int limit) {
         checkElasticsearchAvailable();
-        
+
         try {
-            // First, get the source product
             SearchResponse<Map> getResponse = esClient.search(s -> s
                             .index(searchIndex)
                             .query(q -> q.term(t -> t.field("id").value(productId)))
@@ -400,15 +545,12 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             @SuppressWarnings("unchecked")
             List<String> tags = (List<String>) source.get("tags");
 
-            // Find similar products
             BoolQuery.Builder boolQuery = new BoolQuery.Builder();
-            
-            // Same category
+
             if (categoryId != null) {
                 boolQuery.must(TermQuery.of(t -> t.field("category_id").value(categoryId))._toQuery());
             }
-            
-            // Similar tags (boost)
+
             if (tags != null && !tags.isEmpty()) {
                 boolQuery.should(TermsQuery.of(t -> t
                         .field("tags")
@@ -418,10 +560,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 )._toQuery());
             }
 
-            // Exclude original product
             boolQuery.mustNot(TermQuery.of(t -> t.field("id").value(productId))._toQuery());
-            
-            // Must be available
             boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
 
             SearchResponse<Map> response = esClient.search(s -> s
@@ -450,7 +589,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     @Override
     public List<String> getAvailableCities() {
         checkElasticsearchAvailable();
-        
+
         try {
             SearchResponse<Void> response = esClient.search(s -> s
                             .index(searchIndex)
@@ -478,7 +617,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     @Override
     public PriceRangeStats getPriceRangeStats(String city, Integer categoryId) {
         checkElasticsearchAvailable();
-        
+
         try {
             BoolQuery.Builder boolQuery = new BoolQuery.Builder();
             boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
@@ -526,10 +665,6 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         }
     }
 
-    /**
-     * Check và throw exception nếu ES không available.
-     * Gọi ở đầu mỗi search method.
-     */
     private void checkElasticsearchAvailable() {
         if (!isElasticsearchAvailable()) {
             throw new RuntimeException("Elasticsearch is not available. Please ensure Elasticsearch is running on " + esHost + ":" + esPort);
@@ -588,9 +723,6 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         return sortOptions;
     }
 
-    /**
-     * Map ES document to ProductResponseDTO
-     */
     @SuppressWarnings("unchecked")
     private ProductResponseDTO mapToProductResponseDTO(Map<String, Object> source) {
         ProductResponseDTO dto = new ProductResponseDTO();
@@ -598,7 +730,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         dto.setId(getInteger(source, "id"));
         dto.setShopId(getInteger(source, "shop_id"));
         dto.setShopName(getString(source, "shop_name"));
-        dto.setShopIsOpen(true); // TODO: Calculate from opening hours
+        dto.setShopIsOpen(true);
         dto.setCategoryId(getInteger(source, "category_id"));
         dto.setCategoryName(getString(source, "category_name"));
         dto.setName(getString(source, "name"));
@@ -613,17 +745,14 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         dto.setRating(getDouble(source, "rating"));
         dto.setTotalReviews(getLong(source, "total_reviews"));
 
-        // Parse arrays
         dto.setImageUrls(getStringList(source, "image_urls"));
         dto.setIngredients(getStringList(source, "ingredients_list"));
         dto.setNutritionInfo(getStringList(source, "nutrition_info"));
         dto.setTags(getStringList(source, "tags"));
 
-        // Parse timestamps
         dto.setCreatedAt(parseDateTime(getString(source, "created_at")));
         dto.setUpdatedAt(parseDateTime(getString(source, "updated_at")));
 
-        // Load variants from database (ES doesn't store variants)
         if (dto.getId() != null) {
             try {
                 List<ProductVariant> variants = variantRepository.findActiveByProductId(dto.getId());
@@ -650,7 +779,6 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         return dto;
     }
 
-    // Helper methods for safe type conversion
     private Integer getInteger(Map<String, Object> source, String key) {
         Object value = source.get(key);
         if (value == null) return null;

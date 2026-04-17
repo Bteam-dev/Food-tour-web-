@@ -21,7 +21,7 @@ ChatbotMessageServiceImpl
     |       |-- LangChain4j AiServices goi:
     |       |       |
     |       |       |-- [1] ContentRetriever (RAG)
-    |       |       |       |-- Embed query bang Google text-embedding-004
+    |       |       |       |-- Embed query bang gemini-embedding-001 (3072 dims)
     |       |       |       |-- Hybrid search tren Elasticsearch:
     |       |       |       |     BM25 text match (30%) + cosine similarity (70%)
     |       |       |       |-- Loc theo min-score, tra ve top 6 san pham
@@ -46,14 +46,14 @@ Response: { botReply, suggestedProducts[], navigationUrls[] }
 
 | Component | Technology | Vai tro |
 |-----------|-----------|---------|
-| LLM (Chat) | Google Gemini 2.0 Flash | Sinh cau tra loi tu nhien bang tieng Viet |
-| Embedding | Google text-embedding-004 | Chuyen text thanh vector 768 chieu |
+| LLM (Chat) | Google Gemini 2.5 Flash | Sinh cau tra loi tu nhien bang tieng Viet |
+| Embedding | gemini-embedding-001 | Chuyen text thanh vector 3072 chieu |
 | Vector Search | Elasticsearch 8.11.1 | Luu tru + tim kiem vector + full-text |
 | RAG Framework | LangChain4j 0.36.2 | Ket noi LLM + retriever + memory |
 | Conversation Memory | Caffeine Cache | Luu lich su hoi thoai trong RAM (30 phut) |
 | Event Queue | Redis | Dong bo san pham vao ES theo thoi gian thuc |
 | Database | MySQL 8.0 | Luu hoi thoai, tin nhan, san pham |
-| Sync Script | Python + google-generativeai | Full reindex Elasticsearch |
+| Sync Script | Python + google-generativeai | Tao ES index mapping lan dau tien |
 
 ---
 
@@ -179,7 +179,7 @@ rag.min-score=1.1          # Nguong diem toi thieu (hybrid score)
 | `total_reviews` | long | Tong so luot danh gia |
 | `is_available` | boolean | Con ban khong |
 | `context_text` | text | Noi dung co cau truc cho RAG |
-| `embedding` | dense_vector (768 dims, cosine) | Vector embedding |
+| `embedding` | dense_vector (3072 dims, cosine) | Vector embedding |
 
 ### Context text format (truyen vao LLM)
 
@@ -215,14 +215,18 @@ EsChatbotSyncConsumer (chay background, poll moi 5 giay)
     |-- Pop batch 50 events
     |-- Deduplicate theo productId
     |-- Fetch san pham tu DB
-    |-- Generate embedding (Google text-embedding-004)
+    |-- Generate embedding (gemini-embedding-001, 3072 dims)
     |-- Build context_text
     |-- Bulk index vao Elasticsearch
 ```
 
 ### Thu cong (Full reindex)
 
-Chay khi: deploy lan dau, doi embedding model, can rebuild toan bo index.
+Co 2 truong hop can phan biet:
+
+#### Truong hop 1: Lan dau tien deploy (index chua co) hoac mapping bi hong
+
+Phai chay Python script de tao index voi mapping dung (dense_vector 3072 dims):
 
 ```bash
 # Cai thu vien
@@ -231,16 +235,28 @@ pip install pymysql elasticsearch google-generativeai
 # Set API key
 export GEMINI_API_KEY=your_key_here
 
-# Chay sync
+# Chay script: xoa index cu, tao lai mapping, sync toan bo data
 python scripts/chatbot/sync_es_chatbot.py
 ```
 
 Script se:
-1. Tao index voi mapping neu chua co
-2. Fetch toan bo san pham dang ban tu MySQL
-3. Tao context_text cho tung san pham
-4. Generate embedding 768 chieu qua Google API
+1. Xoa index cu (neu co) de tranh mapping conflict
+2. Tao index voi mapping chinh xac: dense_vector 3072 dims + cosine similarity
+3. Fetch toan bo san pham dang ban tu MySQL
+4. Tao context_text + generate embedding 3072 chieu qua gemini-embedding-001
 5. Bulk index vao Elasticsearch
+
+#### Truong hop 2: Index da co, chi can resync lai data (sau khi sua code logic, fix data sai)
+
+Dung Admin API — KHONG can chay Python script:
+
+```bash
+# Yeu cau JWT token ADMIN role
+curl -X POST http://localhost:8080/api/admin/vector/resync \
+  -H "Authorization: Bearer {admin_token}"
+```
+
+API se push tat ca product IDs vao Redis queue → EsChatbotSyncConsumer xu ly async (embedding + bulk index). Ket qua xuat hien trong logs sau ~10-20 giay.
 
 ---
 
@@ -321,8 +337,8 @@ San pham thay doi → push event vao Redis → consumer xu ly batch 50 events mo
 ```properties
 # Google Gemini API (free: 15 RPM, 1500 req/ngay)
 gemini.api-key=${GEMINI_API_KEY}
-gemini.model=gemini-2.0-flash
-gemini.embedding-model=text-embedding-004
+gemini.model=gemini-2.5-flash
+gemini.embedding-model=gemini-embedding-001
 
 # Elasticsearch
 elasticsearch.host=localhost
@@ -396,10 +412,11 @@ scripts/chatbot/
 
 | Van de | Nguyen nhan | Giai phap |
 |--------|------------|-----------|
-| Bot tra loi "app chua co du lieu" | ES index rong hoac embedding model khac | Chay lai `sync_es_chatbot.py` |
+| Bot tra loi "app chua co du lieu" | ES index rong | Chay `sync_es_chatbot.py` (lan dau) hoac `POST /api/admin/vector/resync` |
 | Bot tra loi cham | Gemini API latency | Binh thuong ~1-3s, kiem tra mang |
 | Loi 429 (rate limit) | Vuot 15 RPM free tier | Doi 1 phut hoac nang cap billing |
 | Bot bja thong tin | min-score qua thap, CONTEXT khong lien quan | Tang `rag.min-score` |
 | Tim khong ra mon | min-score qua cao | Giam `rag.min-score` |
-| Embedding dimension mismatch | Doi model ma chua rebuild index | Xoa index, chay lai sync script |
+| Embedding dimension mismatch | Doi model ma chua rebuild index | Chay `sync_es_chatbot.py` (xoa index + tao lai mapping) |
 | ES connection refused | Elasticsearch chua chay | `docker-compose up -d elasticsearch` |
+| Resync khong co tac dung | Index mapping sai (khong co dense_vector) | Chay `sync_es_chatbot.py` de tao lai index |

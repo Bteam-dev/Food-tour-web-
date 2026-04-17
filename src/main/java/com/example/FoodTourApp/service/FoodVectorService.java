@@ -12,12 +12,9 @@ public interface FoodVectorService {
     List<Integer> retrieveProductIds(String query);
 
     /**
-     * Sync một món ăn cụ thể khi có thay đổi (thêm/sửa/xóa)
-     */
-    void syncProductToEs(Integer productId);
-
-    /**
-     * Full sync toàn bộ món ăn (dùng cho admin hoặc khi cần reset)
+     * Full sync toàn bộ món ăn vào ES chatbot index.
+     * Push tất cả product IDs vào Redis queue → EsChatbotSyncConsumer xử lý async.
+     * Dùng khi: sửa code logic, fix index corrupt, lần đầu deploy.
      */
     void fullSyncToEs();
 }

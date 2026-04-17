@@ -44,12 +44,3 @@ services:
       memlock: -1
       nofile: 65536
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: foodtour_ollama
-    restart: always
-    ports:
-      - "11434:11434"
-    volumes:
-      - ../Ollama_data:/root/.ollama
-    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull nomic-embed-text && ollama pull qwen2.5:1.5b && wait"]

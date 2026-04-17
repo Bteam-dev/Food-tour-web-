@@ -1,6 +1,8 @@
 package com.example.FoodTourApp.service.impl;
 
 import co.elastic.clients.transport.rest_client.RestClientTransport;
+import com.example.FoodTourApp.repository.ProductRepository;
+import com.example.FoodTourApp.service.EsChatbotSyncProducer;
 import com.example.FoodTourApp.service.FoodVectorService;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
@@ -18,14 +20,11 @@ import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.io.StringReader;
-import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -42,6 +41,12 @@ public class FoodVectorServiceImpl implements FoodVectorService {
      * ThreadLocal đảm bảo thread-safe giữa các request đồng thời
      */
     private final ThreadLocal<List<Integer>> lastRetrievedProductIds = new ThreadLocal<>();
+
+    @Autowired
+    private ProductRepository productRepository;
+
+    @Autowired
+    private EsChatbotSyncProducer chatbotSyncProducer;
 
     private EmbeddingModel embeddingModel;
     private ElasticsearchClient esClient;
@@ -66,9 +71,6 @@ public class FoodVectorServiceImpl implements FoodVectorService {
 
     @Value("${rag.min-score:0.55}")
     private double minScore;
-
-    @Value("${app.python-sync-script:scripts/sync_es_chatbot.py}")
-    private String pythonSyncScriptPath;
 
     private ContentRetriever contentRetriever;
 
@@ -166,39 +168,28 @@ public class FoodVectorServiceImpl implements FoodVectorService {
         }
     }
 
-    @Override
-    public void syncProductToEs(Integer productId) {
-        executePython("--product-id", String.valueOf(productId));
-    }
-
+    /**
+     * Full resync: push tất cả product IDs vào Redis queue.
+     * EsChatbotSyncConsumer sẽ xử lý async: generate Gemini embedding + bulk index vào ES.
+     * Quá trình không blocking - Admin có thể kiểm tra progress qua server logs.
+     */
     @Override
     public void fullSyncToEs() {
-        executePython("--full", null);
-    }
-
-    private void executePython(String mode, String param) {
         try {
-            List<String> command = new ArrayList<>();
-            command.add("python");
-            command.add(pythonSyncScriptPath);
-            command.add(mode);
-            if (param != null) command.add(param);
+            List<Integer> allProductIds = productRepository.findAll()
+                    .stream()
+                    .map(p -> p.getId())
+                    .toList();
 
-            ProcessBuilder pb = new ProcessBuilder(command);
-            pb.directory(Paths.get(".").toAbsolutePath().toFile());
-            Process process = pb.start();
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    log.info("[Python Sync] {}", line);
-                }
+            for (Integer productId : allProductIds) {
+                chatbotSyncProducer.pushIndexEvent(productId);
             }
 
-            int exitCode = process.waitFor();
-            log.info("Python sync {} completed with exit code: {}", mode, exitCode);
+            log.info("Full chatbot resync triggered: pushed {} product IDs to queue. " +
+                     "EsChatbotSyncConsumer will process in ~5s batches.", allProductIds.size());
         } catch (Exception e) {
-            log.error("Failed to execute Python sync script", e);
+            log.error("Failed to trigger full chatbot resync", e);
+            throw new RuntimeException("Full resync failed: " + e.getMessage(), e);
         }
     }
 
