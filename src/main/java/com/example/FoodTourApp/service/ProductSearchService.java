@@ -40,6 +40,16 @@ public interface ProductSearchService {
      * Internally calls: python sync_es_search.py --full
      */
     void fullSyncToEs();
+
+    /**
+     * Cập nhật trạng thái mở/đóng cửa của shop trong ES bằng update_by_query.
+     * Được gọi bởi ShopOpenStatusScheduler mỗi 60 giây.
+     * Chỉ update các shop có trạng thái thay đổi → hiệu quả, không cần run script tay.
+     *
+     * @param shopId ID của shop cần cập nhật
+     * @param isOpen trạng thái mới (true = đang mở, false = đã đóng)
+     */
+    void updateShopOpenStatusInEs(Integer shopId, boolean isOpen);
     
     /**
      * Recreate index and sync all (for schema changes).
@@ -67,16 +77,19 @@ public interface ProductSearchService {
      * @param minPrice   Giá tối thiểu (effective_price)
      * @param maxPrice   Giá tối đa (effective_price)
      * @param sortBy     Sắp xếp: newest, rating_desc, rating_asc, price_asc, price_desc, best_selling
+     * @param shopOpen   null = không filter; true = chỉ shop đang mở; false = chỉ shop đang đóng
      * @param pageable   Phân trang
      * @return Page<ProductResponseDTO> - Đã convert sang DTO để controller dùng trực tiếp
      */
     Page<ProductResponseDTO> searchProducts(
             String keyword,
             String city,
+            String district,
             Integer categoryId,
             BigDecimal minPrice,
             BigDecimal maxPrice,
             String sortBy,
+            Boolean shopOpen,
             Pageable pageable
     );
     
@@ -106,6 +119,14 @@ public interface ProductSearchService {
      * Lấy danh sách thành phố có sản phẩm (cho filter dropdown).
      */
     List<String> getAvailableCities();
+
+    /**
+     * Lấy danh sách quận/huyện trong một thành phố (cho filter dropdown quận).
+     * Chỉ trả về quận có sản phẩm available.
+     *
+     * @param city Tên thành phố (phải match chính xác với giá trị trong ES index)
+     */
+    List<String> getAvailableDistricts(String city);
     
     /**
      * Lấy thống kê giá (min, max, avg) - cho price range slider.

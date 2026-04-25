@@ -25,6 +25,9 @@ public interface ShopRepository extends JpaRepository<Shop, Integer> {
     // Chỉ shop đã verified VÀ đang active mới hiện ra public
     Page<Shop> findByIsVerifiedTrueAndIsActiveTrue(Pageable pageable);
 
+    // Dùng cho scheduler kiểm tra open/close status (không cần phân trang)
+    List<Shop> findByIsVerifiedTrueAndIsActiveTrue();
+
     // Admin: tất cả shop (kể cả chưa verified)
     Page<Shop> findByIsActiveTrue(Pageable pageable);
 

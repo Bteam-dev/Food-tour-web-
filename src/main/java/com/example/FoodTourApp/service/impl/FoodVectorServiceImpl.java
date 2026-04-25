@@ -131,7 +131,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                           "should": [
                             { "multi_match": {
                                 "query": "%s",
-                                "fields": ["name^3", "description", "tags", "ingredients", "category_name^2", "shop_name"],
+                                "fields": ["name^3", "description", "tags", "ingredients", "category_name^2", "shop_name", "shop_district^2", "shop_city^2", "shop_ward"],
                                 "type": "best_fields",
                                 "minimum_should_match": "30%%"
                             }},
@@ -227,7 +227,7 @@ public class FoodVectorServiceImpl implements FoodVectorService {
                           "should": [
                             { "multi_match": {
                                 "query": "%s",
-                                "fields": ["name^3", "description", "tags", "ingredients", "category_name^2", "shop_name"],
+                                "fields": ["name^3", "description", "tags", "ingredients", "category_name^2", "shop_name", "shop_district^2", "shop_city^2", "shop_ward"],
                                 "type": "best_fields",
                                 "minimum_should_match": "30%%"
                             }},

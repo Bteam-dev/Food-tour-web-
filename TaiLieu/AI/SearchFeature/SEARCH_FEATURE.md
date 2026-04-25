@@ -113,17 +113,41 @@ Log khi guest click product tu ket qua search.
 }
 ```
 
-#### GET `/api/public/products?keyword=pho`
+#### GET `/api/public/products`
 
-Main search (da upgrade hybrid). Khi PhoBERT server online:
-- BM25 full-text + PhoBERT cosine similarity
-- Hieu tieng Viet, sai chinh ta, khong dau
+Main search + filter. Query params:
 
-Khi PhoBERT offline: fallback BM25 only (van hoat dong binh thuong).
+| Param | Loại | Mô tả |
+|-------|------|-------|
+| `keyword` | string | Từ khóa tìm kiếm (hybrid BM25 + PhoBERT) |
+| `city` | string | Lọc theo thành phố (vd: "Hồ Chí Minh") |
+| `district` | string | Lọc theo quận/huyện (vd: "Quận 1") — chỉ dùng khi đã chọn city |
+| `categoryId` | int | Lọc theo danh mục |
+| `sortBy` | string | `rating`, `price_asc`, `price_desc`, `newest`, `best_selling` |
+| `minPrice` | long | Giá tối thiểu (VNĐ) |
+| `maxPrice` | long | Giá tối đa (VNĐ) |
+| `page` | int | Trang (default 0) |
+| `size` | int | Số kết quả/trang (default 10) |
+
+Khi PhoBERT online: BM25 full-text + PhoBERT cosine similarity (hiểu sai chính tả, không dấu).
+Khi PhoBERT offline: fallback BM25 only (vẫn hoạt động bình thường).
+
+#### GET `/api/public/shops/districts?city={city}`
+
+Lấy danh sách quận/huyện có shop trong thành phố đã chọn.
+
+```json
+{
+  "success": true,
+  "data": ["Quận 1", "Quận 3", "Quận Bình Thạnh", "Tân Bình"]
+}
+```
+
+Dùng để populate dropdown "Chọn quận" sau khi user chọn thành phố.
 
 #### GET `/api/public/products/suggest?q=ph&limit=5`
 
-Product autocomplete (giu nguyen API cu). Da upgrade hybrid voi PhoBERT.
+Product autocomplete (giữ nguyên API cũ). Đã upgrade hybrid với PhoBERT.
 
 ---
 
@@ -375,7 +399,8 @@ src/main/java/.../
   controller/
     PublicController/
       PublicSearchController.java       # Trending + suggest (guest)
-      PublicProductController.java      # Main search (updated)
+      PublicProductController.java      # Main search + district filter
+      PublicShopController.java         # GET /api/public/shops/districts?city=
     UserController/
       UserSearchController.java         # History + suggest (logged-in)
 

@@ -3,7 +3,16 @@
     "allow": [
       "Bash(./mvnw compile:*)",
       "Bash(ls:*)",
-      "Bash(./mvnw idea:idea)"
+      "Bash(./mvnw idea:idea)",
+      "Bash(grep \"\\\\.kt$\")",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.kt$\")",
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(del:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3:*)",
+      "Bash(pip install:*)",
+      "Bash(grep -n \"shopIsOpen\\\\|setShopIsOpen\\\\|shop_is_open\\\\|isOpen\" \"D:/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/FoodVectorSer\"*)"
     ]
   }
 }

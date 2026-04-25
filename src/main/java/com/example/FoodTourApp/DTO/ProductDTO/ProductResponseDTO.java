@@ -33,4 +33,7 @@ public class ProductResponseDTO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private List<VariantResponseDTO> variants;
+
+    // null = user chưa đăng nhập (anonymous), true/false = đã đăng nhập
+    private Boolean isWishlisted;
 }

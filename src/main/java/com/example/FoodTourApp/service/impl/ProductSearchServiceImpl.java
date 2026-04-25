@@ -17,6 +17,7 @@ import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.DTO.ProductVariantDTO.VariantResponseDTO;
 import com.example.FoodTourApp.entity.ProductVariant;
 import com.example.FoodTourApp.repository.ProductVariantRepository;
+import com.example.FoodTourApp.repository.ShopRepository;
 import com.example.FoodTourApp.service.ProductSearchService;
 import jakarta.annotation.PostConstruct;
 import org.apache.http.HttpHost;
@@ -39,7 +40,9 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.nio.file.Paths;
 import java.text.Normalizer;
+import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -62,8 +65,11 @@ public class ProductSearchServiceImpl implements ProductSearchService {
 
     private static final String EMB_CACHE_PREFIX = "phobert:emb:";
     private static final int EMB_CACHE_TTL_MINUTES = 30;
+    private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final ProductVariantRepository variantRepository;
+    private final ShopRepository shopRepository;
     private final RestTemplate restTemplate;
     private final RedisTemplate<String, Object> redisObjectTemplate;
     private ElasticsearchClient esClient;
@@ -96,9 +102,11 @@ public class ProductSearchServiceImpl implements ProductSearchService {
 
     public ProductSearchServiceImpl(
             ProductVariantRepository variantRepository,
+            ShopRepository shopRepository,
             @Qualifier("redisObjectTemplate") RedisTemplate<String, Object> redisObjectTemplate
     ) {
         this.variantRepository = variantRepository;
+        this.shopRepository = shopRepository;
         this.redisObjectTemplate = redisObjectTemplate;
         this.restTemplate = new RestTemplate();
     }
@@ -148,6 +156,23 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         executePythonScript("--update-sales", null);
     }
 
+    @Override
+    public void updateShopOpenStatusInEs(Integer shopId, boolean isOpen) {
+        try {
+            esClient.updateByQuery(u -> u
+                    .index(searchIndex)
+                    .query(q -> q.term(t -> t.field("shop_id").value(shopId)))
+                    .script(s -> s.inline(i -> i
+                            .source("ctx._source.shop_is_open = params.isOpen")
+                            .params("isOpen", JsonData.of(isOpen))
+                    ))
+            );
+            log.debug("[ShopOpenStatus] shopId={} → isOpen={}", shopId, isOpen);
+        } catch (Exception e) {
+            log.error("[ShopOpenStatus] Failed to update shopId={}: {}", shopId, e.getMessage());
+        }
+    }
+
     private void executePythonScript(String mode, String param) {
         try {
             List<String> command = new ArrayList<>();
@@ -191,10 +216,12 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     public Page<ProductResponseDTO> searchProducts(
             String keyword,
             String city,
+            String district,
             Integer categoryId,
             BigDecimal minPrice,
             BigDecimal maxPrice,
             String sortBy,
+            Boolean shopOpen,
             Pageable pageable
     ) {
         checkElasticsearchAvailable();
@@ -217,6 +244,14 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 boolQuery.filter(TermQuery.of(t -> t
                         .field("shop_city")
                         .value(city.trim().toLowerCase())
+                )._toQuery());
+            }
+
+            // Filter by district (chỉ áp dụng khi đã chọn city)
+            if (district != null && !district.isBlank()) {
+                boolQuery.filter(TermQuery.of(t -> t
+                        .field("shop_district")
+                        .value(district.trim().toLowerCase())
                 )._toQuery());
             }
 
@@ -249,7 +284,15 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             }
             sortOptions.addAll(buildSortOptions(sortBy));
 
-            // Execute search
+            // Filter theo trạng thái mở/đóng cửa của shop — tại ES level, pagination chính xác.
+            // shop_is_open được cập nhật tự động bởi ShopOpenStatusScheduler mỗi 60 giây.
+            if (shopOpen != null) {
+                boolQuery.filter(TermQuery.of(t -> t
+                        .field("shop_is_open")
+                        .value(shopOpen)
+                )._toQuery());
+            }
+
             SearchResponse<Map> response = esClient.search(s -> s
                             .index(searchIndex)
                             .query(boolQuery.build()._toQuery())
@@ -268,8 +311,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
 
             long totalHits = response.hits().total() != null ? response.hits().total().value() : 0;
 
-            log.debug("Hybrid Search: keyword='{}', city='{}', categoryId={}, results={}, total={}, phobertUsed={}",
-                    keyword, city, categoryId, results.size(), totalHits, phobertEnabled);
+            log.debug("Hybrid Search: keyword='{}', city='{}', categoryId={}, shopOpen={}, results={}, total={}",
+                    keyword, city, categoryId, shopOpen, results.size(), totalHits);
 
             return new PageImpl<>(results, pageable, totalHits);
 
@@ -615,6 +658,47 @@ public class ProductSearchServiceImpl implements ProductSearchService {
     }
 
     @Override
+    public List<String> getAvailableDistricts(String city) {
+        checkElasticsearchAvailable();
+
+        try {
+            BoolQuery.Builder boolQuery = new BoolQuery.Builder();
+            boolQuery.filter(TermQuery.of(t -> t.field("is_available").value(true))._toQuery());
+
+            // Chỉ lấy quận trong thành phố đã chọn
+            if (city != null && !city.isBlank()) {
+                boolQuery.filter(TermQuery.of(t -> t
+                        .field("shop_city")
+                        .value(city.trim().toLowerCase())
+                )._toQuery());
+            }
+
+            SearchResponse<Void> response = esClient.search(s -> s
+                            .index(searchIndex)
+                            .size(0)
+                            .query(boolQuery.build()._toQuery())
+                            .aggregations("districts", Aggregation.of(a -> a
+                                    .terms(t -> t.field("shop_district").size(100))
+                            )),
+                    Void.class
+            );
+
+            return response.aggregations().get("districts").sterms().buckets().array().stream()
+                    .map(StringTermsBucket::key)
+                    .map(k -> k._get().toString())
+                    .filter(d -> !d.isBlank())
+                    .sorted()
+                    .collect(Collectors.toList());
+
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("ES Get districts failed for city={}", city, e);
+            throw new RuntimeException("Elasticsearch get districts failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public PriceRangeStats getPriceRangeStats(String city, Integer categoryId) {
         checkElasticsearchAvailable();
 
@@ -730,7 +814,10 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         dto.setId(getInteger(source, "id"));
         dto.setShopId(getInteger(source, "shop_id"));
         dto.setShopName(getString(source, "shop_name"));
-        dto.setShopIsOpen(true);
+        // Đọc shop_is_open từ ES (được cập nhật bởi ShopOpenStatusScheduler mỗi 60s).
+        // Fallback sang tính runtime nếu field chưa có (index cũ chưa sync lại).
+        Boolean shopIsOpen = getBoolean(source, "shop_is_open");
+        dto.setShopIsOpen(shopIsOpen != null ? shopIsOpen : isShopCurrentlyOpen(getString(source, "opening_hours")));
         dto.setCategoryId(getInteger(source, "category_id"));
         dto.setCategoryName(getString(source, "category_name"));
         dto.setName(getString(source, "name"));
@@ -841,6 +928,42 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             return LocalDateTime.parse(dateStr, DateTimeFormatter.ISO_DATE_TIME);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * Tính trạng thái mở/đóng cửa của shop dựa trên opening_hours JSON từ ES.
+     * Format: {"monday":{"open":"08:00","close":"22:00"}, ...}
+     * Nếu opening_hours null/rỗng → coi như mở cửa 24/7.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean isShopCurrentlyOpen(String openingHoursJson) {
+        if (openingHoursJson == null || openingHoursJson.isBlank()) return true;
+        try {
+            Map<String, Map<String, String>> hoursMap = OBJECT_MAPPER.readValue(openingHoursJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Map<String, String>>>() {});
+
+            LocalDateTime now = LocalDateTime.now();
+            String dayKey = now.getDayOfWeek().name().toLowerCase();
+            Map<String, String> todayHours = hoursMap.get(dayKey);
+            if (todayHours == null) return false;
+
+            String openStr = todayHours.get("open");
+            String closeStr = todayHours.get("close");
+            if (openStr == null || closeStr == null) return false;
+
+            LocalTime currentTime = now.toLocalTime();
+            LocalTime openTime = LocalTime.parse(openStr);
+            LocalTime closeTime = LocalTime.parse(closeStr);
+
+            if (closeTime.isBefore(openTime)) {
+                // Overnight hours (e.g. 22:00–02:00)
+                return currentTime.isAfter(openTime) || currentTime.isBefore(closeTime);
+            }
+            return !currentTime.isBefore(openTime) && currentTime.isBefore(closeTime);
+        } catch (Exception e) {
+            log.warn("Failed to parse opening_hours: {}", e.getMessage());
+            return true;
         }
     }
 }

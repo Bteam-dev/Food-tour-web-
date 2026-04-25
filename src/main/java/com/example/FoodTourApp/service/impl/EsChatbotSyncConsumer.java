@@ -252,6 +252,15 @@ public class EsChatbotSyncConsumer {
         // Shop & Category names
         doc.put("shop_name", product.getShop() != null ? product.getShop().getShopName() : null);
         doc.put("category_name", product.getCategory() != null ? product.getCategory().getName() : null);
+
+        // Shop location fields — để chatbot hiểu câu hỏi "quận X có món Y không?"
+        if (product.getShop() != null) {
+            Shop shop = product.getShop();
+            doc.put("shop_address", shop.getAddressLine());
+            doc.put("shop_ward", shop.getWard());
+            doc.put("shop_district", shop.getDistrict());
+            doc.put("shop_city", shop.getCity());
+        }
         
         // Build context_text (structured format for RAG)
         String contextText = buildContextText(product);
@@ -275,12 +284,35 @@ public class EsChatbotSyncConsumer {
         String shopName = product.getShop() != null ? product.getShop().getShopName() : "Không rõ";
         Integer shopId = product.getShop() != null ? product.getShop().getId() : null;
         String categoryName = product.getCategory() != null ? product.getCategory().getName() : "Không rõ";
-        
+
+        // Build address string from shop
+        String shopAddress = "Không rõ";
+        String shopDistrict = "";
+        String shopCity = "";
+        if (product.getShop() != null) {
+            Shop shop = product.getShop();
+            StringBuilder addr = new StringBuilder();
+            if (shop.getAddressLine() != null) addr.append(shop.getAddressLine());
+            if (shop.getWard() != null) addr.append(", ").append(shop.getWard());
+            if (shop.getDistrict() != null) {
+                addr.append(", ").append(shop.getDistrict());
+                shopDistrict = shop.getDistrict();
+            }
+            if (shop.getCity() != null) {
+                addr.append(", ").append(shop.getCity());
+                shopCity = shop.getCity();
+            }
+            if (!addr.isEmpty()) shopAddress = addr.toString();
+        }
+
         return String.format("""
                 ===PRODUCT===
                 Món: %s
                 Quán: %s (shopId: %s)
                 Danh mục: %s
+                Địa chỉ quán: %s
+                Quận/Huyện: %s
+                Thành phố: %s
                 Mô tả: %s
                 Nguyên liệu: %s
                 Tags: %s
@@ -293,6 +325,9 @@ public class EsChatbotSyncConsumer {
                 shopName,
                 shopId,
                 categoryName,
+                shopAddress,
+                shopDistrict,
+                shopCity,
                 product.getDescription() != null ? product.getDescription() : "",
                 product.getIngredients() != null ? product.getIngredients() : "",
                 product.getTags() != null ? product.getTags() : "không có",

@@ -1,42 +1,45 @@
 # FoodTour Chatbot - AI Food Assistant
 
-Chatbot tro ly mon an thong minh, su dung RAG (Retrieval-Augmented Generation) ket hop Google Gemini API + Elasticsearch de goi y mon an chinh xac tu du lieu thuc trong database.
+Chatbot trợ lý món ăn thông minh, sử dụng RAG (Retrieval-Augmented Generation) kết hợp Google Gemini API + Elasticsearch để gợi ý món ăn chính xác từ dữ liệu thực trong database.
 
 ---
 
-## Kien truc tong quan
+## Kiến trúc tổng quan
 
 ```
-User gui tin nhan
-    |
-    v
+User gửi tin nhắn
+    │
+    ▼
 ChatbotController (REST API)
-    |
-    v
+    │
+    ▼
 ChatbotMessageServiceImpl
-    |-- Luu tin nhan user vao DB
-    |-- Goi ChatbotAIServiceImpl.generateReply()
-    |       |
-    |       |-- Load conversation memory (Caffeine cache)
-    |       |-- LangChain4j AiServices goi:
-    |       |       |
-    |       |       |-- [1] ContentRetriever (RAG)
-    |       |       |       |-- Embed query bang gemini-embedding-001 (3072 dims)
-    |       |       |       |-- Hybrid search tren Elasticsearch:
-    |       |       |       |     BM25 text match (30%) + cosine similarity (70%)
-    |       |       |       |-- Loc theo min-score, tra ve top 6 san pham
-    |       |       |       |-- Cache product IDs vao ThreadLocal
-    |       |       |       v
-    |       |       |-- [2] Google Gemini 2.0 Flash
-    |       |       |       |-- System prompt + CONTEXT (san pham) + user message
-    |       |       |       v
-    |       |       |-- Tra ve cau tra loi tu nhien
-    |       |
-    |-- Luu tin nhan bot vao DB
-    |-- Lay product IDs tu cache (KHONG goi ES lan 2)
-    |-- Query DB lay thong tin san pham day du
-    |-- Build product cards (ten, quan, gia, rating, anh)
-    v
+    │── Lưu tin nhắn user vào DB
+    │── Gọi ChatbotAIServiceImpl.generateReply()
+    │       │
+    │       │── Load conversation memory (Caffeine cache, TTL 60 phút)
+    │       │── LangChain4j AiServices gọi:
+    │       │       │
+    │       │       │── [1] ContentRetriever (RAG)
+    │       │       │       │── Embed query bằng gemini-embedding-001 (3072 dims)
+    │       │       │       │── Hybrid search trên Elasticsearch:
+    │       │       │       │     BM25 text match (30%) + cosine similarity (70%)
+    │       │       │       │     Fields: name^3, description, tags, ingredients,
+    │       │       │       │            category_name^2, shop_name,
+    │       │       │       │            shop_district^2, shop_city^2, shop_ward
+    │       │       │       │── Lọc theo min-score, trả về top 6 sản phẩm
+    │       │       │       │── Cache product IDs vào ThreadLocal
+    │       │       │       ▼
+    │       │       │── [2] Google Gemini 2.5 Flash
+    │       │       │       │── System prompt + CONTEXT (sản phẩm) + user message
+    │       │       │       ▼
+    │       │       │── Trả về câu trả lời tự nhiên
+    │       │
+    │── Lưu tin nhắn bot vào DB
+    │── Lấy product IDs từ cache (KHÔNG gọi ES lần 2)
+    │── Query DB lấy thông tin sản phẩm đầy đủ
+    │── Build product cards (tên, quán, giá, rating, ảnh)
+    ▼
 Response: { botReply, suggestedProducts[], navigationUrls[] }
 ```
 
@@ -44,16 +47,16 @@ Response: { botReply, suggestedProducts[], navigationUrls[] }
 
 ## Tech Stack
 
-| Component | Technology | Vai tro |
+| Component | Technology | Vai trò |
 |-----------|-----------|---------|
-| LLM (Chat) | Google Gemini 2.5 Flash | Sinh cau tra loi tu nhien bang tieng Viet |
-| Embedding | gemini-embedding-001 | Chuyen text thanh vector 3072 chieu |
-| Vector Search | Elasticsearch 8.11.1 | Luu tru + tim kiem vector + full-text |
-| RAG Framework | LangChain4j 0.36.2 | Ket noi LLM + retriever + memory |
-| Conversation Memory | Caffeine Cache | Luu lich su hoi thoai trong RAM (30 phut) |
-| Event Queue | Redis | Dong bo san pham vao ES theo thoi gian thuc |
-| Database | MySQL 8.0 | Luu hoi thoai, tin nhan, san pham |
-| Sync Script | Python + google-generativeai | Tao ES index mapping lan dau tien |
+| LLM (Chat) | Google Gemini 2.5 Flash | Sinh câu trả lời tự nhiên bằng tiếng Việt |
+| Embedding | gemini-embedding-001 | Chuyển text thành vector 3072 chiều |
+| Vector Search | Elasticsearch 8.11.1 | Lưu trữ + tìm kiếm vector + full-text |
+| RAG Framework | LangChain4j 0.36.2 | Kết nối LLM + retriever + memory |
+| Conversation Memory | Caffeine Cache | Lưu lịch sử hội thoại trong RAM (60 phút) |
+| Event Queue | Redis | Đồng bộ sản phẩm vào ES theo thời gian thực |
+| Database | MySQL 8.0 | Lưu hội thoại, tin nhắn, sản phẩm |
+| Sync Script | Python + google-generativeai | Full reindex khi cần |
 
 ---
 
@@ -61,32 +64,32 @@ Response: { botReply, suggestedProducts[], navigationUrls[] }
 
 Base URL: `/api/user/chatbot`
 
-**Yeu cau xac thuc**: Tat ca endpoint can JWT token trong header `Authorization: Bearer <token>`
+**Yêu cầu xác thực**: Tất cả endpoint cần JWT token trong header `Authorization: Bearer <token>`
 
-### Quan ly hoi thoai
+### Quản lý hội thoại
 
-| Method | Endpoint | Request Body | Response | Mo ta |
+| Method | Endpoint | Request Body | Response | Mô tả |
 |--------|----------|-------------|----------|-------|
-| POST | `/conversations` | `{ "title": "Hoi ve mon ngon" }` | `{ id, title, createdAt }` | Tao hoi thoai moi |
-| GET | `/conversations` | - | `[{ id, title, createdAt, updatedAt }]` | Danh sach hoi thoai (moi nhat truoc) |
-| PUT | `/conversations/{id}` | `{ "title": "Ten moi" }` | `{ id, title, ... }` | Doi ten hoi thoai |
-| DELETE | `/conversations/{id}` | - | 200 OK | Xoa hoi thoai + toan bo tin nhan |
+| POST | `/conversations` | `{ "title": "Hỏi về món ngon" }` | `{ id, title, createdAt }` | Tạo hội thoại mới |
+| GET | `/conversations` | - | `[{ id, title, createdAt, updatedAt }]` | Danh sách hội thoại (mới nhất trước) |
+| PUT | `/conversations/{id}` | `{ "title": "Tên mới" }` | `{ id, title, ... }` | Đổi tên hội thoại |
+| DELETE | `/conversations/{id}` | - | 200 OK | Xóa hội thoại + toàn bộ tin nhắn |
 
-### Nhan tin
+### Nhắn tin
 
-| Method | Endpoint | Request Body | Response | Mo ta |
+| Method | Endpoint | Request Body | Response | Mô tả |
 |--------|----------|-------------|----------|-------|
-| POST | `/{conversationId}/messages` | `{ "content": "Mon gi ngon o SG?" }` | Xem chi tiet ben duoi | Gui tin nhan, nhan tra loi AI |
-| GET | `/conversations/{id}/messages` | - | `[{ id, senderType, content, createdAt }]` | Lich su tin nhan |
+| POST | `/{conversationId}/messages` | `{ "content": "Món gì ngon ở SG?" }` | Xem chi tiết bên dưới | Gửi tin nhắn, nhận trả lời AI |
+| GET | `/conversations/{id}/messages` | - | `[{ id, senderType, content, createdAt }]` | Lịch sử tin nhắn |
 
-### Response format khi gui tin nhan
+### Response format khi gửi tin nhắn
 
 ```json
 {
   "id": 42,
   "senderType": "BOT",
   "senderName": "FoodTour Bot",
-  "content": "Oi bro, noi den mon ngon Sai Gon thi phai thu **Banh Mi Thit Nuong** ...",
+  "content": "Oi bro, nói đến món ngon Sài Gòn thì phải thử **Bánh Mì Thịt Nướng** ...",
   "createdAt": "2026-04-11T10:30:00",
   "navigationUrls": [
     "product_detail/15",
@@ -95,8 +98,8 @@ Base URL: `/api/user/chatbot`
   "suggestedProducts": [
     {
       "productId": 15,
-      "productName": "Banh Mi Thit Nuong",
-      "shopName": "Banh Mi Huynh Hoa",
+      "productName": "Bánh Mì Thịt Nướng",
+      "shopName": "Bánh Mì Huỳnh Hoa",
       "shopId": 3,
       "price": 45000,
       "discountPrice": 39000,
@@ -109,49 +112,35 @@ Base URL: `/api/user/chatbot`
 }
 ```
 
-| Field | Type | Mo ta |
-|-------|------|-------|
-| `content` | String | Cau tra loi tu nhien cua bot (Markdown, bold ten mon) |
-| `navigationUrls` | String[] | Deep link toi trang chi tiet san pham |
-| `suggestedProducts` | Object[] | Danh sach san pham goi y (sap xep theo do phu hop giam dan) |
-
 ---
 
 ## Hybrid Search (BM25 + Vector)
 
-Chatbot su dung **hybrid search** ket hop 2 phuong phap de tim san pham chinh xac:
-
-### Tai sao can hybrid?
-
-| Phuong phap | Gioi o dau | Yeu o dau |
-|-------------|-----------|-----------|
-| **BM25** (text match) | Tim chinh xac tu khoa ("pho bo", "bun cha") | Khong hieu ngu nghia ("an gi troi lanh") |
-| **Vector** (cosine similarity) | Hieu ngu nghia, y dinh | Co the miss ket qua khi hoi chinh xac ten mon |
-| **Hybrid** (ket hop) | Ca hai | - |
-
-### Cong thuc scoring
+### Công thức scoring
 
 ```
 final_score = bm25_score * 0.3 + (cosine_similarity + 1.0) * 0.7
 ```
 
-### Cac truong duoc search
+### Các trường được search
 
-| Field | Boost | Vi du |
-|-------|-------|-------|
-| `name` | x3 | "Pho Bo", "Banh Mi" |
-| `category_name` | x2 | "Mon nuoc", "Do uong" |
-| `description` | x1 | "Nuoc dung ninh xuong 12 tieng..." |
-| `tags` | x1 | "cay", "healthy", "an khuya" |
-| `ingredients` | x1 | "thit bo", "rau muong" |
-| `shop_name` | x1 | "Pho Thin", "Bun Cha Huong Lien" |
+| Field | Boost | Mục đích |
+|-------|-------|----------|
+| `name` | x3 | Tên món: "Phở Bò", "Bánh Mì" |
+| `category_name` | x2 | Danh mục: "Món nước", "Đồ uống" |
+| `shop_district` | x2 | Lọc theo quận: "Quận 1", "Tân Bình" |
+| `shop_city` | x2 | Lọc theo thành phố: "Hồ Chí Minh" |
+| `description` | x1 | Mô tả món ăn |
+| `tags` | x1 | "cay", "healthy", "ăn khuya" |
+| `ingredients` | x1 | Nguyên liệu |
+| `shop_name` | x1 | Tên quán |
+| `shop_ward` | x1 | Phường/Xã |
 
 ### Config
 
 ```properties
-# application.properties
-rag.max-results=6          # Tra ve toi da 6 san pham
-rag.min-score=1.1          # Nguong diem toi thieu (hybrid score)
+rag.max-results=6          # Trả về tối đa 6 sản phẩm
+rag.min-score=1.1          # Ngưỡng điểm tối thiểu (hybrid score)
 ```
 
 ---
@@ -162,180 +151,187 @@ rag.min-score=1.1          # Nguong diem toi thieu (hybrid score)
 
 ### Mapping
 
-| Field | Type | Mo ta |
+| Field | Type | Mô tả |
 |-------|------|-------|
 | `id` | integer | Product ID |
-| `name` | text | Ten mon an (BM25 searchable) |
-| `description` | text | Mo ta mon an |
-| `ingredients` | text | Nguyen lieu |
-| `nutrition_info` | text | Thong tin dinh duong |
-| `tags` | keyword | Tags ("cay", "healthy", "an khuya") |
-| `shop_name` | text | Ten cua hang |
-| `category_name` | text | Ten danh muc |
-| `price` | scaled_float | Gia goc |
-| `discount_price` | scaled_float | Gia khuyen mai |
-| `preparation_time` | integer | Thoi gian chuan bi (phut) |
-| `rating` | double | Diem danh gia trung binh |
-| `total_reviews` | long | Tong so luot danh gia |
-| `is_available` | boolean | Con ban khong |
-| `context_text` | text | Noi dung co cau truc cho RAG |
+| `name` | text | Tên món ăn (BM25 searchable) |
+| `description` | text | Mô tả món ăn |
+| `ingredients` | text | Nguyên liệu |
+| `nutrition_info` | text | Thông tin dinh dưỡng |
+| `tags` | keyword | Tags ("cay", "healthy", "ăn khuya") |
+| `shop_name` | text | Tên cửa hàng |
+| `category_name` | text | Tên danh mục |
+| `shop_address` | text | Địa chỉ đầy đủ của quán |
+| `shop_ward` | keyword | Phường/Xã |
+| `shop_district` | keyword | Quận/Huyện |
+| `shop_city` | keyword | Thành phố |
+| `price` | scaled_float | Giá gốc |
+| `discount_price` | scaled_float | Giá khuyến mãi |
+| `preparation_time` | integer | Thời gian chuẩn bị (phút) |
+| `rating` | double | Điểm đánh giá trung bình |
+| `total_reviews` | long | Tổng số lượt đánh giá |
+| `is_available` | boolean | Còn bán không |
+| `context_text` | text | Nội dung có cấu trúc cho RAG |
 | `embedding` | dense_vector (3072 dims, cosine) | Vector embedding |
 
-### Context text format (truyen vao LLM)
+### Context text format (truyền vào LLM)
 
 ```
 ===PRODUCT===
-Mon: Pho Bo Tai Chin
-Quan: Pho Thin (shopId: 5)
-Danh muc: Mon nuoc
-Mo ta: Pho bo truyen thong Ha Noi, nuoc dung ninh xuong 12 tieng
-Nguyen lieu: Banh pho, thit bo tai, thit bo chin, hanh la, rau mui
-Tags: truyen thong, mon nuoc, sang
-Dinh duong: 480 kcal, 25g protein, 45g carb
-Thoi gian chuan bi: 10 phut
-Gia: 55000 VND
-Rating: 4.6/5.0 (215 danh gia)
+Món: Phở Bò Tái Chín
+Quán: Phở Thìn (shopId: 5)
+Danh mục: Món nước
+Địa chỉ quán: 13 Lò Đúc, Phường Phạm Đình Hổ, Quận Hai Bà Trưng, Hà Nội
+Quận/Huyện: Quận Hai Bà Trưng
+Thành phố: Hà Nội
+Mô tả: Phở bò truyền thống Hà Nội, nước dùng ninh xương 12 tiếng
+Nguyên liệu: Bánh phở, thịt bò tái, thịt bò chín, hành lá, rau mùi
+Tags: truyền thống, món nước, sáng
+Dinh dưỡng: 480 kcal, 25g protein, 45g carb
+Thời gian chuẩn bị: 10 phút
+Giá: 55000 VNĐ
+Rating: 4.6/5.0 (215 đánh giá)
 ===END_PRODUCT===
 ```
 
 ---
 
-## Dong bo du lieu (ES Sync)
+## Đồng bộ dữ liệu (ES Sync)
 
-### Tu dong (Runtime)
+### Tự động (Runtime) — mỗi khi product thay đổi
 
 ```
-San pham thay doi (them/sua/xoa)
-    |
-    v
-EsChatbotSyncProducerImpl
-    |-- Push event vao Redis queue: es:chatbot:sync:queue
-    v
-EsChatbotSyncConsumer (chay background, poll moi 5 giay)
-    |-- Pop batch 50 events
-    |-- Deduplicate theo productId
-    |-- Fetch san pham tu DB
-    |-- Generate embedding (gemini-embedding-001, 3072 dims)
-    |-- Build context_text
-    |-- Bulk index vao Elasticsearch
+Sản phẩm thay đổi (thêm/sửa/xóa)
+    │ JPA @PostPersist/@PostUpdate/@PostRemove
+    ▼
+ProductEntityListener
+    │── pushIndexEvent(productId) → es:chatbot:sync:queue
+    │── pushIndexEvent(productId) → es:search:sync:queue
+    ▼
+EsChatbotSyncConsumer (background, poll mỗi 5 giây)
+    │── Pop batch 50 events
+    │── Deduplicate theo productId
+    │── Fetch sản phẩm từ DB
+    │── Generate embedding (gemini-embedding-001, 3072 dims)
+    │── Build context_text (bao gồm location)
+    │── Bulk index vào Elasticsearch
 ```
 
-### Thu cong (Full reindex)
+### Thủ công (Full reindex) — dùng script
 
-Co 2 truong hop can phan biet:
+Cần chạy script khi:
 
-#### Truong hop 1: Lan dau tien deploy (index chua co) hoac mapping bi hong
-
-Phai chay Python script de tao index voi mapping dung (dense_vector 3072 dims):
+| Tình huống | Cần reindex? |
+|---|---|
+| Thêm/sửa/xóa product thông thường | ❌ Incremental sync tự lo |
+| Restart app | ❌ ES data vẫn còn trên disk |
+| Sửa `buildContextText()` (thêm field mới) | ✅ Phải reindex |
+| Đổi embedding model | ✅ Phải reindex |
+| Fix index corrupt / data cũ sai | ✅ Phải reindex |
+| Deploy lần đầu (ES index trống) | ✅ Phải reindex |
+| Bulk update ngoài app (trực tiếp DB) | ✅ Phải reindex |
 
 ```bash
-# Cai thu vien
+# Cài thư viện
 pip install pymysql elasticsearch google-generativeai
 
 # Set API key
 export GEMINI_API_KEY=your_key_here
 
-# Chay script: xoa index cu, tao lai mapping, sync toan bo data
+# Chạy script — xóa index cũ, tạo lại mapping, sync toàn bộ data
 python scripts/chatbot/sync_es_chatbot.py
 ```
 
-Script se:
-1. Xoa index cu (neu co) de tranh mapping conflict
-2. Tao index voi mapping chinh xac: dense_vector 3072 dims + cosine similarity
-3. Fetch toan bo san pham dang ban tu MySQL
-4. Tao context_text + generate embedding 3072 chieu qua gemini-embedding-001
-5. Bulk index vao Elasticsearch
-
-#### Truong hop 2: Index da co, chi can resync lai data (sau khi sua code logic, fix data sai)
-
-Dung Admin API — KHONG can chay Python script:
-
-```bash
-# Yeu cau JWT token ADMIN role
-curl -X POST http://localhost:8080/api/admin/vector/resync \
-  -H "Authorization: Bearer {admin_token}"
-```
-
-API se push tat ca product IDs vao Redis queue → EsChatbotSyncConsumer xu ly async (embedding + bulk index). Ket qua xuat hien trong logs sau ~10-20 giay.
+Script sẽ:
+1. Xóa index cũ (nếu có) để tránh mapping conflict
+2. Tạo index mới với mapping: dense_vector 3072 dims + location fields
+3. Fetch toàn bộ sản phẩm từ MySQL (JOIN với shops để lấy địa chỉ)
+4. Tạo context_text + generate embedding qua gemini-embedding-001
+5. Bulk index vào Elasticsearch
 
 ---
 
 ## System Prompt
 
-Bot duoc cau hinh voi cac nguyen tac:
+Bot được cấu hình với các nguyên tắc:
 
-### Chong hallucination (QUAN TRONG NHAT)
-- **CHI** dung thong tin trong CONTEXT duoc Elasticsearch tra ve
-- Khong co CONTEXT → tra loi "Tiec qua bro, mon nay app chua co"
-- KHONG bia ten mon, gia, rating, quan. KHONG tron thong tin giua cac mon
-- Moi mon goi y BAT BUOC co: **Ten mon** (bold), quan (shopId), gia VND, rating (so danh gia)
+### Chống hallucination (QUAN TRỌNG NHẤT)
+- **CHỈ** dùng thông tin trong CONTEXT được Elasticsearch trả về
+- Không có CONTEXT → trả lời "Tiếc quá bro, món này app chưa có"
+- KHÔNG bịa tên món, giá, rating, quán. KHÔNG trộn thông tin giữa các món
+- Mỗi món gợi ý BẮT BUỘC có: **Tên món** (bold), quán (shopId), giá VNĐ, rating (số đánh giá)
 
-### Phong cach tra loi
-- Than thien, tu nhien nhu ban be ("bro", "nha", "ne")
-- Ke chuyen lien mach, KHONG bullet point, KHONG so thu tu
-- Them cam xuc ("ngon lam bro", "re beo luon")
+### Phong cách trả lời
+- Thân thiện, tự nhiên như bạn bè ("bro", "nha", "nè")
+- Kể chuyện liền mạch, KHÔNG bullet point, KHÔNG số thứ tự
+- Thêm cảm xúc ("ngon lắm bro", "rẻ bèo luôn")
 
-### Suy luan thong minh
-- Ten mon cu the → match truong "Mon:"
-- Quan nao ban → lay shopId + ten quan
-- Danh muc → dung "Danh muc:"
-- Troi lanh/nong/khuya/healthy → doc mo ta + tags + nguyen lieu + dinh duong
-- Gia: <100k = re, 100-200k = vua, >200k = cao cap
-- Thoi gian: <15 phut = nhanh, 15-20 = vua, >20 = lau
-- Top ngon: uu tien rating cao + nhieu danh gia
+### Suy luận địa điểm
+- Khi hỏi "ở quận X/thành phố Y có ... không?" → đọc trường "Quận/Huyện:" và "Thành phố:" trong CONTEXT
+- Chỉ gợi ý món có quán TẠI quận/thành phố đó. Không có → "Tiếc quá bro, app chưa có quán nào ở [địa điểm]..."
+- Khi trả lời có địa chỉ → thêm "Quán nằm ở [Địa chỉ quán]"
+
+### Suy luận thông minh
+- Tên món cụ thể → match trường "Món:"
+- Quán nào bán → lấy shopId + tên quán
+- Danh mục → dùng "Danh mục:"
+- Trời lạnh/nóng/khuya/healthy → đọc mô tả + tags + nguyên liệu + dinh dưỡng
+- Giá: <100k = rẻ, 100-200k = vừa, >200k = cao cấp
+- Thời gian: <15 phút = nhanh, 15-20 = vừa, >20 = lâu
+- Top ngon: ưu tiên rating cao + nhiều đánh giá
 
 ---
 
 ## Conversation Memory
 
-| Config | Gia tri | Mo ta |
+| Config | Giá trị | Mô tả |
 |--------|---------|-------|
-| Cache type | Caffeine | In-memory, tu dong don dep |
-| Max conversations | 500 | Toi da 500 hoi thoai dong thoi trong RAM |
-| Expire | 30 phut | Khong hoat dong 30 phut → xoa khoi RAM |
-| Message window | 20 tin nhan | LLM chi nhan 20 tin gan nhat lam context |
-| Persistence | MySQL | Toan bo tin nhan luu DB, load lai khi can |
+| Cache type | Caffeine | In-memory, tự động dọn dẹp |
+| Max conversations | 500 | Tối đa 500 hội thoại đồng thời trong RAM |
+| Expire | 60 phút | Không hoạt động 60 phút → xóa khỏi RAM |
+| Message window | 30 tin nhắn | LLM chỉ nhận 30 tin gần nhất làm context |
+| Persistence | MySQL | Toàn bộ tin nhắn lưu DB, load lại khi cần |
 
-**Flow khoi tao memory:**
-1. User gui tin nhan trong conversation
-2. Kiem tra Caffeine cache co conversation khong
-3. Neu KHONG co → load 20 tin nhan gan nhat tu DB → nap vao memory
-4. Neu CO → dung memory san co
-5. Sau 30 phut khong hoat dong → tu dong xoa khoi RAM
+**Flow khởi tạo memory:**
+1. User gửi tin nhắn trong conversation
+2. Kiểm tra Caffeine cache có conversation không
+3. Nếu KHÔNG có → load 30 tin nhắn gần nhất từ DB → nạp vào memory
+4. Nếu CÓ → dùng memory sẵn có
+5. Sau 60 phút không hoạt động → tự động xóa khỏi RAM
 
 ---
 
-## Toi uu hieu suat
+## Tối ưu hiệu suất
 
-### 1. ThreadLocal cache (tranh double embedding)
+### 1. ThreadLocal cache (tránh double embedding)
 
-**Van de:** Moi tin nhan goi Elasticsearch 2 lan:
-- Lan 1: RAG ContentRetriever (lay context cho LLM)
-- Lan 2: `retrieveProductIds()` (lay product IDs cho card UI)
+**Vấn đề:** Mỗi tin nhắn gọi Elasticsearch 2 lần:
+- Lần 1: RAG ContentRetriever (lấy context cho LLM)
+- Lần 2: `retrieveProductIds()` (lấy product IDs cho card UI)
 
-**Giai phap:** ContentRetriever cache product IDs vao ThreadLocal → `retrieveProductIds()` doc tu cache.
+**Giải pháp:** ContentRetriever cache product IDs vào ThreadLocal → `retrieveProductIds()` đọc từ cache.
 
 ```
-Truoc: 2 lan embedding + 2 lan ES query = ~2s
-Sau:   1 lan embedding + 1 lan ES query = ~1s (nhanh gap doi)
+Trước: 2 lần embedding + 2 lần ES query = ~2s
+Sau:   1 lần embedding + 1 lần ES query = ~1s (nhanh gấp đôi)
 ```
 
 ### 2. Caffeine cache cho conversation memory
 
-Khong can load lich su tu DB moi lan gui tin nhan. Chi load 1 lan, sau do dung memory trong RAM.
+Không cần load lịch sử từ DB mỗi lần gửi tin nhắn. Chỉ load 1 lần, sau đó dùng memory trong RAM.
 
 ### 3. Background sync (Redis event queue)
 
-San pham thay doi → push event vao Redis → consumer xu ly batch 50 events moi 5 giay. Khong anh huong toi API response time.
+Sản phẩm thay đổi → push event vào Redis → consumer xử lý batch 50 events mỗi 5 giây. Không ảnh hưởng tới API response time.
 
 ---
 
-## Cau hinh
+## Cấu hình
 
 ### application.properties
 
 ```properties
-# Google Gemini API (free: 15 RPM, 1500 req/ngay)
+# Google Gemini API (free: 15 RPM, 1500 req/ngày)
 gemini.api-key=${GEMINI_API_KEY}
 gemini.model=gemini-2.5-flash
 gemini.embedding-model=gemini-embedding-001
@@ -346,31 +342,24 @@ elasticsearch.port=9200
 elasticsearch.index=foodtour_products_chatbot
 
 # RAG
-rag.max-results=6       # So san pham toi da tra ve
-rag.min-score=1.1        # Nguong diem hybrid search
-```
-
-### .env
-
-```env
-# Lay key tai: https://aistudio.google.com/apikey
-GEMINI_API_KEY=your_gemini_api_key_here
+rag.max-results=6       # Số sản phẩm tối đa trả về
+rag.min-score=1.1        # Ngưỡng điểm hybrid search
 ```
 
 ### Free tier Google Gemini
 
-| Gioi han | Gia tri |
+| Giới hạn | Giá trị |
 |----------|---------|
-| Requests/phut | 15 |
-| Requests/ngay | 1,500 |
-| Tokens/phut | 1,000,000 |
-| Gia | **Mien phi** |
+| Requests/phút | 15 |
+| Requests/ngày | 1,500 |
+| Tokens/phút | 1,000,000 |
+| Giá | **Miễn phí** |
 
-Du cho dev/demo. Production can billing (rat re: ~$0.10/1M tokens).
+Đủ cho dev/demo. Production cần billing (rất rẻ: ~$0.10/1M tokens).
 
 ---
 
-## Files lien quan
+## Files liên quan
 
 ```
 src/main/java/com/example/FoodTourApp/
@@ -379,22 +368,22 @@ src/main/java/com/example/FoodTourApp/
 ├── controller/UserController/
 │   └── ChatbotController.java                 # REST API endpoints
 ├── DTO/ChatbotDTO/
-│   ├── CreateChatbotConversationRequest.java   # Request tao hoi thoai
-│   ├── SendChatbotMessageRequest.java          # Request gui tin nhan
-│   ├── ChatbotConversationResponse.java        # Response hoi thoai
-│   └── ChatbotMessageResponse.java             # Response tin nhan + product cards
+│   ├── CreateChatbotConversationRequest.java
+│   ├── SendChatbotMessageRequest.java
+│   ├── ChatbotConversationResponse.java
+│   └── ChatbotMessageResponse.java
 ├── entity/
-│   ├── ChatbotConversation.java                # Entity hoi thoai
-│   └── ChatbotMessage.java                     # Entity tin nhan
+│   ├── ChatbotConversation.java
+│   └── ChatbotMessage.java
 ├── repository/
-│   ├── ChatbotConversationRepository.java      # Query hoi thoai
-│   └── ChatbotMessageRepository.java           # Query tin nhan
+│   ├── ChatbotConversationRepository.java
+│   └── ChatbotMessageRepository.java
 ├── service/
 │   ├── ChatbotAI.java                          # LangChain4j interface + system prompt
-│   ├── ChatbotAIService.java                   # Interface AI service
-│   ├── ChatbotMessageService.java              # Interface message service
-│   ├── FoodVectorService.java                  # Interface vector/RAG service
-│   ├── EsChatbotSyncProducer.java              # Interface sync producer
+│   ├── ChatbotAIService.java
+│   ├── ChatbotMessageService.java
+│   ├── FoodVectorService.java
+│   ├── EsChatbotSyncProducer.java
 │   └── impl/
 │       ├── ChatbotAIServiceImpl.java           # Memory management + LLM orchestration
 │       ├── ChatbotMessageServiceImpl.java      # Message flow + product cards
@@ -403,20 +392,20 @@ src/main/java/com/example/FoodTourApp/
 │       └── EsChatbotSyncProducerImpl.java      # Push sync events to Redis
 
 scripts/chatbot/
-└── sync_es_chatbot.py                          # Python full reindex script
+└── sync_es_chatbot.py   # Full reindex: xóa index cũ → tạo lại mapping → sync toàn bộ
 ```
 
 ---
 
 ## Troubleshooting
 
-| Van de | Nguyen nhan | Giai phap |
+| Vấn đề | Nguyên nhân | Giải pháp |
 |--------|------------|-----------|
-| Bot tra loi "app chua co du lieu" | ES index rong | Chay `sync_es_chatbot.py` (lan dau) hoac `POST /api/admin/vector/resync` |
-| Bot tra loi cham | Gemini API latency | Binh thuong ~1-3s, kiem tra mang |
-| Loi 429 (rate limit) | Vuot 15 RPM free tier | Doi 1 phut hoac nang cap billing |
-| Bot bja thong tin | min-score qua thap, CONTEXT khong lien quan | Tang `rag.min-score` |
-| Tim khong ra mon | min-score qua cao | Giam `rag.min-score` |
-| Embedding dimension mismatch | Doi model ma chua rebuild index | Chay `sync_es_chatbot.py` (xoa index + tao lai mapping) |
-| ES connection refused | Elasticsearch chua chay | `docker-compose up -d elasticsearch` |
-| Resync khong co tac dung | Index mapping sai (khong co dense_vector) | Chay `sync_es_chatbot.py` de tao lai index |
+| Bot trả lời "app chưa có dữ liệu" | ES index rỗng | Chạy `python scripts/chatbot/sync_es_chatbot.py` |
+| Bot không biết quán ở đâu | Index cũ thiếu location fields | Chạy lại `sync_es_chatbot.py` (tạo lại index với mapping mới) |
+| Bot trả lời chậm | Gemini API latency | Bình thường ~1-3s, kiểm tra mạng |
+| Lỗi 429 (rate limit) | Vượt 15 RPM free tier | Đợi 1 phút hoặc nâng cấp billing |
+| Bot bịa thông tin | min-score quá thấp, CONTEXT không liên quan | Tăng `rag.min-score` |
+| Tìm không ra món | min-score quá cao | Giảm `rag.min-score` |
+| Embedding dimension mismatch | Đổi model mà chưa rebuild index | Chạy `sync_es_chatbot.py` (xóa index + tạo lại mapping) |
+| ES connection refused | Elasticsearch chưa chạy | `docker-compose up -d elasticsearch` |

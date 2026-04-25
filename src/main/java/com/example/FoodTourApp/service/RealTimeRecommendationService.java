@@ -172,4 +172,35 @@ public interface RealTimeRecommendationService {
      * Precompute embeddings cho tất cả users (batch job)
      */
     void precomputeAllUserEmbeddings();
+
+    /**
+     * Hot-reload product embeddings từ file model_output/product_embeddings.json.
+     * Gọi sau khi retrain Two-Tower model trên Colab và copy file mới vào resources.
+     * Không cần restart app.
+     *
+     * @return số lượng embeddings được load
+     */
+    int reloadProductEmbeddings();
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PRODUCT SYNC SUPPORT - Gọi bởi EsRecommendSyncConsumer
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Lấy category-average embedding để dùng làm proxy cho product mới.
+     * Trả về null nếu category chưa có embedding (category mới chưa có product nào).
+     */
+    float[] getCategoryEmbedding(Integer categoryId);
+
+    /**
+     * Thêm/cập nhật product vào in-memory maps ngay lập tức (không chờ scheduled refresh).
+     * Gọi sau khi index product vào ES để KNN hoạt động ngay.
+     * embedding có thể null nếu chưa có category average.
+     */
+    void registerProduct(Integer productId, Integer categoryId, Integer shopId, float[] embedding);
+
+    /**
+     * Xóa product khỏi in-memory maps khi product bị delete.
+     */
+    void removeProduct(Integer productId);
 }

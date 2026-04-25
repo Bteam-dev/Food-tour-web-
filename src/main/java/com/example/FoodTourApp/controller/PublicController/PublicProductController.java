@@ -2,6 +2,8 @@ package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
+import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
+import com.example.FoodTourApp.repository.WishlistRepository;
 import com.example.FoodTourApp.service.FoodDetectionService;
 import com.example.FoodTourApp.service.ProductSearchService;
 import com.example.FoodTourApp.service.ProductService;
@@ -30,6 +32,8 @@ public class PublicProductController {
     private final FoodDetectionService foodDetectionService;
     private final RealTimeRecommendationService recommendationService;
     private final SearchSuggestionService searchSuggestionService;
+    private final WishlistRepository wishlistRepository;
+    private final JwtUtils jwtUtils;
 
     // Mapping từ class name của YOLO sang các từ khóa tìm kiếm tiếng Việt
     private static final Map<String, List<String>> FOOD_CLASS_KEYWORDS = new HashMap<>();
@@ -46,13 +50,44 @@ public class PublicProductController {
             ProductSearchService productSearchService,
             FoodDetectionService foodDetectionService,
             RealTimeRecommendationService recommendationService,
-            SearchSuggestionService searchSuggestionService
+            SearchSuggestionService searchSuggestionService,
+            WishlistRepository wishlistRepository,
+            JwtUtils jwtUtils
     ) {
         this.productService = productService;
         this.productSearchService = productSearchService;
         this.foodDetectionService = foodDetectionService;
         this.recommendationService = recommendationService;
         this.searchSuggestionService = searchSuggestionService;
+        this.wishlistRepository = wishlistRepository;
+        this.jwtUtils = jwtUtils;
+    }
+
+    /**
+     * Trích xuất userId từ Authorization header (optional).
+     * Trả null nếu không có token hoặc token không hợp lệ.
+     */
+    private Integer extractUserId(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) return null;
+        try {
+            String token = authHeader.substring(7);
+            if (jwtUtils.validateToken(token)) {
+                return jwtUtils.getUserIdFromToken(token);
+            }
+        } catch (Exception e) {
+            // Token lỗi / hết hạn → treat as anonymous
+        }
+        return null;
+    }
+
+    /**
+     * Enrich danh sách sản phẩm với isWishlisted.
+     * CHỈ 1 DB query duy nhất cho toàn bộ page — không N+1.
+     */
+    private void enrichWishlistStatus(List<ProductResponseDTO> products, Integer userId) {
+        if (userId == null || products.isEmpty()) return;
+        Set<Integer> wishlistIds = new HashSet<>(wishlistRepository.findProductIdsByUser(userId));
+        products.forEach(p -> p.setIsWishlisted(wishlistIds.contains(p.getId())));
     }
 
     /**
@@ -69,26 +104,33 @@ public class PublicProductController {
      */
     @GetMapping
     public ResponseEntity<?> getAllActiveProducts(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestParam(required = false) String city,
+            @RequestParam(required = false) String district,
             @RequestParam(required = false) Integer categoryId,
             @RequestParam(required = false) String sortBy,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) Boolean shopOpen,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        
-        logger.info("ES Search - keyword={}, city={}, categoryId={}, sortBy={}, minPrice={}, maxPrice={}, page={}, size={}",
-                keyword, city, categoryId, sortBy, minPrice, maxPrice, page, size);
+
+        logger.info("ES Search - keyword={}, city={}, district={}, categoryId={}, sortBy={}, minPrice={}, maxPrice={}, shopOpen={}, page={}, size={}",
+                keyword, city, district, categoryId, sortBy, minPrice, maxPrice, shopOpen, page, size);
 
         try {
             Pageable pageable = PageRequest.of(page, size);
-            
+
             Page<ProductResponseDTO> products = productSearchService.searchProducts(
-                    keyword, city, categoryId, minPrice, maxPrice, sortBy, pageable
+                    keyword, city, district, categoryId, minPrice, maxPrice, sortBy, shopOpen, pageable
             );
 
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
+
+            // Enrich với wishlist status — 1 DB query duy nhất, không N+1
+            Integer userId = extractUserId(authHeader);
+            enrichWishlistStatus(pageResponse.getContent(), userId);
 
             // Log search analytics (async - không ảnh hưởng response time)
             if (keyword != null && !keyword.isBlank()) {
@@ -174,11 +216,19 @@ public class PublicProductController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<?> getProductById(@PathVariable Integer id) {
+    public ResponseEntity<?> getProductById(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @PathVariable Integer id) {
         logger.info("Fetching product with id: {}", id);
 
         try {
             ProductResponseDTO product = productService.getProductById(id);
+
+            // Enrich wishlist status cho single product
+            Integer userId = extractUserId(authHeader);
+            if (userId != null) {
+                product.setIsWishlisted(wishlistRepository.existsByUserIdAndProductId(userId, id));
+            }
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -195,22 +245,27 @@ public class PublicProductController {
 
     @GetMapping("/shop/{shopId}")
     public ResponseEntity<?> getActiveProductsByShop(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
             @PathVariable Integer shopId,
             @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "newest") String sortBy) {
-        
+
         logger.info("ES Search for shop: {} with keyword={}", shopId, keyword);
 
         try {
             Pageable pageable = PageRequest.of(page, size);
-            
+
             Page<ProductResponseDTO> products = productSearchService.searchProductsByShop(
                     shopId, keyword, sortBy, pageable
             );
 
             PageResponse<ProductResponseDTO> pageResponse = PageResponse.of(products);
+
+            // Enrich với wishlist status — 1 DB query duy nhất
+            Integer userId = extractUserId(authHeader);
+            enrichWishlistStatus(pageResponse.getContent(), userId);
 
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
@@ -256,7 +311,7 @@ public class PublicProductController {
             Map<Integer, ProductResponseDTO> uniqueProducts = new LinkedHashMap<>();
             for (String keyword : searchKeywords) {
                 Page<ProductResponseDTO> page = productSearchService.searchProducts(
-                        keyword, null, null, null, null, null, PageRequest.of(0, 50)
+                        keyword, null, null, null, null, null, null, null, PageRequest.of(0, 50)
                 );
                 for (ProductResponseDTO product : page.getContent()) {
                     uniqueProducts.putIfAbsent(product.getId(), product);

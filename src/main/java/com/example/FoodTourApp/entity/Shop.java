@@ -1,5 +1,6 @@
 package com.example.FoodTourApp.entity;
 
+import com.example.FoodTourApp.config.ShopEntityListener;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -9,6 +10,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "shops")
 @Data
+@EntityListeners(ShopEntityListener.class)
 public class Shop {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

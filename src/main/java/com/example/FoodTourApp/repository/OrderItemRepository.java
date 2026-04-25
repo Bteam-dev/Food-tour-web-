@@ -41,7 +41,7 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Integer> {
     FROM OrderItem oi
     JOIN oi.order o
     WHERE o.user.id = :userId
-    AND o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered
+    AND o.orderStatus = com.example.FoodTourApp.entity.Order.OrderStatus.delivered
     ORDER BY o.createdAt DESC
     LIMIT :limit
     """)
@@ -57,13 +57,30 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Integer> {
     """)
     List<Integer> findProductIdsByUser(@Param("userId") Integer userId);
 
+    /**
+     * Item-based CF: Tìm sản phẩm thường được order cùng với productId trong cùng đơn hàng.
+     * Đây là co-purchase signal mạnh nhất — từ actual completed orders.
+     */
+    @Query("""
+    SELECT oi2.product.id, COUNT(oi2.id) as co_count
+    FROM OrderItem oi1
+    JOIN OrderItem oi2 ON oi1.order.id = oi2.order.id
+    WHERE oi1.product.id = :productId
+    AND oi2.product.id != :productId
+    GROUP BY oi2.product.id
+    ORDER BY COUNT(oi2.id) DESC
+    """)
+    List<Object[]> findCoPurchasedInOrders(
+            @Param("productId") Integer productId,
+            org.springframework.data.domain.Pageable pageable);
+
     @Query("""
     SELECT p.name
     FROM OrderItem oi
     JOIN oi.order o
     JOIN oi.product p
     WHERE o.user.id = :userId
-    AND o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered
+    AND o.orderStatus = com.example.FoodTourApp.entity.Order.OrderStatus.delivered
     GROUP BY p.id, p.name
     ORDER BY COUNT(oi.id) DESC
     LIMIT 1

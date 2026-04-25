@@ -104,9 +104,14 @@ INDEX_SETTINGS = {
                 "type": "keyword",
                 "normalizer": "lowercase"
             },
+            "shop_district": {
+                "type": "keyword",
+                "normalizer": "lowercase"
+            },
             "shop_address": {"type": "text", "analyzer": "vietnamese_analyzer"},
             "shop_is_verified": {"type": "boolean"},
             "shop_is_active": {"type": "boolean"},
+            "opening_hours": {"type": "keyword", "index": False},
 
             # Category
             "category_name": {
@@ -166,6 +171,8 @@ INDEX_SETTINGS = {
 
             # Status
             "is_available": {"type": "boolean"},
+            # Trạng thái mở/đóng cửa của shop - được cập nhật tự động bởi Spring Scheduler mỗi 60s
+            "shop_is_open": {"type": "boolean"},
 
             # Rating & reviews
             "rating": {"type": "float"},
@@ -222,6 +229,34 @@ def parse_json_array(json_str: str) -> List[str]:
         return result if isinstance(result, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def is_shop_currently_open(opening_hours_json: str) -> bool:
+    """Tính trạng thái mở/đóng cửa của shop tại thời điểm sync.
+    Format opening_hours: {"monday": {"open": "08:00", "close": "22:00"}, ...}
+    """
+    if not opening_hours_json:
+        return True
+    try:
+        from datetime import time as dt_time
+        hours = json.loads(opening_hours_json)
+        now = datetime.now()
+        day_key = now.strftime('%A').lower()  # 'monday', 'tuesday', ...
+        today_hours = hours.get(day_key)
+        if not today_hours:
+            return False
+        open_str = today_hours.get('open')
+        close_str = today_hours.get('close')
+        if not open_str or not close_str:
+            return False
+        open_time = dt_time.fromisoformat(open_str)
+        close_time = dt_time.fromisoformat(close_str)
+        current_time = now.time().replace(second=0, microsecond=0)
+        if close_time < open_time:  # qua đêm (22:00 - 02:00)
+            return current_time >= open_time or current_time < close_time
+        return open_time <= current_time < close_time
+    except Exception:
+        return True
 
 
 def calculate_effective_price(price: float, discount_price: Optional[float]) -> float:
@@ -285,7 +320,9 @@ def build_search_document(row: Dict[str, Any], embedding: Optional[List[float]] 
         'category_id': row.get('category_id'),
         'shop_name': row.get('shop_name'),
         'shop_city': row.get('shop_city', '').lower() if row.get('shop_city') else None,
+        'shop_district': row.get('shop_district', '').lower() if row.get('shop_district') else None,
         'shop_address': row.get('shop_address'),
+        'opening_hours': row.get('opening_hours'),
         'shop_is_verified': bool(row.get('shop_is_verified')),
         'shop_is_active': bool(row.get('shop_is_active')),
         'category_name': row.get('category_name'),
@@ -308,6 +345,7 @@ def build_search_document(row: Dict[str, Any], embedding: Optional[List[float]] 
         'min_order_quantity': row.get('min_order_quantity', 1),
         'max_order_quantity': row.get('max_order_quantity', 999),
         'is_available': bool(row.get('is_available')),
+        'shop_is_open': is_shop_currently_open(row.get('opening_hours')),
         'rating': rating,
         'total_reviews': total_reviews,
         'rating_score': rating_score,
@@ -369,7 +407,11 @@ def get_products_query(product_id: Optional[int] = None) -> str:
             p.nutrition_info, p.tags, p.preparation_time, p.stock_quantity,
             p.min_order_quantity, p.max_order_quantity, p.is_available,
             p.rating, p.total_reviews, p.created_at, p.updated_at,
-            s.shop_name, s.city as shop_city, s.address_line as shop_address,
+            s.shop_name,
+            s.city as shop_city,
+            s.district as shop_district,
+            s.address_line as shop_address,
+            s.opening_hours,
             s.is_verified as shop_is_verified, s.is_active as shop_is_active,
             c.name as category_name,
             COALESCE(

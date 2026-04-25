@@ -3,6 +3,7 @@ package com.example.FoodTourApp.config;
 import com.example.FoodTourApp.entity.Product;
 import com.example.FoodTourApp.service.EsChatbotSyncProducer;
 import com.example.FoodTourApp.service.EsProductSyncProducer;
+import com.example.FoodTourApp.service.EsRecommendSyncProducer;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
@@ -13,16 +14,17 @@ import org.springframework.stereotype.Component;
 
 /**
  * JPA Entity Listener - Auto sync Product changes to Elasticsearch.
- * 
+ *
  * Triggers when Product entity is created/updated/deleted.
  * Publishes events to Redis queues for async processing.
- * 
- * Syncs to 2 ES indexes:
- * 1. foodtour_products_chatbot - Vector index for RAG/chatbot (with embeddings)
+ *
+ * Syncs to 3 ES indexes:
+ * 1. foodtour_products_chatbot - Vector index for RAG/chatbot (with Gemini embeddings)
  * 2. foodtour_products_search  - Search index for product listing
- * 
+ * 3. products_recommend        - KNN index for recommendation (category-avg embedding proxy)
+ *
  * Flow:
- * Product change → this listener → Redis queue → Consumer → ES bulk sync
+ * Product change → this listener → Redis queues → Consumers → ES bulk sync
  */
 @Component
 public class ProductEntityListener {
@@ -34,6 +36,9 @@ public class ProductEntityListener {
 
     @Autowired
     private EsProductSyncProducer esProductSyncProducer;
+
+    @Autowired
+    private EsRecommendSyncProducer esRecommendSyncProducer;
 
     @PostPersist
     @PostUpdate
@@ -54,6 +59,13 @@ public class ProductEntityListener {
         } catch (Exception e) {
             log.error("Failed to queue product {} for search index: {}", productId, e.getMessage());
         }
+
+        // 3. Push event to recommend sync queue (category-avg embedding proxy)
+        try {
+            esRecommendSyncProducer.pushIndexEvent(productId);
+        } catch (Exception e) {
+            log.error("Failed to queue product {} for recommend index: {}", productId, e.getMessage());
+        }
     }
 
     @PostRemove
@@ -73,6 +85,13 @@ public class ProductEntityListener {
             esProductSyncProducer.pushDeleteEvent(productId);
         } catch (Exception e) {
             log.error("Failed to queue product {} delete for search index: {}", productId, e.getMessage());
+        }
+
+        // 3. Push delete event to recommend queue
+        try {
+            esRecommendSyncProducer.pushDeleteEvent(productId);
+        } catch (Exception e) {
+            log.error("Failed to queue product {} delete for recommend index: {}", productId, e.getMessage());
         }
     }
 }

@@ -46,6 +46,7 @@ public class SecurityConfig {
                         .requestMatchers("/uploads/ShopBanner/**").permitAll()
                         .requestMatchers("/uploads/ReviewImage/**").permitAll()
                         .requestMatchers("/uploads/UserAvatar/**").permitAll()
+                        .requestMatchers("/uploads/ForDemo/**").permitAll()
                         .requestMatchers("/uploads/BusinessLicense/**").hasRole("ADMIN")
                         .requestMatchers("/uploads/IdCard/**").hasRole("ADMIN")
                         // FileMessage KHÔNG permitAll → phải có JWT + là participant

@@ -267,6 +267,44 @@ public class TokenStorageService {
     }
 
     /**
+     * Revoke một token cụ thể theo tokenId (không cần JWT - dùng cho admin)
+     * Admin biết tokenId từ getUserActiveSessions() và revoke trực tiếp
+     */
+    public boolean revokeTokenById(String tokenId) {
+        try {
+            String tokenKey = String.format(TOKEN_KEY, tokenId);
+            Map<Object, Object> tokenData = stringRedisTemplate.opsForHash().entries(tokenKey);
+
+            if (tokenData.isEmpty()) {
+                logger.warn("Token not found for tokenId-based revocation: {}", tokenId);
+                return false;
+            }
+
+            Integer userId = Integer.parseInt((String) tokenData.get("userId"));
+
+            // Xóa khỏi user sessions set
+            String userSessionsKey = String.format(USER_SESSIONS_KEY, userId);
+            stringRedisTemplate.opsForSet().remove(userSessionsKey, tokenId);
+
+            // Xóa token data
+            stringRedisTemplate.delete(tokenKey);
+
+            // Kiểm tra còn session nào không, nếu không thì xóa khỏi active users
+            Long remaining = stringRedisTemplate.opsForSet().size(userSessionsKey);
+            if (remaining == null || remaining == 0) {
+                stringRedisTemplate.opsForSet().remove(ACTIVE_USERS_KEY, userId.toString());
+            }
+
+            logger.info("✅ Token revoked by ID: {}, UserId: {}", tokenId, userId);
+            return true;
+
+        } catch (Exception e) {
+            logger.error("❌ Failed to revoke token by ID: {}", tokenId, e);
+            return false;
+        }
+    }
+
+    /**
      * Revoke tất cả tokens của một user (logout all devices)
      */
     public boolean revokeAllUserTokens(Integer userId) {

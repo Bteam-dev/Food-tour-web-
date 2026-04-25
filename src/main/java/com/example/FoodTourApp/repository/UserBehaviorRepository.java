@@ -54,16 +54,20 @@ public interface UserBehaviorRepository extends JpaRepository<UserBehavior, Long
     List<Integer> findNegativeProductIds(@Param("userId") Integer userId);
 
     /**
-     * Tính tổng weighted score của user cho mỗi product
+     * Tính tổng weighted score của user cho mỗi product trong N ngày gần nhất.
+     * Trả thêm MAX(createdAt) để caller có thể apply time decay.
      */
     @Query("""
-        SELECT ub.product.id, SUM(ub.weight) as totalWeight
+        SELECT ub.product.id, SUM(ub.weight) as totalWeight, MAX(ub.createdAt) as lastInteraction
         FROM UserBehavior ub
         WHERE ub.user.id = :userId
+        AND ub.weight > 0
+        AND ub.createdAt > :since
         GROUP BY ub.product.id
         ORDER BY SUM(ub.weight) DESC
         """)
-    List<Object[]> findUserProductWeights(@Param("userId") Integer userId);
+    List<Object[]> findUserProductWeights(@Param("userId") Integer userId,
+                                          @Param("since") LocalDateTime since);
 
     /**
      * Lấy các category mà user hay tương tác (cho content-based)
@@ -174,6 +178,71 @@ public interface UserBehaviorRepository extends JpaRepository<UserBehavior, Long
     List<Object[]> findProductsFromSimilarUsers(
             @Param("similarUserIds") List<Integer> similarUserIds,
             @Param("excludeProductIds") List<Integer> excludeProductIds,
+            Pageable pageable);
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // COLD-START — Trending & Popular products cho user mới chưa có hành vi
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Trending: các product được mua nhiều nhất trong khoảng thời gian gần đây.
+     * Dùng cho cold-start thay vì chỉ top-rated tĩnh.
+     */
+    @Query("""
+        SELECT ub.product.id, COUNT(ub.id) as purchase_count
+        FROM UserBehavior ub
+        WHERE ub.actionType = 'PURCHASE'
+        AND ub.createdAt > :since
+        GROUP BY ub.product.id
+        ORDER BY COUNT(ub.id) DESC
+        """)
+    List<Object[]> findTrendingProductIds(
+            @Param("since") LocalDateTime since,
+            Pageable pageable);
+
+    /**
+     * Kiểm tra user có bất kỳ hành vi nào chưa (để detect cold-start).
+     */
+    @Query("SELECT COUNT(ub) > 0 FROM UserBehavior ub WHERE ub.user.id = :userId")
+    boolean existsByUserId(@Param("userId") Integer userId);
+
+    /**
+     * Item-based CF: Tìm sản phẩm hay được mua cùng với productId
+     * Dùng UserBehavior PURCHASE records: users nào mua productId cũng mua gì khác
+     */
+    @Query("""
+        SELECT ub2.product.id, COUNT(ub2.id) as co_count
+        FROM UserBehavior ub1
+        JOIN UserBehavior ub2 ON ub1.user.id = ub2.user.id
+        WHERE ub1.product.id = :productId
+        AND ub1.actionType = 'PURCHASE'
+        AND ub2.actionType = 'PURCHASE'
+        AND ub2.product.id != :productId
+        GROUP BY ub2.product.id
+        ORDER BY COUNT(ub2.id) DESC
+        """)
+    List<Object[]> findCoPurchasedProducts(
+            @Param("productId") Integer productId,
+            Pageable pageable);
+
+    /**
+     * Weak CF signals: users nào VIEW/ADD_CART productId cũng tương tác với gì khác
+     * Dùng khi PURCHASE data còn thưa
+     */
+    @Query("""
+        SELECT ub2.product.id, SUM(ub2.weight) as total_score
+        FROM UserBehavior ub1
+        JOIN UserBehavior ub2 ON ub1.user.id = ub2.user.id
+        WHERE ub1.product.id = :productId
+        AND ub1.actionType IN ('PURCHASE', 'ADD_CART', 'WISHLIST_ADD')
+        AND ub2.actionType IN ('PURCHASE', 'ADD_CART', 'WISHLIST_ADD')
+        AND ub2.product.id != :productId
+        AND ub2.weight > 0
+        GROUP BY ub2.product.id
+        ORDER BY SUM(ub2.weight) DESC
+        """)
+    List<Object[]> findCoInteractedProducts(
+            @Param("productId") Integer productId,
             Pageable pageable);
 
     // ══════════════════════════════════════════════════════════════════════════

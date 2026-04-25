@@ -477,7 +477,7 @@ public class ProductServiceImpl implements ProductService {
                 return currentTime.isAfter(openTime) || currentTime.isBefore(closeTime);
             }
             
-            return !currentTime.isBefore(openTime) && !currentTime.isAfter(closeTime);
+            return !currentTime.isBefore(openTime) && currentTime.isBefore(closeTime);
             
         } catch (Exception e) {
             log.warn("Failed to parse shop opening hours for shop {}: {}", shop.getId(), e.getMessage());

@@ -39,6 +39,11 @@ public class WebConfig implements WebMvcConfigurer {
                 .addResourceLocations(storageFilePath + "UserAvatar/")
                 .setCachePeriod(cachePeriodSeconds)
                 .resourceChain(true);
+        registry.addResourceHandler("/uploads/ForDemo/**")
+                .addResourceLocations(storageFilePath + "ForDemo/")
+                .setCachePeriod(cachePeriodSeconds)
+                .resourceChain(true);
+
         // BusinessLicense và IdCard KHÔNG serve tĩnh — phải đi qua /api/admin/files/** (yêu cầu ADMIN JWT)
 
         // FileMessage KHÔNG được serve tĩnh ở đây nữa

@@ -297,6 +297,19 @@ public class JwtUtils {
     }
 
     /**
+     * Revoke token theo tokenId (dùng cho admin - không cần JWT string)
+     * Admin lấy tokenId từ getUserActiveSessions() rồi revoke trực tiếp
+     */
+    public boolean revokeTokenById(String tokenId) {
+        try {
+            return tokenStorageService.revokeTokenById(tokenId);
+        } catch (Exception e) {
+            log.error("❌ Error revoking token by ID: {}", tokenId, e);
+            return false;
+        }
+    }
+
+    /**
      * 🔥 NEW: Get user active sessions
      */
     public List<TokenStorageService.SessionInfo> getUserActiveSessions(Integer userId) {

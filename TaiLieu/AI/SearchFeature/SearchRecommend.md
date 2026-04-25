@@ -171,13 +171,13 @@ cd D:\Project\BackEnd\FoodTourApp_BE\FoodTourApp
 pip install elasticsearch pymysql
 
 # Lần đầu hoặc khi thay đổi mapping → recreate
-python scripts/search/sync_es_search.py --recreate-index
+python sync_es_search.py --recreate-index
 
 # Các lần sau chỉ cần sync
-python scripts/search/sync_es_search.py --full
+python sync_es_search.py --full
 
 # Kiểm tra
-python scripts/search/sync_es_search.py --verify
+python sync_es_search.py --verify
 ```
 
 **Kết quả:**
@@ -193,10 +193,10 @@ python scripts/search/sync_es_search.py --verify
 
 ```bash
 # Tạo suggestion index từ MySQL
-python scripts/search/sync_es_suggestions.py --recreate-index --from-db
+python sync_es_suggestions.py --recreate-index --from-db
 
 # Kiểm tra
-python scripts/search/sync_es_suggestions.py --verify
+python sync_es_suggestions.py --verify
 ```
 
 Cấu hình `application.properties`:

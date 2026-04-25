@@ -118,27 +118,6 @@ public class UserSessionController {
     }
 
     /**
-     * 🔥 NEW: Revoke specific session by tokenId (for admin or advanced users)
-     */
-    @DeleteMapping("/revoke/{tokenId}")
-    public ResponseEntity<?> revokeSpecificSession(@AuthenticationPrincipal User user,
-                                                 @PathVariable String tokenId) {
-        try {
-            // TODO: Implement tokenId-based revocation
-            // For now, we'll just return not implemented
-            return ResponseEntity.badRequest().body(
-                Map.of("success", false, "message", "Token ID based revocation not yet implemented")
-            );
-            
-        } catch (Exception e) {
-            logger.error("❌ Failed to revoke specific session", e);
-            return ResponseEntity.badRequest().body(
-                Map.of("success", false, "message", "Failed to revoke session: " + e.getMessage())
-            );
-        }
-    }
-
-    /**
      * 🔥 NEW: Get session statistics
      */
     @GetMapping("/stats")

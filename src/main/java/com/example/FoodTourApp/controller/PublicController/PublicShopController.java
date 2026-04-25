@@ -2,6 +2,7 @@ package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.DTO.ShopDTO.ShopResponseDTO;
+import com.example.FoodTourApp.service.ProductSearchService;
 import com.example.FoodTourApp.service.ShopService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import java.util.Map;
 public class PublicShopController {
 
     private final ShopService shopService;
+    private final ProductSearchService productSearchService;
 
     /**
      * Lấy thông tin chi tiết cửa hàng (PUBLIC - không cần authentication)
@@ -90,6 +92,31 @@ public class PublicShopController {
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", "Failed to fetch cities");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    /**
+     * Lấy danh sách quận/huyện trong một thành phố (PUBLIC)
+     * GET /api/public/shops/districts?city=Ho+Chi+Minh
+     *
+     * Dùng cho filter dropdown quận — chỉ hiện sau khi user chọn thành phố.
+     * Trả về danh sách quận có sản phẩm available trong thành phố đó.
+     */
+    @GetMapping("/districts")
+    public ResponseEntity<?> getAvailableDistricts(@RequestParam(required = false) String city) {
+        log.info("Getting available districts for city={}", city);
+        try {
+            List<String> districts = productSearchService.getAvailableDistricts(city);
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", districts);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error fetching districts for city={}: {}", city, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch districts");
             return ResponseEntity.internalServerError().body(error);
         }
     }

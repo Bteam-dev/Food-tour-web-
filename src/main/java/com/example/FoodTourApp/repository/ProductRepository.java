@@ -58,7 +58,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
            "LEFT JOIN OrderItem oi ON oi.product = p " +
            "LEFT JOIN Order o ON oi.order = o " +
            "WHERE p.isAvailable = true " +
-           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered) " +
+           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order.OrderStatus.delivered) " +
            "GROUP BY p " +
            "ORDER BY COALESCE(SUM(oi.quantity), 0) DESC")
     Page<Product> findBestSelling(Pageable pageable);
@@ -70,7 +70,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
            "LEFT JOIN OrderItem oi ON oi.product = p " +
            "LEFT JOIN Order o ON oi.order = o " +
            "WHERE p.isAvailable = true AND LOWER(p.shop.city) = LOWER(:city) " +
-           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered) " +
+           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order.OrderStatus.delivered) " +
            "GROUP BY p " +
            "ORDER BY COALESCE(SUM(oi.quantity), 0) DESC")
     Page<Product> findBestSellingByCity(@Param("city") String city, Pageable pageable);
@@ -107,7 +107,7 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
            "AND (:maxPrice IS NULL OR COALESCE(p.discountPrice, p.price) <= :maxPrice) " +
            "AND (:categoryId IS NULL OR p.category.id = :categoryId) " +
            "AND (:city IS NULL OR LOWER(p.shop.city) = LOWER(:city)) " +
-           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order$OrderStatus.delivered) " +
+           "AND (o IS NULL OR o.orderStatus = com.example.FoodTourApp.entity.Order.OrderStatus.delivered) " +
            "GROUP BY p " +
            "ORDER BY COALESCE(SUM(oi.quantity), 0) DESC")
     Page<Product> findBestSellingWithFilters(
@@ -154,4 +154,21 @@ public interface ProductRepository extends JpaRepository<Product, Integer> {
      */
     @Query("SELECT p FROM Product p WHERE p.shop.id = :shopId AND p.isAvailable = true ORDER BY p.rating DESC")
     List<Product> findByShopIdAndIsAvailableTrue(@Param("shopId") Integer shopId, Pageable pageable);
+
+    /**
+     * Cold-start: lấy top-rated available có diversity theo category.
+     * Lấy pool lớn để service tự deduplicate by category.
+     */
+    @Query("""
+    SELECT p FROM Product p
+    WHERE p.isAvailable = true
+    ORDER BY p.category.id ASC, (p.rating * LOG(p.totalReviews + 1)) DESC
+    """)
+    List<Product> findAvailableOrderedByCategoryAndScore(Pageable pageable);
+
+    /**
+     * Cold-start: lấy sản phẩm theo danh sách product IDs (trending)
+     */
+    @Query("SELECT p FROM Product p WHERE p.id IN :ids AND p.isAvailable = true")
+    List<Product> findAvailableByIds(@Param("ids") List<Integer> ids);
 }
