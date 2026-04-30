@@ -20,7 +20,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -72,15 +71,6 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
         // Gọi AI (RAG) — truyền conversationId để memory độc lập per conversation
         String botReply = chatbotAIService.generateReply(conversationId, request.getContent());
 
-        // Lưu tin bot
-        ChatbotMessage botMsg = new ChatbotMessage();
-        botMsg.setConversation(conv);
-        botMsg.setSenderType("BOT");
-        botMsg.setSenderName("FoodTour Bot");
-        botMsg.setContent(botReply);
-        messageRepo.save(botMsg);
-        conv.addMessage(botMsg);
-
         // Extract product IDs từ RAG retrieval
         // RAG engine (Elasticsearch + Vector Similarity) đã tự động tìm products phù hợp với query:
         // - Hỏi tên món → tìm món có tên giống/chứa từ khóa
@@ -90,39 +80,30 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
         // - Hỏi về giá/rating/thời gian → tìm món match điều kiện
         // Vector similarity đảm bảo suggestions LUÔN tương quan với query của user
         List<Integer> relevantProductIds = foodVectorService.retrieveProductIds(request.getContent());
-        
-        log.info("📋 Query: '{}' → Found {} relevant products: {}", 
-                 request.getContent(), relevantProductIds.size(), relevantProductIds);
-        
-        // CRITICAL: Nếu RAG không tìm thấy món nào → LLM sẽ tự bịa!
-        // Cần đảm bảo System Prompt bắt buộc LLM trả lời [NO_MATCH] khi CONTEXT rỗng
+
+        log.info("📋 Query: '{}' → Found {} relevant products: {}",
+                request.getContent(), relevantProductIds.size(), relevantProductIds);
+
         if (relevantProductIds.isEmpty()) {
             log.warn("⚠️ WARNING: RAG returned EMPTY results → LLM might hallucinate!");
         }
-        
+
         // Tạo navigation URLs (giữ nguyên thứ tự từ RAG - món match nhất ở đầu)
         List<String> navigationUrls = relevantProductIds.stream()
                 .map(id -> "product_detail/" + id)
                 .collect(Collectors.toList());
-        
+
         // Tạo danh sách sản phẩm gợi ý với đầy đủ thông tin
-        // QUAN TRỌNG: Phải giữ nguyên thứ tự từ relevantProductIds (đã được sort theo similarity score)
-        // Món có score cao nhất (match nhất với query) sẽ hiển thị đầu tiên
         List<ChatbotMessageResponse.ProductSuggestion> suggestedProducts = new ArrayList<>();
-        
-        // Dùng LinkedHashMap để giữ thứ tự và tránh query database nhiều lần
+
         Map<Integer, Product> productMap = new java.util.LinkedHashMap<>();
-        List<Product> allProducts = productRepository.findAllById(relevantProductIds);
-        for (Product p : allProducts) {
-            productMap.put(p.getId(), p);
-        }
-        
-        // Duyệt theo đúng thứ tự từ RAG (món match nhất ở đầu)
+        productRepository.findAllById(relevantProductIds).forEach(p -> productMap.put(p.getId(), p));
+
         for (Integer productId : relevantProductIds) {
             Product product = productMap.get(productId);
             if (product != null && product.getIsAvailable() != null && product.getIsAvailable()) {
-                ChatbotMessageResponse.ProductSuggestion suggestion = 
-                    new ChatbotMessageResponse.ProductSuggestion();
+                ChatbotMessageResponse.ProductSuggestion suggestion =
+                        new ChatbotMessageResponse.ProductSuggestion();
                 suggestion.setProductId(product.getId());
                 suggestion.setProductName(product.getName());
                 suggestion.setShopName(product.getShop().getShopName());
@@ -131,20 +112,37 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
                 suggestion.setDiscountPrice(product.getDiscountPrice());
                 suggestion.setRating(product.getRating());
                 suggestion.setTotalReviews(product.getTotalReviews());
-                
-                // Lấy ảnh đầu tiên từ imageUrls JSON array
-                String imageUrl = extractFirstImageUrl(product.getImageUrls());
-                suggestion.setImageUrl(imageUrl);
-                
+                suggestion.setImageUrl(extractFirstImageUrl(product.getImageUrls()));
                 suggestion.setNavigationUrl("product_detail/" + product.getId());
-                
                 suggestedProducts.add(suggestion);
-                
-                log.info("  ✅ Added suggestion #{}: {} (shopId: {}, score rank: {})", 
-                         suggestedProducts.size(), product.getName(), product.getShop().getId(), 
-                         relevantProductIds.indexOf(productId) + 1);
+
+                log.info("  ✅ Added suggestion #{}: {} (shopId: {}, score rank: {})",
+                        suggestedProducts.size(), product.getName(), product.getShop().getId(),
+                        relevantProductIds.indexOf(productId) + 1);
             }
         }
+
+        // Lưu tin bot (một lần duy nhất, đã có đủ navigation + products)
+        ChatbotMessage botMsg = new ChatbotMessage();
+        botMsg.setConversation(conv);
+        botMsg.setSenderType("BOT");
+        botMsg.setSenderName("FoodTour Bot");
+        botMsg.setContent(botReply);
+
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            if (!navigationUrls.isEmpty()) {
+                botMsg.setNavigationUrlsJson(mapper.writeValueAsString(navigationUrls));
+            }
+            if (!suggestedProducts.isEmpty()) {
+                botMsg.setSuggestedProductsJson(mapper.writeValueAsString(suggestedProducts));
+            }
+        } catch (Exception e) {
+            log.warn("[Chatbot] Không thể serialize navigation/products: {}", e.getMessage());
+        }
+
+        messageRepo.save(botMsg);
+        conv.addMessage(botMsg);
 
         ChatbotMessageResponse response = new ChatbotMessageResponse();
         response.setId(botMsg.getId());
@@ -165,6 +163,7 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
             throw new RuntimeException("Not authorized");
         }
 
+        ObjectMapper mapper = new ObjectMapper();
         return conv.getMessages().stream()
                 .map(msg -> {
                     ChatbotMessageResponse response = new ChatbotMessageResponse();
@@ -173,8 +172,32 @@ public class ChatbotMessageServiceImpl implements ChatbotMessageService {
                     response.setSenderName(msg.getSenderName());
                     response.setContent(msg.getContent());
                     response.setCreatedAt(msg.getCreatedAt());
-                    // Note: historical messages don't have navigation URLs and suggested products
-                    // Only new messages include these fields
+
+                    // Deserialize navigation URLs từ DB
+                    if (msg.getNavigationUrlsJson() != null) {
+                        try {
+                            List<String> urls = mapper.readValue(
+                                    msg.getNavigationUrlsJson(),
+                                    mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                            response.setNavigationUrls(urls);
+                        } catch (Exception e) {
+                            log.warn("[Chatbot] Không thể deserialize navigationUrls cho message {}", msg.getId());
+                        }
+                    }
+
+                    // Deserialize suggested products từ DB
+                    if (msg.getSuggestedProductsJson() != null) {
+                        try {
+                            List<ChatbotMessageResponse.ProductSuggestion> products = mapper.readValue(
+                                    msg.getSuggestedProductsJson(),
+                                    mapper.getTypeFactory().constructCollectionType(
+                                            List.class, ChatbotMessageResponse.ProductSuggestion.class));
+                            response.setSuggestedProducts(products);
+                        } catch (Exception e) {
+                            log.warn("[Chatbot] Không thể deserialize suggestedProducts cho message {}", msg.getId());
+                        }
+                    }
+
                     return response;
                 }).collect(Collectors.toList());
     }

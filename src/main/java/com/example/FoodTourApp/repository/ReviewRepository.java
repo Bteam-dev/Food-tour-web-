@@ -85,4 +85,17 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
 
     // CHECK XEM ORDER CÓ REVIEW YÊU CẦU REFUND KHÔNG
     boolean existsByOrderIdAndHasRefundRequestTrue(Integer orderId);
+
+    /**
+     * Lấy N đánh giá gần nhất của một sản phẩm để đưa vào context AI phân tích.
+     * Chỉ lấy review approved, chưa bị xóa mềm.
+     */
+    @Query("SELECT r FROM Review r WHERE r.reviewableType = com.example.FoodTourApp.entity.Review.ReviewableType.product " +
+           "AND r.reviewableId = :productId " +
+           "AND r.isApproved = true AND r.isDeleted = false " +
+           "ORDER BY r.createdAt DESC")
+    List<Review> findTopApprovedReviewsForProduct(
+            @Param("productId") Integer productId,
+            org.springframework.data.domain.Pageable pageable
+    );
 }

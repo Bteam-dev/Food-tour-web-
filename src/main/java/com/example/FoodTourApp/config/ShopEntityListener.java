@@ -37,6 +37,9 @@ public class ShopEntityListener {
     @Autowired
     private EsProductSyncProducer esProductSyncProducer;
 
+    @Autowired
+    private ShopOpenStatusScheduler shopOpenStatusScheduler;
+
     /**
      * Khi shop được update (approve, reject, đổi tên, đổi địa chỉ, deactivate...):
      * Re-index tất cả products của shop để ES phản ánh dữ liệu shop mới nhất.
@@ -48,6 +51,9 @@ public class ShopEntityListener {
             if (products.isEmpty()) return;
 
             log.info("Shop {} updated — queuing re-index for {} products", shop.getId(), products.size());
+
+            // Reschedule open/close transition task khi opening_hours, isVerified, hoặc isActive thay đổi
+            shopOpenStatusScheduler.rescheduleShop(shop);
 
             for (var product : products) {
                 Integer productId = product.getId();

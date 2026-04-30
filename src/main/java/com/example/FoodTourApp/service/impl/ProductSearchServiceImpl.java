@@ -285,7 +285,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             sortOptions.addAll(buildSortOptions(sortBy));
 
             // Filter theo trạng thái mở/đóng cửa của shop — tại ES level, pagination chính xác.
-            // shop_is_open được cập nhật tự động bởi ShopOpenStatusScheduler mỗi 60 giây.
+            // shop_is_open được cập nhật bởi ShopOpenStatusScheduler theo event-driven:
+            // task fire đúng lúc shop mở/đóng cửa, không polling.
             if (shopOpen != null) {
                 boolQuery.filter(TermQuery.of(t -> t
                         .field("shop_is_open")
@@ -814,7 +815,7 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         dto.setId(getInteger(source, "id"));
         dto.setShopId(getInteger(source, "shop_id"));
         dto.setShopName(getString(source, "shop_name"));
-        // Đọc shop_is_open từ ES (được cập nhật bởi ShopOpenStatusScheduler mỗi 60s).
+        // Đọc shop_is_open từ ES (được cập nhật bởi ShopOpenStatusScheduler event-driven).
         // Fallback sang tính runtime nếu field chưa có (index cũ chưa sync lại).
         Boolean shopIsOpen = getBoolean(source, "shop_is_open");
         dto.setShopIsOpen(shopIsOpen != null ? shopIsOpen : isShopCurrentlyOpen(getString(source, "opening_hours")));
