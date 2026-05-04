@@ -5,6 +5,7 @@ import com.example.FoodTourApp.DTO.ProductDTO.ProductResponseDTO;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.entity.UserBehavior.BehaviorSource;
 import com.example.FoodTourApp.service.RealTimeRecommendationService;
+import com.example.FoodTourApp.service.SearchSuggestionService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,7 @@ import java.util.Map;
 public class RecommendationController {
 
     private final RealTimeRecommendationService recommendationService;
+    private final SearchSuggestionService searchSuggestionService;
     private static final Logger logger = LoggerFactory.getLogger(RecommendationController.class);
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -223,10 +225,17 @@ public class RecommendationController {
     public ResponseEntity<?> trackSearchClick(
             @AuthenticationPrincipal User user,
             @RequestParam Integer productId,
-            @RequestParam(required = false) String sessionId
+            @RequestParam(required = false) String sessionId,
+            @RequestParam(required = false) String searchQuery,
+            @RequestParam(required = false, defaultValue = "0") int clickPosition
     ) {
         try {
-            recommendationService.trackSearchClick(user.getId(), productId, sessionId);
+            Integer userId = user != null ? user.getId() : null;
+            recommendationService.trackSearchClick(userId, productId, sessionId);
+            // Ghi vào ES để export analytics CSV (clicked_product_id, click_position)
+            if (searchQuery != null && !searchQuery.isBlank()) {
+                searchSuggestionService.logSearchClick(userId, searchQuery, productId, clickPosition, sessionId);
+            }
             return ResponseEntity.ok(Map.of("success", true));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));

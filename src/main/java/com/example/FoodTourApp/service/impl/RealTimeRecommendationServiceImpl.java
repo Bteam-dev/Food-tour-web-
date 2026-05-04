@@ -469,19 +469,15 @@ public class RealTimeRecommendationServiceImpl implements RealTimeRecommendation
             );
             
             if (existingView != null) {
-                // Update duration cho existing record
                 existingView.setViewDurationSeconds(durationSeconds);
                 behaviorRepository.save(existingView);
-                
                 log.info("Updated view duration: userId={}, productId={}, sessionId={}, duration={}s",
                     userId, productId, sessionId, durationSeconds);
-                
-                // Update user embedding after behavior change
                 if (userId != null) {
                     updateUserEmbedding(userId);
                 }
             } else {
-                log.warn("No existing VIEW record found to update duration: userId={}, productId={}, sessionId={}",
+                log.warn("No VIEW record to update duration: userId={}, productId={}, sessionId={}",
                     userId, productId, sessionId);
             }
         } catch (Exception e) {
