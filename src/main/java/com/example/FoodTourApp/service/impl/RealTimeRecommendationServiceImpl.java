@@ -11,6 +11,7 @@ import com.example.FoodTourApp.repository.UserBehaviorRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.ProductService;
 import com.example.FoodTourApp.service.RealTimeRecommendationService;
+import com.example.FoodTourApp.service.UserBehaviorBufferService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -50,6 +51,7 @@ import java.util.stream.Collectors;
 public class RealTimeRecommendationServiceImpl implements RealTimeRecommendationService {
 
     private final UserBehaviorRepository behaviorRepository;
+    private final UserBehaviorBufferService behaviorBufferService;
     private final OrderItemRepository orderItemRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
@@ -327,8 +329,9 @@ public class RealTimeRecommendationServiceImpl implements RealTimeRecommendation
     // ══════════════════════════════════════════════════════════════════════════
 
     @Override
-    @Transactional
-    public void trackBehavior(Integer userId, Integer productId, 
+    // @Transactional bỏ: không còn write trong method này
+    // enable_lazy_load_no_trans=true cho phép lazy-load ngoài transaction
+    public void trackBehavior(Integer userId, Integer productId,
                               ActionType actionType,
                               String sessionId,
                               BehaviorSource source,
@@ -342,24 +345,20 @@ public class RealTimeRecommendationServiceImpl implements RealTimeRecommendation
                 return;
             }
 
-            UserBehavior behavior = UserBehavior.builder()
-                    .user(userRepository.getReferenceById(userId))
-                    .product(product)
-                    .actionType(actionType)
-                    .weight(calculateWeight(actionType, viewDurationSeconds, quantity, rating))
-                    .sessionId(sessionId)
-                    .source(source)
-                    .viewDurationSeconds(viewDurationSeconds)
-                    .quantity(quantity)
-                    .rating(rating)
-                    .categoryId(product.getCategory().getId())
-                    .shopId(product.getShop().getId())
-                    .build();
+            double weight     = calculateWeight(actionType, viewDurationSeconds, quantity, rating);
+            Integer categoryId = product.getCategory().getId(); // lazy load ok do enable_lazy_load_no_trans
+            Integer shopId     = product.getShop().getId();
 
-            behaviorRepository.save(behavior);
-            log.debug("Tracked {} for user {} on product {}", actionType, userId, productId);
+            // Buffer vào Redis thay vì ghi thẳng MySQL
+            // → Batch flush vào MySQL mỗi 30s bởi UserBehaviorBufferServiceImpl
+            behaviorBufferService.buffer(userId, productId, actionType, weight,
+                    sessionId, source, viewDurationSeconds, quantity, rating,
+                    categoryId, shopId);
 
-            // Async update user embedding
+            log.debug("Buffered {} for user {} on product {}", actionType, userId, productId);
+
+            // Async update user embedding (từ MySQL data hiện tại, max lag 30s)
+            // Lag 30s chấp nhận được vì embedding cache TTL là 6 giờ
             updateUserEmbeddingAsync(userId);
 
         } catch (Exception e) {

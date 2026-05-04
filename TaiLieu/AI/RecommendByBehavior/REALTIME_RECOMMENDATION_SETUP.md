@@ -459,13 +459,35 @@ curl -X POST http://localhost:8080/api/user/recommendations/track \
 ```
 User click/view/mua hàng
   → POST /api/user/recommendations/track
-  → trackBehavior() → lưu UserBehavior vào MySQL
+  → trackBehavior() → buffer UserBehavior vào Redis List (non-blocking, ~1ms)
   → [ASYNC] updateUserEmbeddingAsync():
-       Query behaviors 14 ngày gần nhất
+       Query behaviors 14 ngày gần nhất (từ MySQL, max lag 30s)
        user_emb[i] = Σ(0.7^daysAgo × weight × product_emb[i]) / Σ(decay × weight)
        product_emb: lấy từ RAM (ES đã load) hoặc category average nếu không có
        L2 normalize → unit vector 64-dim
        → Redis: rec:user:embedding:{userId} (TTL 6h)
+
+  [BACKGROUND - mỗi 30 giây]
+  → UserBehaviorBufferService.flush():
+       LRANGE Redis buffer → batch saveAll → MySQL
+       (max lag 30s, không ảnh hưởng embedding vì TTL 6h)
+
+  [BACKGROUND - 3 giờ sáng]
+  → Retention cleanup: xóa behaviors cũ hơn 90 ngày từ MySQL
+    (90 ngày đủ cho training 6 tháng trong RecommendationDataExportService)
+```
+
+### SearchAnalytics - Elasticsearch thay MySQL
+
+```
+User search
+  → logSearch() → ghi SearchAnalytics vào ES index "search_analytics" (async)
+  → [KHÔNG ghi MySQL nữa - tránh table phình triệu records/ngày]
+
+Trending queries
+  → ES terms aggregation trên "query_normalized" field (nhanh hơn MySQL GROUP BY)
+
+Retention: @Scheduled 3 giờ sáng → delete_by_query (xóa docs > 90 ngày)
 ```
 
 ### Lấy embedding cho sản phẩm trong Java

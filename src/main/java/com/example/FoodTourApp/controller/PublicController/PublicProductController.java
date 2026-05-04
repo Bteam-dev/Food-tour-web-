@@ -114,7 +114,8 @@ public class PublicProductController {
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(required = false) Boolean shopOpen,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sessionId) {
 
         logger.info("ES Search - keyword={}, city={}, district={}, categoryId={}, sortBy={}, minPrice={}, maxPrice={}, shopOpen={}, page={}, size={}",
                 keyword, city, district, categoryId, sortBy, minPrice, maxPrice, shopOpen, page, size);
@@ -133,8 +134,9 @@ public class PublicProductController {
             enrichWishlistStatus(pageResponse.getContent(), userId);
 
             // Log search analytics (async - không ảnh hưởng response time)
+            // userId đã được extract từ auth header — ghi history nếu đã đăng nhập
             if (keyword != null && !keyword.isBlank()) {
-                searchSuggestionService.logSearch(null, keyword, (int) products.getTotalElements(), null);
+                searchSuggestionService.logSearch(userId, keyword, (int) products.getTotalElements(), sessionId);
             }
 
             Map<String, Object> result = new HashMap<>();

@@ -232,17 +232,78 @@ def sync_from_csv(es: Elasticsearch, csv_path: str):
         print("[WARN] No suggestions found in CSV")
 
 
+def build_suggestion_docs(rows, now):
+    """
+    Dùng chung cho cả sync_from_db và sync_from_es.
+    rows: list of dict với keys: query_text, query_normalized, searched_at (datetime)
+    """
+    cut_1d  = now - timedelta(days=1)
+    cut_7d  = now - timedelta(days=7)
+    cut_15d = now - timedelta(days=15)
+
+    stats = defaultdict(lambda: {
+        'texts': [], 'total': 0,
+        'c1d': 0, 'c7d': 0, 'c15d': 0, 'last': None
+    })
+
+    for row in rows:
+        raw_q = (row.get('query_text') or '').strip()
+        if not raw_q:
+            continue
+        norm = row.get('query_normalized') or normalize_vietnamese(raw_q)
+        ts   = row.get('searched_at') or now
+
+        s = stats[norm]
+        s['texts'].append(raw_q)
+        s['total'] += 1
+        if ts >= cut_1d:  s['c1d'] += 1
+        if ts >= cut_7d:  s['c7d'] += 1
+        if ts >= cut_15d: s['c15d'] += 1
+        if s['last'] is None or ts > s['last']:
+            s['last'] = ts
+
+    docs = []
+    for norm, s in stats.items():
+        recent = s['c15d']
+        avg  = recent / 15.0 if recent > 0 else 0
+        mult = (s['c1d'] + s['c7d'] * 0.5) / (avg + 1e-6) if avg > 1e-6 else 1.0
+        score = recent * (1 + 0.7 * (mult - 1))
+        best_text = Counter(s['texts']).most_common(1)[0][0]
+
+        docs.append({
+            'query_text':         best_text,
+            'query_normalized':   norm,
+            'no_accent':          normalize_vietnamese(best_text),
+            'total_searches':     s['total'],
+            'searches_1d':        s['c1d'],
+            'searches_7d':        s['c7d'],
+            'searches_15d':       s['c15d'],
+            'trending_multiplier': round(mult, 4),
+            'is_trending':        mult >= 1.5,
+            'es_weight':          round(max(score, 0), 4),
+            'last_searched_at':   s['last'].isoformat() if s['last'] else None,
+            'updated_at':         now.isoformat(),
+        })
+
+    # Normalize es_weight to 1-10000
+    if docs:
+        max_w = max(d['es_weight'] for d in docs)
+        for d in docs:
+            nw = d['es_weight'] / max_w if max_w > 0 else 0
+            d['es_weight'] = max(1, min(10000, int(1 + nw * 9999)))
+
+    return docs
+
+
 def sync_from_db(es: Elasticsearch):
-    """Compute trending from MySQL search_analytics table (fallback, no embeddings)"""
-    print("[PROCESSING] Computing suggestions from search_analytics...")
+    """
+    Compute trending từ MySQL search_analytics (legacy - cho historical data).
+    Nếu MySQL trống → tự động fallback sang sync_from_es().
+    """
+    print("[PROCESSING] Computing suggestions from MySQL search_analytics...")
 
     conn = get_mysql_connection()
     try:
-        now = datetime.now()
-        cut_1d = now - timedelta(days=1)
-        cut_7d = now - timedelta(days=7)
-        cut_15d = now - timedelta(days=15)
-
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT query_text, query_normalized, searched_at
@@ -250,75 +311,122 @@ def sync_from_db(es: Elasticsearch):
                 WHERE query_text IS NOT NULL AND query_text != ''
                 ORDER BY searched_at DESC
             """)
-            rows = cursor.fetchall()
-
-        if not rows:
-            print("[WARN] No search analytics data found")
-            return
-
-        # Group by normalized query
-        stats = defaultdict(lambda: {
-            'texts': [], 'total': 0,
-            'c1d': 0, 'c7d': 0, 'c15d': 0, 'last': None
-        })
-
-        for row in rows:
-            raw_q = row['query_text'].strip()
-            norm = row['query_normalized'] or normalize_vietnamese(raw_q)
-            ts = row['searched_at'] or now
-
-            s = stats[norm]
-            s['texts'].append(raw_q)
-            s['total'] += 1
-            if ts >= cut_1d:  s['c1d'] += 1
-            if ts >= cut_7d:  s['c7d'] += 1
-            if ts >= cut_15d: s['c15d'] += 1
-            if s['last'] is None or ts > s['last']:
-                s['last'] = ts
-
-        # Build suggestion docs
-        docs = []
-        for norm, s in stats.items():
-            recent = s['c15d']
-            avg = recent / 15.0 if recent > 0 else 0
-            mult = (s['c1d'] + s['c7d'] * 0.5) / (avg + 1e-6) if avg > 1e-6 else 1.0
-            score = recent * (1 + 0.7 * (mult - 1))
-            best_text = Counter(s['texts']).most_common(1)[0][0]
-
-            docs.append({
-                'query_text': best_text,
-                'query_normalized': norm,
-                'no_accent': normalize_vietnamese(best_text),
-                'total_searches': s['total'],
-                'searches_1d': s['c1d'],
-                'searches_7d': s['c7d'],
-                'searches_15d': s['c15d'],
-                'trending_multiplier': round(mult, 4),
-                'is_trending': mult >= 1.5,
-                'es_weight': round(max(score, 0), 4),
-                'last_searched_at': s['last'].isoformat() if s['last'] else None,
-                'updated_at': now.isoformat(),
-            })
-
-        # Normalize es_weight to 1-10000 range
-        if docs:
-            max_w = max(d['es_weight'] for d in docs)
-            for d in docs:
-                nw = d['es_weight'] / max_w if max_w > 0 else 0
-                d['es_weight'] = max(1, min(10000, int(1 + nw * 9999)))
-
-        actions = []
-        for d in docs:
-            doc_id = d['query_normalized'].replace(' ', '_')
-            actions.append({"_index": ES_INDEX, "_id": doc_id, "_source": d})
-
-        if actions:
-            success, failed = helpers.bulk(es, actions, raise_on_error=False)
-            print(f"[OK] Indexed {success} suggestions from DB")
-            es.indices.refresh(index=ES_INDEX)
-
+            raw_rows = cursor.fetchall()
     finally:
         conn.close()
+
+    if not raw_rows:
+        print("[WARN] MySQL search_analytics trống → fallback sang ES search_analytics index...")
+        sync_from_es(es)
+        return
+
+    now = datetime.now()
+    rows = [
+        {
+            'query_text':       r['query_text'],
+            'query_normalized': r.get('query_normalized'),
+            'searched_at':      r['searched_at'] if isinstance(r['searched_at'], datetime) else now,
+        }
+        for r in raw_rows
+    ]
+
+    _bulk_index_suggestions(es, build_suggestion_docs(rows, now), source="MySQL")
+
+
+def sync_from_es(es: Elasticsearch, analytics_index: str = 'search_analytics'):
+    """
+    Compute trending từ ES search_analytics index (NEW - thay thế --from-db).
+
+    SearchAnalytics đã chuyển từ MySQL sang ES để xử lý volume cao hơn.
+    Dùng ES scroll API để lấy toàn bộ data 90 ngày gần nhất → tính trending.
+
+    Usage:
+        python sync_es_suggestions.py --from-es
+    """
+    print(f"[PROCESSING] Computing suggestions from ES index '{analytics_index}'...")
+
+    if not es.indices.exists(index=analytics_index):
+        print(f"[WARN] ES index '{analytics_index}' không tồn tại. Hãy chạy Spring Boot app trước.")
+        return
+
+    now = datetime.now()
+    rows = []
+
+    # Scroll qua toàn bộ search_analytics (tối đa 90 ngày gần nhất)
+    try:
+        resp = es.search(
+            index=analytics_index,
+            scroll='2m',
+            size=1000,
+            body={
+                "query": {
+                    "range": {
+                        "searched_at": {"gte": "now-90d"}
+                    }
+                },
+                "_source": ["query_text", "query_normalized", "searched_at"]
+            }
+        )
+
+        scroll_id = resp['_scroll_id']
+        hits = resp['hits']['hits']
+
+        while hits:
+            for hit in hits:
+                src = hit.get('_source', {})
+                qt = (src.get('query_text') or '').strip()
+                if not qt:
+                    continue
+
+                # Parse searched_at
+                ts_str = src.get('searched_at')
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace('Z', '')) if ts_str else now
+                except Exception:
+                    ts = now
+
+                rows.append({
+                    'query_text':       qt,
+                    'query_normalized': src.get('query_normalized') or normalize_vietnamese(qt),
+                    'searched_at':      ts,
+                })
+
+            # Next scroll batch
+            resp = es.scroll(scroll_id=scroll_id, scroll='2m')
+            scroll_id = resp['_scroll_id']
+            hits = resp['hits']['hits']
+
+        # Clear scroll
+        es.clear_scroll(scroll_id=scroll_id)
+
+    except Exception as e:
+        print(f"[ERROR] ES scroll failed: {e}")
+        return
+
+    if not rows:
+        print("[WARN] Không có data trong ES search_analytics (app chưa chạy đủ lâu?)")
+        return
+
+    print(f"[INFO] Fetched {len(rows)} search events from ES")
+    _bulk_index_suggestions(es, build_suggestion_docs(rows, now), source="ES")
+
+
+def _bulk_index_suggestions(es: Elasticsearch, docs: List[Dict[str, Any]], source: str):
+    """Bulk index suggestion docs vào foodtour_search_suggestions."""
+    if not docs:
+        print(f"[WARN] Không có suggestion docs để index (source={source})")
+        return
+
+    actions = []
+    for d in docs:
+        doc_id = d['query_normalized'].replace(' ', '_')
+        actions.append({"_index": ES_INDEX, "_id": doc_id, "_source": d})
+
+    success, failed = helpers.bulk(es, actions, raise_on_error=False)
+    print(f"[OK] Indexed {success} suggestions from {source}")
+    if failed:
+        print(f"[WARN] Failed: {len(failed)}")
+    es.indices.refresh(index=ES_INDEX)
 
 
 def verify_index(es: Elasticsearch):
@@ -354,11 +462,31 @@ def verify_index(es: Elasticsearch):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Sync search suggestions to Elasticsearch')
-    parser.add_argument('--from-csv', type=str, help='Load from Colab-exported CSV')
-    parser.add_argument('--from-db', action='store_true', help='Compute from MySQL search_analytics')
-    parser.add_argument('--recreate-index', action='store_true', help='Recreate index')
-    parser.add_argument('--verify', action='store_true', help='Verify index')
+    parser = argparse.ArgumentParser(
+        description='Sync search suggestions to Elasticsearch',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Sau khi train Colab (chính xác nhất, có PhoBERT embedding):
+  python sync_es_suggestions.py --from-csv suggestions.csv
+
+  # Tính trending từ ES search_analytics (SearchAnalytics đã chuyển sang ES):
+  python sync_es_suggestions.py --from-es
+
+  # Legacy: tính trending từ MySQL (chỉ dùng nếu còn historical data trong MySQL):
+  python sync_es_suggestions.py --from-db
+
+  # Recreate index + sync từ ES:
+  python sync_es_suggestions.py --recreate-index --from-es
+        """
+    )
+    parser.add_argument('--from-csv', type=str, help='Load từ Colab-exported CSV (khuyến nghị)')
+    parser.add_argument('--from-es',  action='store_true',
+                        help='Tính trending từ ES search_analytics index (NEW - thay thế --from-db)')
+    parser.add_argument('--from-db',  action='store_true',
+                        help='Tính trending từ MySQL search_analytics (legacy, auto-fallback sang ES nếu trống)')
+    parser.add_argument('--recreate-index', action='store_true', help='Recreate index trước khi sync')
+    parser.add_argument('--verify',   action='store_true', help='Kiểm tra index')
 
     args = parser.parse_args()
 
@@ -371,24 +499,24 @@ def main():
 
     if args.recreate_index:
         recreate_index(es)
-        if args.from_csv:
-            sync_from_csv(es, args.from_csv)
-        elif args.from_db:
-            sync_from_db(es)
-    elif args.from_csv:
+
+    if args.from_csv:
         create_index_if_not_exists(es)
         sync_from_csv(es, args.from_csv)
+    elif args.from_es:
+        create_index_if_not_exists(es)
+        sync_from_es(es)
     elif args.from_db:
         create_index_if_not_exists(es)
-        sync_from_db(es)
+        sync_from_db(es)  # auto-fallback sang ES nếu MySQL trống
     elif args.verify:
         verify_index(es)
-    else:
+        return
+    elif not args.recreate_index:
         parser.print_help()
         sys.exit(1)
 
-    if not args.verify:
-        verify_index(es)
+    verify_index(es)
 
     print("\n[DONE] Done!")
 

@@ -12,7 +12,12 @@
       "Bash(python3 -c ':*)",
       "Bash(python3:*)",
       "Bash(pip install:*)",
-      "Bash(grep -n \"shopIsOpen\\\\|setShopIsOpen\\\\|shop_is_open\\\\|isOpen\" \"D:/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/FoodVectorSer\"*)"
+      "Bash(grep -n \"shopIsOpen\\\\|setShopIsOpen\\\\|shop_is_open\\\\|isOpen\" \"D:/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/FoodVectorSer\"*)",
+      "Bash(python -c \"import matplotlib; import python_docx; print\\('OK'\\)\")",
+      "Bash(python -c \"import matplotlib; print\\('matplotlib ok'\\)\")",
+      "Bash(python -c \"import docx; print\\('docx ok'\\)\")",
+      "Bash(python:*)",
+      "Bash(set PYTHONIOENCODING=utf-8)"
     ]
   }
 }

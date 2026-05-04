@@ -4,6 +4,7 @@ import com.example.FoodTourApp.entity.UserBehavior;
 import com.example.FoodTourApp.entity.UserBehavior.ActionType;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -277,6 +278,19 @@ public interface UserBehaviorRepository extends JpaRepository<UserBehavior, Long
      */
     @Query("SELECT COUNT(DISTINCT ub.product.id) FROM UserBehavior ub")
     Long countDistinctProducts();
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // DATA RETENTION - xóa data cũ để tránh DB phình vô hạn
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Xóa behaviors cũ hơn cutoff (dùng cho retention cleanup scheduler).
+     * Dùng @Modifying + @Query để tránh Spring Data load entity trước khi xóa
+     * (với millions records, derived deleteBy* sẽ gây N+1 → cực chậm).
+     */
+    @Modifying
+    @Query("DELETE FROM UserBehavior ub WHERE ub.createdAt < :cutoff")
+    void deleteByCreatedAtBefore(@Param("cutoff") LocalDateTime cutoff);
 
     /**
      * Tìm VIEW behavior record gần đây nhất để update duration

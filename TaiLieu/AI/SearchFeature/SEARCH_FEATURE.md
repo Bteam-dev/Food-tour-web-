@@ -38,7 +38,7 @@ Tinh nang search YouTube-like voi:
 | `PublicSearchController` | API trending + suggestions (guest) | `controller/PublicController/` |
 | `UserSearchController` | API history + suggestions (logged-in) | `controller/UserController/` |
 | `SearchHistory` entity | Luu lich su search cua user | `entity/` |
-| `SearchAnalytics` entity | Luu moi luot search (cho training) | `entity/` |
+| `SearchAnalyticsEsService` | Luu moi luot search (Elasticsearch, khong phai MySQL) | `service/` |
 | `sync_es_search.py` | Index products + PhoBERT embeddings | `scripts/search/` |
 | `sync_es_suggestions.py` | Index trending/suggestions + embeddings | `scripts/search/` |
 | `SearchRecommend.md` | Colab notebook train PhoBERT | `resources/CollabTrain/` |
@@ -297,7 +297,10 @@ search.hybrid.semantic-weight=0.7
 
 Spring Boot tu dong tao bang khi chay (ddl-auto=update):
 - `search_histories`
-- `search_analytics`
+
+> **Luu y:** `search_analytics` da chuyen sang **Elasticsearch** (index `search_analytics`).
+> Khong con luu trong MySQL. Volume qua lon (trieu records/ngay) nen dung ES voi
+> 90-ngay retention tu dong. Xem `SearchAnalyticsEsService` de biet chi tiet.
 
 ### 2. Train PhoBERT tren Colab
 
@@ -333,35 +336,37 @@ phobert.enabled=true
 
 ### products.csv
 
-```sql
-SELECT
-    p.id, p.name, p.description, p.price, p.discount_price,
-    p.image_urls, p.ingredients, p.tags,
-    p.rating, p.total_reviews, p.is_available,
-    s.shop_name, s.city as shop_city,
-    c.name as category_name
-FROM products p
-LEFT JOIN shops s ON p.shop_id = s.id
-LEFT JOIN categories c ON p.category_id = c.id
-WHERE p.is_available = 1
-INTO OUTFILE '/tmp/products.csv'
-FIELDS TERMINATED BY ',' ENCLOSED BY '"'
-LINES TERMINATED BY '\n';
+Dung script Python local (xem `SearchRecommend.md` Buoc 1 de co script day du):
+
+```bash
+python export_products.py
+# → products.csv san sang upload len Colab
 ```
 
 ### search_analytics.csv
 
-```sql
-SELECT
-    id, user_id, query_text, query_normalized,
-    result_count, clicked_product_id, click_position,
-    session_id, searched_at
-FROM search_analytics
-ORDER BY searched_at DESC
-INTO OUTFILE '/tmp/search_analytics.csv'
-FIELDS TERMINATED BY ',' ENCLOSED BY '"'
-LINES TERMINATED BY '\n';
+> **SearchAnalytics da chuyen sang Elasticsearch** — khong con trong MySQL.
+> Dung Admin API de export CSV thay vi `INTO OUTFILE`.
+
+```bash
+# 1. Login admin, lay JWT token
+# 2. Download CSV (90 ngay gan nhat):
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+     "http://localhost:8080/api/admin/search/analytics/export?days=90" \
+     -o search_analytics.csv
+
+# Hoac mo tren browser (neu da login):
+# http://localhost:8080/api/admin/search/analytics/export?days=90
 ```
+
+CSV columns (khop voi format Colab expect):
+```
+id, user_id, query_text, query_normalized, clicked_product_id,
+click_position, result_count, session_id, searched_at
+```
+
+> Can it nhat 100 rows click data (`clicked_product_id` khong null) de train PhoBERT co y nghia.
+> Neu chua du thi dung BM25 only truoc (`phobert.enabled=false`).
 
 ---
 
@@ -382,20 +387,22 @@ Khi can semantic lai: mo Colab → chay Cell 7 + 15 + 16 → copy tunnel URL.
 ```
 scripts/search/
   sync_es_search.py          # Index products (--embeddings embeddings.csv)
-  sync_es_suggestions.py     # Index suggestions (--from-csv suggestions.csv)
+  sync_es_suggestions.py     # Index suggestions (--from-csv suggestions.csv / --from-es)
 
 src/main/java/.../
   entity/
     SearchHistory.java        # User search history (MySQL)
-    SearchAnalytics.java      # All search logs (MySQL)
+    # SearchAnalytics → da chuyen sang ES, khong con entity MySQL
   repository/
     SearchHistoryRepository.java
-    SearchAnalyticsRepository.java
+    # SearchAnalyticsRepository → khong con dung
   service/
     SearchSuggestionService.java        # Interface
+    SearchAnalyticsEsService.java       # ES analytics interface (thay MySQL)
     impl/
       SearchSuggestionServiceImpl.java  # Trending, history, smart suggest
       ProductSearchServiceImpl.java     # Hybrid search (updated)
+      SearchAnalyticsEsServiceImpl.java # ES analytics: log + trending + export
   controller/
     PublicController/
       PublicSearchController.java       # Trending + suggest (guest)
@@ -403,9 +410,12 @@ src/main/java/.../
       PublicShopController.java         # GET /api/public/shops/districts?city=
     UserController/
       UserSearchController.java         # History + suggest (logged-in)
+    AdminController/
+      AdminSearchDataController.java    # GET /api/admin/search/analytics/export → CSV Colab
 
+TaiLieu/AI/SearchFeature/
+  SearchRecommend.md                    # Colab notebook (train PhoBERT)
+  SEARCH_FEATURE.md                     # file nay
 src/main/resources/
-  CollabTrain/
-    SearchRecommend.md                  # Colab notebook (train PhoBERT)
-  application.properties                # PhoBERT config added
+  application.properties                # PhoBERT config + ES analytics index
 ```

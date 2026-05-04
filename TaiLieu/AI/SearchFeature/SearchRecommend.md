@@ -142,24 +142,29 @@ python export_products.py
 
 ### Export `search_analytics.csv`
 
-```sql
-SELECT
-    id,
-    user_id,
-    query_text,
-    query_normalized,
-    clicked_product_id,
-    click_position,
-    result_count,
-    session_id,
-    searched_at
-FROM search_analytics
-WHERE query_text IS NOT NULL AND query_text != ''
-ORDER BY searched_at DESC
-LIMIT 50000;
+> **SearchAnalytics đã chuyển sang Elasticsearch** — không còn trong MySQL.
+> Dùng Admin API để export thay vì `INTO OUTFILE`.
+
+```bash
+# Login admin → lấy JWT token, sau đó:
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+     "http://localhost:8080/api/admin/search/analytics/export?days=90" \
+     -o search_analytics.csv
 ```
 
-> Cần ít nhất 100 rows click data để train PhoBERT có ý nghĩa. Nếu chưa đủ thì dùng BM25 only trước.
+Hoặc mở trên browser sau khi login admin:
+```
+http://localhost:8080/api/admin/search/analytics/export?days=90
+```
+
+CSV columns (đúng format Colab Cell 6 expect):
+```
+id, user_id, query_text, query_normalized, clicked_product_id,
+click_position, result_count, session_id, searched_at
+```
+
+> Cần ít nhất 100 rows click data (`clicked_product_id` không null) để train PhoBERT có ý nghĩa.
+> Nếu chưa đủ thì dùng BM25 only trước (`phobert.enabled=false`).
 
 ---
 
@@ -189,15 +194,18 @@ python sync_es_search.py --verify
 
 ---
 
-## Bước 3: Sync suggestions từ DB + chạy app (BM25 only)
+## Bước 3: Sync suggestions từ ES + chạy app (BM25 only)
 
 ```bash
-# Tạo suggestion index từ MySQL
-python sync_es_suggestions.py --recreate-index --from-db
+# Tạo suggestion index từ search_analytics đang lưu trong ES
+python sync_es_suggestions.py --recreate-index --from-es
 
 # Kiểm tra
 python sync_es_suggestions.py --verify
 ```
+
+> **Lưu ý:** SearchAnalytics đã chuyển sang ES nên dùng `--from-es` thay `--from-db`.
+> `--from-db` vẫn hoạt động nhưng sẽ tự fallback sang `--from-es` nếu MySQL trống.
 
 Cấu hình `application.properties`:
 
@@ -745,8 +753,16 @@ redis-cli --scan --pattern "phobert:emb:*" | xargs redis-cli DEL
 
 ## Re-train khi có data mới
 
-1. Export lại `search_analytics.csv` từ MySQL (cần thêm ~1000 clicks mới)
+1. Export lại `search_analytics.csv` qua Admin API (cần thêm ~1000 clicks mới):
+   ```bash
+   curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+        "http://localhost:8080/api/admin/search/analytics/export?days=90" \
+        -o search_analytics.csv
+   ```
 2. Chạy lại Colab Cell 1 → 13
 3. Download `embeddings.csv`, `suggestions.csv`
 4. Chạy lại Bước 5 để index
-5. Xóa embedding cache Redis
+5. Xóa embedding cache Redis:
+   ```bash
+   redis-cli --scan --pattern "phobert:emb:*" | xargs redis-cli DEL
+   ```

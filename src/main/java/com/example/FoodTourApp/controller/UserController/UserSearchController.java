@@ -1,13 +1,11 @@
 package com.example.FoodTourApp.controller.UserController;
 
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.SearchSuggestionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,6 +16,9 @@ import java.util.Map;
  *
  * Search history + Smart suggestions với history matching.
  * Giống YouTube: khi đăng nhập, thanh search hiện lịch sử tìm kiếm.
+ *
+ * Note: JwtAuthenticationFilter sets principal as User entity (not UserDetails),
+ * so we use @AuthenticationPrincipal User user directly.
  */
 @RestController
 @RequestMapping("/api/user/search")
@@ -26,12 +27,9 @@ public class UserSearchController {
     private static final Logger log = LoggerFactory.getLogger(UserSearchController.class);
 
     private final SearchSuggestionService searchSuggestionService;
-    private final UserRepository userRepository;
 
-    public UserSearchController(SearchSuggestionService searchSuggestionService,
-                                UserRepository userRepository) {
+    public UserSearchController(SearchSuggestionService searchSuggestionService) {
         this.searchSuggestionService = searchSuggestionService;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -44,16 +42,15 @@ public class UserSearchController {
      */
     @GetMapping("/history")
     public ResponseEntity<?> getSearchHistory(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal User user,
             @RequestParam(defaultValue = "10") int limit) {
 
-        Integer userId = getUserId(userDetails);
-        if (userId == null) {
+        if (user == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "User not found"));
         }
 
         try {
-            List<Map<String, Object>> history = searchSuggestionService.getSearchHistory(userId, limit);
+            List<Map<String, Object>> history = searchSuggestionService.getSearchHistory(user.getId(), limit);
             return ResponseEntity.ok(Map.of("success", true, "data", history));
         } catch (Exception e) {
             log.error("Error getting search history: {}", e.getMessage(), e);
@@ -68,15 +65,14 @@ public class UserSearchController {
      */
     @DeleteMapping("/history/{id}")
     public ResponseEntity<?> deleteHistoryItem(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal User user,
             @PathVariable Long id) {
 
-        Integer userId = getUserId(userDetails);
-        if (userId == null) {
+        if (user == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "User not found"));
         }
 
-        boolean deleted = searchSuggestionService.deleteSearchHistoryItem(userId, id);
+        boolean deleted = searchSuggestionService.deleteSearchHistoryItem(user.getId(), id);
         return ResponseEntity.ok(Map.of("success", deleted));
     }
 
@@ -86,14 +82,13 @@ public class UserSearchController {
      * Xóa toàn bộ search history (nút "Xóa tất cả").
      */
     @DeleteMapping("/history")
-    public ResponseEntity<?> clearAllHistory(@AuthenticationPrincipal UserDetails userDetails) {
+    public ResponseEntity<?> clearAllHistory(@AuthenticationPrincipal User user) {
 
-        Integer userId = getUserId(userDetails);
-        if (userId == null) {
+        if (user == null) {
             return ResponseEntity.badRequest().body(Map.of("success", false, "message", "User not found"));
         }
 
-        searchSuggestionService.clearSearchHistory(userId);
+        searchSuggestionService.clearSearchHistory(user.getId());
         return ResponseEntity.ok(Map.of("success", true));
     }
 
@@ -105,11 +100,11 @@ public class UserSearchController {
      */
     @GetMapping("/suggest")
     public ResponseEntity<?> getSmartSuggestions(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal User user,
             @RequestParam("q") String query,
             @RequestParam(defaultValue = "8") int limit) {
 
-        Integer userId = getUserId(userDetails);
+        Integer userId = user != null ? user.getId() : null;
 
         try {
             List<Map<String, Object>> suggestions =
@@ -128,10 +123,10 @@ public class UserSearchController {
      */
     @PostMapping("/log-click")
     public ResponseEntity<?> logSearchClick(
-            @AuthenticationPrincipal UserDetails userDetails,
+            @AuthenticationPrincipal User user,
             @RequestBody Map<String, Object> body) {
 
-        Integer userId = getUserId(userDetails);
+        Integer userId = user != null ? user.getId() : null;
 
         try {
             String queryText = (String) body.get("queryText");
@@ -146,16 +141,6 @@ public class UserSearchController {
         } catch (Exception e) {
             log.error("Error logging search click: {}", e.getMessage());
             return ResponseEntity.ok(Map.of("success", true));
-        }
-    }
-
-    private Integer getUserId(UserDetails userDetails) {
-        if (userDetails == null) return null;
-        try {
-            User user = userRepository.findByEmail(userDetails.getUsername()).orElse(null);
-            return user != null ? user.getId() : null;
-        } catch (Exception e) {
-            return null;
         }
     }
 }

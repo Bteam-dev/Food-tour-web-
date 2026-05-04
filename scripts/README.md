@@ -64,7 +64,41 @@ python sync_es_search.py
 
 ---
 
-### 3. Recommendation Index (`scripts/recommend/sync_es_rcm_behavior.py`)
+### 3. Search Suggestions Index (`scripts/search/sync_es_suggestions.py`)
+**Purpose**: Sync trending search queries to `foodtour_search_suggestions` index
+
+**Khi nào chạy:**
+- Lần đầu setup (index trống)
+- Sau khi train Colab (để load PhoBERT embeddings vào suggestions)
+- Muốn refresh trending data thủ công
+
+**Các mode:**
+
+```bash
+# PRIMARY: Load từ Colab output (có PhoBERT embedding, chính xác nhất)
+python sync_es_suggestions.py --from-csv suggestions.csv
+
+# NEW: Tính trending từ ES search_analytics index (SearchAnalytics đã chuyển sang ES)
+python sync_es_suggestions.py --from-es
+
+# LEGACY: Tính trending từ MySQL (chỉ dùng nếu còn historical data trong MySQL)
+# Tự động fallback sang --from-es nếu MySQL trống
+python sync_es_suggestions.py --from-db
+
+# Recreate index + sync từ ES:
+python sync_es_suggestions.py --recreate-index --from-es
+
+# Verify index:
+python sync_es_suggestions.py --verify
+```
+
+> **LƯU Ý QUAN TRỌNG**: SearchAnalytics đã chuyển từ MySQL sang Elasticsearch.
+> Dùng `--from-es` thay cho `--from-db` kể từ phiên bản này.
+> `--from-db` vẫn giữ để đọc historical data, tự fallback sang ES nếu MySQL trống.
+
+---
+
+### 4. Recommendation Index (`scripts/recommend/sync_es_rcm_behavior.py`)
 **Purpose**: Sync user behavior data for recommendation system
 
 **Status:** Independent system - not affected by product sync changes

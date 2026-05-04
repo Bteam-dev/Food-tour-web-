@@ -9,12 +9,11 @@ import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
-import com.example.FoodTourApp.entity.SearchAnalytics;
 import com.example.FoodTourApp.entity.SearchHistory;
 import com.example.FoodTourApp.entity.User;
-import com.example.FoodTourApp.repository.SearchAnalyticsRepository;
 import com.example.FoodTourApp.repository.SearchHistoryRepository;
 import com.example.FoodTourApp.repository.UserRepository;
+import com.example.FoodTourApp.service.SearchAnalyticsEsService;
 import com.example.FoodTourApp.service.SearchSuggestionService;
 import jakarta.annotation.PostConstruct;
 import org.apache.http.HttpHost;
@@ -25,6 +24,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -49,7 +49,7 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
     private static final int EMB_CACHE_TTL_MINUTES = 30;
 
     private final SearchHistoryRepository searchHistoryRepository;
-    private final SearchAnalyticsRepository searchAnalyticsRepository;
+    private final SearchAnalyticsEsService searchAnalyticsEsService;
     private final UserRepository userRepository;
     private final RedisTemplate<String, Object> redisObjectTemplate;
     private final RestTemplate restTemplate;
@@ -76,12 +76,12 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
 
     public SearchSuggestionServiceImpl(
             SearchHistoryRepository searchHistoryRepository,
-            SearchAnalyticsRepository searchAnalyticsRepository,
+            SearchAnalyticsEsService searchAnalyticsEsService,
             UserRepository userRepository,
             @Qualifier("redisObjectTemplate") RedisTemplate<String, Object> redisObjectTemplate
     ) {
         this.searchHistoryRepository = searchHistoryRepository;
-        this.searchAnalyticsRepository = searchAnalyticsRepository;
+        this.searchAnalyticsEsService = searchAnalyticsEsService;
         this.userRepository = userRepository;
         this.redisObjectTemplate = redisObjectTemplate;
         this.restTemplate = new RestTemplate();
@@ -100,13 +100,17 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
         }
     }
 
+    private String esUrl() {
+        return "http://" + esHost + ":" + esPort;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // TRENDING
     // ═══════════════════════════════════════════════════════════════════════════
 
     @Override
     public List<Map<String, Object>> getTrendingSearches(int limit) {
-        // 1. Check Redis cache
+        // 1. Redis cache (10 phút) — tránh ES aggregation hit mỗi request
         try {
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> cached = (List<Map<String, Object>>) redisObjectTemplate.opsForValue()
@@ -118,23 +122,92 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
             log.warn("Redis cache miss for trending: {}", e.getMessage());
         }
 
-        // 2. Query ES suggestion index (populated by Colab)
-        List<Map<String, Object>> trending = queryTrendingFromEs(limit);
+        // 2. PRIMARY: Real-time aggregation từ search_analytics ES (last 7 days)
+        //    Đây là data THỰC từ user searches, luôn fresh
+        List<Map<String, Object>> trending = searchAnalyticsEsService.getTrendingQueries(7, limit);
 
-        // 3. Fallback: tính trending từ MySQL nếu ES không có data
+        // 3. FALLBACK: foodtour_search_suggestions (Colab CSV) nếu chưa có analytics data
+        //    Thường chỉ xảy ra khi mới deploy, search_analytics còn trống
         if (trending.isEmpty()) {
-            trending = computeTrendingFromDb(limit);
+            trending = queryTrendingFromEs(limit);
         }
 
         // 4. Cache in Redis
-        try {
-            redisObjectTemplate.opsForValue().set(TRENDING_CACHE_KEY, trending,
-                    TRENDING_CACHE_TTL_MINUTES, TimeUnit.MINUTES);
-        } catch (Exception e) {
-            log.warn("Failed to cache trending: {}", e.getMessage());
+        if (!trending.isEmpty()) {
+            try {
+                redisObjectTemplate.opsForValue().set(TRENDING_CACHE_KEY, trending,
+                        TRENDING_CACHE_TTL_MINUTES, TimeUnit.MINUTES);
+            } catch (Exception e) {
+                log.warn("Failed to cache trending: {}", e.getMessage());
+            }
         }
 
         return trending;
+    }
+
+    /**
+     * Sync real-time trending từ search_analytics → foodtour_search_suggestions mỗi 30 phút.
+     *
+     * Mục đích: Giữ suggestion index fresh với trending scores thực tế.
+     * Khi user gõ search, semantic search trên foodtour_search_suggestions sẽ boost
+     * những queries đang trending thực sự (từ search_analytics) thay vì chỉ dùng Colab CSV.
+     *
+     * Flow: search_analytics (real-time) → upsert vào foodtour_search_suggestions → invalidate cache
+     */
+    @Scheduled(fixedDelay = 30 * 60 * 1000) // 30 phút sau mỗi lần chạy xong
+    public void syncTrendingToSuggestionIndex() {
+        try {
+            List<Map<String, Object>> realtimeTrending = searchAnalyticsEsService.getTrendingQueries(7, 100);
+            if (realtimeTrending.isEmpty()) return;
+
+            int synced = 0;
+            String now = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME);
+
+            for (Map<String, Object> trending : realtimeTrending) {
+                String queryText = (String) trending.get("queryText");
+                if (queryText == null || queryText.isBlank()) continue;
+
+                long searchCount = ((Number) trending.get("searchCount")).longValue();
+                boolean isTrending = Boolean.TRUE.equals(trending.get("isTrending"));
+                String normalized = normalizeVietnamese(queryText);
+
+                // es_weight: dùng để sort khi query trending mà không kèm keyword gõ
+                double esWeight = searchCount * (isTrending ? 1.5 : 1.0);
+
+                // Dùng normalized (không dấu, lowercase) làm ES _id → upsert consistent
+                String docId = normalized.replace(" ", "_");
+                if (docId.isBlank()) continue;
+
+                Map<String, Object> doc = new LinkedHashMap<>();
+                doc.put("query_text",       queryText);
+                doc.put("query_normalized", normalized);
+                doc.put("no_accent",        normalized);
+                doc.put("total_searches",   searchCount);
+                doc.put("searches_7d",      searchCount);
+                doc.put("is_trending",      isTrending);
+                doc.put("es_weight",        esWeight);
+                doc.put("last_searched_at", now);
+                doc.put("updated_at",       now);
+
+                try {
+                    restTemplate.postForEntity(
+                        esUrl() + "/" + suggestionIndex + "/_update/" + docId,
+                        Map.of("doc", doc, "doc_as_upsert", true),
+                        Map.class
+                    );
+                    synced++;
+                } catch (Exception e) {
+                    log.debug("Upsert failed for '{}': {}", queryText, e.getMessage());
+                }
+            }
+
+            // Invalidate trending cache → request tiếp theo sẽ lấy data mới từ ES
+            try { redisObjectTemplate.delete(TRENDING_CACHE_KEY); } catch (Exception ignored) {}
+            log.info("✅ Synced {}/{} trending queries to suggestion index", synced, realtimeTrending.size());
+
+        } catch (Exception e) {
+            log.warn("⚠️ syncTrendingToSuggestionIndex failed: {}", e.getMessage());
+        }
     }
 
     private List<Map<String, Object>> queryTrendingFromEs(int limit) {
@@ -172,24 +245,8 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
     }
 
     private List<Map<String, Object>> computeTrendingFromDb(int limit) {
-        try {
-            LocalDateTime since = LocalDateTime.now().minusDays(7);
-            List<Object[]> rows = searchAnalyticsRepository.findTrendingQueries(since);
-
-            return rows.stream()
-                    .limit(limit)
-                    .map(row -> {
-                        Map<String, Object> item = new LinkedHashMap<>();
-                        item.put("queryText", row[0]);
-                        item.put("searchCount", ((Number) row[1]).longValue());
-                        item.put("isTrending", ((Number) row[1]).longValue() >= 5);
-                        return item;
-                    })
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            log.warn("Failed to compute trending from DB: {}", e.getMessage());
-            return List.of();
-        }
+        // Trending bây giờ lấy từ ES thay vì MySQL
+        return searchAnalyticsEsService.getTrendingQueries(7, limit);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -412,50 +469,29 @@ public class SearchSuggestionServiceImpl implements SearchSuggestionService {
 
     @Override
     @Async
-    @Transactional
+    // Không dùng @Transactional cùng @Async trên cùng method — Spring proxy issue:
+    // @Async submit task lên executor trước khi @Transactional có thể wrap execution.
+    // Mỗi Spring Data JPA method tự có transaction riêng → đủ cho use case này.
     public void logSearch(Integer userId, String queryText, int resultCount, String sessionId) {
         if (queryText == null || queryText.isBlank()) return;
 
         String normalized = normalizeVietnamese(queryText.trim());
 
-        // 1. Lưu vào search_analytics (mọi lượt search)
-        SearchAnalytics analytics = SearchAnalytics.builder()
-                .userId(userId)
-                .queryText(queryText.trim())
-                .queryNormalized(normalized)
-                .resultCount(resultCount)
-                .sessionId(sessionId)
-                .build();
-        searchAnalyticsRepository.save(analytics);
+        // 1. Lưu vào search_analytics ES (real-time analytics, append-only)
+        searchAnalyticsEsService.logSearch(userId, queryText.trim(), normalized, resultCount, sessionId);
 
-        // 2. Lưu vào search_histories (nếu đã đăng nhập)
+        // 2. Lưu search history vào MySQL (nếu đã đăng nhập)
         if (userId != null) {
             saveToHistory(userId, queryText.trim(), normalized, resultCount);
         }
-
-        // 3. Invalidate trending cache (vì có search mới)
-        try {
-            redisObjectTemplate.delete(TRENDING_CACHE_KEY);
-        } catch (Exception ignored) {}
     }
 
     @Override
     @Async
-    @Transactional
     public void logSearchClick(Integer userId, String queryText, Integer productId, int clickPosition, String sessionId) {
         if (queryText == null || queryText.isBlank() || productId == null) return;
-
         String normalized = normalizeVietnamese(queryText.trim());
-
-        SearchAnalytics analytics = SearchAnalytics.builder()
-                .userId(userId)
-                .queryText(queryText.trim())
-                .queryNormalized(normalized)
-                .clickedProductId(productId)
-                .clickPosition(clickPosition)
-                .sessionId(sessionId)
-                .build();
-        searchAnalyticsRepository.save(analytics);
+        searchAnalyticsEsService.logClick(userId, queryText.trim(), normalized, productId, clickPosition, sessionId);
     }
 
     /**

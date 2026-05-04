@@ -183,6 +183,22 @@ public interface RealTimeRecommendationService {
     int reloadProductEmbeddings();
 
     // ══════════════════════════════════════════════════════════════════════════
+    // SCHEDULED JOBS
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Scheduled job: Refresh product embeddings từ ES mỗi 2 tiếng.
+     * Tự động pick up embeddings mới sau mỗi lần retrain mà không cần restart app.
+     */
+    void scheduledRefreshEmbeddings();
+
+    /**
+     * Scheduled job: Precompute user embeddings mỗi 6 tiếng.
+     * Warm up cache để cải thiện response time cho lần request đầu tiên.
+     */
+    void scheduledPrecomputeEmbeddings();
+
+    // ══════════════════════════════════════════════════════════════════════════
     // PRODUCT SYNC SUPPORT - Gọi bởi EsRecommendSyncConsumer
     // ══════════════════════════════════════════════════════════════════════════
 
