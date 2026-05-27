@@ -1,0 +1,46 @@
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: food_tour_app
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+      MYSQL_DATABASE: food_tour_app
+      MYSQL_USER: minhngosen196
+      MYSQL_PASSWORD: minhngosen196
+    ports:
+      - "3307:3306"
+    volumes:
+      - ../FoodTourApp_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    container_name: foodtour_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ../Redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # --appendonly yes: Persist data to disk
+    # --maxmemory 256mb: Limit memory usage
+    # --maxmemory-policy allkeys-lru: Evict least recently used keys when memory full
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    container_name: foodtour_es
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - ../ElasticSearch_data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock: -1
+      nofile: 65536
+

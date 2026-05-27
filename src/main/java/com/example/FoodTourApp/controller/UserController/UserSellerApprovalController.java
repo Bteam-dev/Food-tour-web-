@@ -1,0 +1,152 @@
+package com.example.FoodTourApp.controller.UserController;
+
+import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalRequest;
+import com.example.FoodTourApp.DTO.SellerApprovalDTO.SellerApprovalResponse;
+import com.example.FoodTourApp.entity.User;
+import com.example.FoodTourApp.service.SellerApprovalService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/user/seller-approval")
+@PreAuthorize("hasAnyRole('USER','SELLER','ADMIN')")
+@RequiredArgsConstructor
+public class UserSellerApprovalController {
+
+    private static final Logger logger = LoggerFactory.getLogger(UserSellerApprovalController.class);
+    private final SellerApprovalService sellerApprovalService;
+    private final ObjectMapper objectMapper;
+
+    /**
+     * Nộp đơn xin trở thành seller.
+     * Content-Type: multipart/form-data
+     * - data: JSON string (SellerApprovalRequest) chứa facebookUrl, zaloUrl (optional)
+     * - idCardImages: file[] (REQUIRED) - Ảnh căn cước công dân (mặt trước, mặt sau)
+     */
+    @PostMapping("/submit")
+    public ResponseEntity<?> submitApproval(
+            @RequestParam(value = "data", required = false) String dataJson,
+            @RequestParam(value = "idCardImages") MultipartFile[] idCardImages,
+            Authentication authentication) {
+        User user = (User) authentication.getPrincipal();
+        Integer userId = user.getId();
+        logger.info("User ID {} is submitting seller approval request", userId);
+
+        try {
+            // Validate idCardImages
+            if (idCardImages == null || idCardImages.length == 0) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("success", false);
+                error.put("message", "Ảnh căn cước công dân là bắt buộc");
+                return ResponseEntity.badRequest().body(error);
+            }
+
+            // Parse JSON data (optional fields)
+            SellerApprovalRequest request = new SellerApprovalRequest();
+            if (dataJson != null && !dataJson.isEmpty()) {
+                request = objectMapper.readValue(dataJson, SellerApprovalRequest.class);
+            }
+
+            SellerApprovalResponse response = sellerApprovalService.submitApproval(userId, request, idCardImages);
+            logger.info("Seller approval request submitted successfully by user ID {}", userId);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("message", "Seller approval request submitted successfully");
+            result.put("data", response);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            logger.error("Failed to submit seller approval for user ID {}: {}", userId, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (jakarta.persistence.EntityNotFoundException e) {
+            logger.error("User not found for ID {}: {}", userId, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "User not found");
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            logger.error("Unexpected error during seller approval submission for user ID {}: {}", userId, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "An unexpected error occurred");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @GetMapping("/my-approvals")
+    public ResponseEntity<?> getMyApprovals(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "submittedAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir,
+            Authentication authentication) {
+        User user = (User) authentication.getPrincipal();
+        Integer userId = user.getId();
+        logger.info("User ID {} is fetching their approval requests (page: {}, size: {})", userId, page, size);
+
+        try {
+            Sort sort = sortDir.equalsIgnoreCase("ASC") ? Sort.by(sortBy).ascending() : Sort.by(sortBy).descending();
+            Pageable pageable = PageRequest.of(page, size, sort);
+            Page<SellerApprovalResponse> approvals = sellerApprovalService.getMyApprovals(userId, pageable);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", approvals.getContent());
+            result.put("currentPage", approvals.getNumber());
+            result.put("totalItems", approvals.getTotalElements());
+            result.put("totalPages", approvals.getTotalPages());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Error fetching approvals for user ID {}: {}", userId, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Failed to fetch approval requests");
+            return ResponseEntity.internalServerError().body(error);
+        }
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getApprovalById(@PathVariable Integer id, Authentication authentication) {
+        User user = (User) authentication.getPrincipal();
+        Integer userId = user.getId();
+        logger.info("User ID {} is fetching approval request with id {}", userId, id);
+
+        try {
+            SellerApprovalResponse response = sellerApprovalService.getApprovalById(id, userId);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("data", response);
+            return ResponseEntity.ok(result);
+        } catch (SecurityException e) {
+            logger.error("Permission denied for user ID {} to view approval {}: {}", userId, id, e.getMessage());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(403).body(error);
+        } catch (Exception e) {
+            logger.error("Error fetching approval {} for user ID {}: {}", id, userId, e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+}

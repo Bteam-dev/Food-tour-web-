@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./mvnw compile:*)",
+      "Bash(ls:*)",
+      "Bash(./mvnw idea:idea)",
+      "Bash(grep \"\\\\.kt$\")",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.kt$\")",
+      "Bash(./gradlew compileDebugKotlin)",
+      "Bash(del:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3:*)",
+      "Bash(pip install:*)",
+      "Bash(grep -n \"shopIsOpen\\\\|setShopIsOpen\\\\|shop_is_open\\\\|isOpen\" \"D:/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/FoodVectorSer\"*)",
+      "Bash(python -c \"import matplotlib; import python_docx; print\\('OK'\\)\")",
+      "Bash(python -c \"import matplotlib; print\\('matplotlib ok'\\)\")",
+      "Bash(python -c \"import docx; print\\('docx ok'\\)\")",
+      "Bash(python:*)",
+      "Bash(set PYTHONIOENCODING=utf-8)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(find D:\\\\Project\\\\FrontEnd\\\\ShoppingApp_FE\\\\JetShop-E-commerce-App-with-Jetpack-Compose\\\\app\\\\src\\\\main\\\\java:*)",
+      "Bash(grep -l \"POST\\\\|GET\" D:/Project/FrontEnd/ShoppingApp_FE/JetShop-E-commerce-App-with-Jetpack-Compose/app/src/main/java/com/app/ecomapp/data/remote/UserApiService/*.kt)",
+      "Bash(find:*)",
+      "WebFetch(domain:storage.openvinotoolkit.org)",
+      "Bash(curl -sI \"https://github.com/PINTO0309/HeadPoseEstimation-WHENet-yolov4-onnx-openvino/releases/download/v1.0.4/whenet_1x3x224x224_prepost.onnx\")",
+      "Bash(curl -sI \"https://huggingface.co/onnxmodelzoo/arcfaceresnet100-11-int8/resolve/main/model/arcfaceresnet100-11-int8.onnx\")",
+      "Bash(curl -sI \"https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/main/model/arcfaceresnet100-8.onnx\")",
+      "Bash(curl -sI \"https://huggingface.co/onnxmodelzoo/arcfaceresnet100-11-int8/resolve/main/arcfaceresnet100-11-int8.onnx\")",
+      "Bash(curl -sI \"https://huggingface.co/onnxmodelzoo/arcfaceresnet100-8/resolve/main/arcfaceresnet100-8.onnx\")",
+      "Bash(curl -sI \"https://huggingface.co/FoivosPar/Arc2Face/resolve/main/arcface.onnx\")",
+      "Bash(gh api:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(xargs wc:*)"
+    ]
+  }
+}
