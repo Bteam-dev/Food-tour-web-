@@ -120,13 +120,14 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public boolean is2FAEnabled(String email) {
-        // TODO: Implement 2FA logic - check if user has 2FA enabled
-        return false;
+        return userRepository.findByEmail(email)
+                .map(user -> Boolean.TRUE.equals(user.getTwoFactorEnabled()))
+                .orElse(false);
     }
 
     @Override
     public boolean verify2FA(String email, String code) {
-        // TODO: Implement 2FA verification logic
+        // Delegated to SecurityService.verify2FACode() in the new flow
         return false;
     }
 

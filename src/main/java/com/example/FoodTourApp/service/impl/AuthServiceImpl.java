@@ -3,6 +3,7 @@ package com.example.FoodTourApp.service.impl;
 
 import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
+import com.example.FoodTourApp.DTO.SecurityDTO.SecurityMethodsResponse;
 import com.example.FoodTourApp.DTO.UserDTO.UserResponse;
 import com.example.FoodTourApp.config.JWTConfig.JwtUtils;
 import com.example.FoodTourApp.entity.PasswordResetOtp;
@@ -12,6 +13,7 @@ import com.example.FoodTourApp.repository.PasswordResetOtpRepository;
 import com.example.FoodTourApp.repository.RoleRepository;
 import com.example.FoodTourApp.repository.UserRepository;
 import com.example.FoodTourApp.service.AuthService;
+import com.example.FoodTourApp.service.SecurityService;
 import com.example.FoodTourApp.service.UserService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -53,6 +55,7 @@ public class AuthServiceImpl implements AuthService {
     private final AuthenticationManager authenticationManager;
     private final TokenBlacklistService tokenBlacklistService;
     private final UserService userService;
+    private final SecurityService securityService;
 
     @Value("${app.base-url}")
     private String appBaseUrl;
@@ -60,7 +63,8 @@ public class AuthServiceImpl implements AuthService {
     public AuthServiceImpl(UserRepository userRepository, RoleRepository roleRepository,
                            PasswordEncoder passwordEncoder, JwtUtils jwtUtil, JavaMailSender mailSender,
                            PasswordResetOtpRepository otpRepository, AuthenticationManager authenticationManager,
-                           TokenBlacklistService tokenBlacklistService, UserService userService) {
+                           TokenBlacklistService tokenBlacklistService, UserService userService,
+                           SecurityService securityService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordEncoder = passwordEncoder;
@@ -70,6 +74,7 @@ public class AuthServiceImpl implements AuthService {
         this.authenticationManager = authenticationManager;
         this.tokenBlacklistService = tokenBlacklistService;
         this.userService = userService;
+        this.securityService = securityService;
     }
 
     @Override
@@ -136,16 +141,22 @@ public class AuthServiceImpl implements AuthService {
 
         UserResponse userResponse = userService.getUserByUsername(request.getUsername());
 
-        // Kiểm tra 2FA
-        if (userService.is2FAEnabled(userResponse.getEmail())) {
+        // Kiểm tra các phương thức bảo mật
+        SecurityMethodsResponse methods = securityService.getSecurityMethods(userResponse.getId());
+        if (!methods.getAvailableMethods().isEmpty()) {
+            // User có phương thức bảo mật → yêu cầu xác thực
+            String verifyToken = securityService.createVerifyToken(userResponse.getId());
             Map<String, Object> response = new HashMap<>();
-            response.put("requires2FA", true);
+            response.put("requiresVerification", true);
+            response.put("verifyToken", verifyToken);
+            response.put("availableMethods", methods.getAvailableMethods());
             response.put("username", request.getUsername());
             response.put("email", userResponse.getEmail());
-            response.put("message", "Vui lòng nhập mã xác thực 2FA");
+            response.put("message", "Vui lòng chọn phương thức xác thực.");
             return response;
         }
 
+        // Không có phương thức bảo mật → đăng nhập luôn
         SecurityContextHolder.getContext().setAuthentication(authentication);
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
         List<String> roles = userDetails.getAuthorities().stream()
@@ -168,10 +179,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public Map<String, Object> verify2FA(String email, String code, String password) {
+        // Legacy 2FA endpoint - now delegates to SecurityService
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(email, password));
 
-        if (!userService.verify2FA(email, code)) {
+        UserResponse userResponse = userService.getUserByEmail(email);
+        if (!securityService.verify2FACode(userResponse.getId(), code)) {
             throw new IllegalArgumentException("Mã 2FA không hợp lệ");
         }
 
@@ -180,7 +193,6 @@ public class AuthServiceImpl implements AuthService {
         List<String> roles = userDetails.getAuthorities().stream()
                 .map(a -> a.getAuthority()).collect(Collectors.toList());
 
-        UserResponse userResponse = userService.getUserByEmail(email);
         String accessToken = jwtUtil.generateAccessToken(userResponse.getId(), email, roles);
         String refreshToken = jwtUtil.generateRefreshToken(userResponse.getId(), roles);
 

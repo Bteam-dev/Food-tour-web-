@@ -2,8 +2,11 @@ package com.example.FoodTourApp.controller.PublicController;
 
 import com.example.FoodTourApp.DTO.AuthDTO.Request.*;
 import com.example.FoodTourApp.DTO.AuthDTO.Response.AuthResponse;
+import com.example.FoodTourApp.DTO.SecurityDTO.GoogleLoginRequest;
+import com.example.FoodTourApp.DTO.SecurityDTO.SecurityVerifyRequest;
 import com.example.FoodTourApp.service.AuthService;
 import com.example.FoodTourApp.service.RateLimitService;
+import com.example.FoodTourApp.service.SecurityService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +36,13 @@ public class PublicAuthController {
     private static final Logger logger = LoggerFactory.getLogger(PublicAuthController.class);
     private final AuthService authService;
     private final RateLimitService rateLimitService;
+    private final SecurityService securityService;
 
-    public PublicAuthController(AuthService authService, RateLimitService rateLimitService) {
+    public PublicAuthController(AuthService authService, RateLimitService rateLimitService,
+                                SecurityService securityService) {
         this.authService = authService;
         this.rateLimitService = rateLimitService;
+        this.securityService = securityService;
     }
     
     /**
@@ -75,15 +81,16 @@ public class PublicAuthController {
                                               HttpServletRequest request) {
         String identifier = loginRequest.getUsername(); // Use username as identifier
         
+        // TODO: bật lại sau demo
         // Rate limit: 5 attempts per 15 minutes (900 seconds)
-        if (!rateLimitService.isAllowed(identifier, "login", 5, 900)) {
-            long timeLeft = rateLimitService.getTimeUntilReset(identifier, "login");
-            logger.warn("Rate limit exceeded for login attempt: {}", identifier);
-            return rateLimitExceeded(
-                "Too many login attempts. Please try again in " + (timeLeft / 60) + " minutes.", 
-                timeLeft
-            );
-        }
+//        if (!rateLimitService.isAllowed(identifier, "login", 5, 900)) {
+//            long timeLeft = rateLimitService.getTimeUntilReset(identifier, "login");
+//            logger.warn("Rate limit exceeded for login attempt: {}", identifier);
+//            return rateLimitExceeded(
+//                "Too many login attempts. Please try again in " + (timeLeft / 60) + " minutes.",
+//                timeLeft
+//            );
+//        }
         
         try {
             Map<String, Object> result = authService.login(loginRequest);
@@ -274,6 +281,64 @@ public class PublicAuthController {
         } catch (Exception e) {
             logger.error("Token refresh failed: {}", e.getMessage(), e);
             throw e;
+        }
+    }
+
+    // ── Google Login ───────────────────────────────────────────────────────────
+
+    @PostMapping("/google-login")
+    public ResponseEntity<?> googleLogin(@RequestBody GoogleLoginRequest request,
+                                         HttpServletRequest httpRequest) {
+        String clientIP = getClientIP(httpRequest);
+        if (!rateLimitService.isAllowed(clientIP, "google-login", 10, 900)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(clientIP, "google-login");
+            return rateLimitExceeded("Too many login attempts.", timeLeft);
+        }
+
+        try {
+            Map<String, Object> result = securityService.googleLogin(request.getIdToken());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Google login failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    // ── Email OTP (during security verification, no JWT needed) ───────────────
+
+    @PostMapping("/send-email-otp")
+    public ResponseEntity<?> sendEmailOtp(@RequestParam("verifyToken") String verifyToken,
+                                          HttpServletRequest httpRequest) {
+        if (!rateLimitService.isAllowed(verifyToken, "send-email-otp", 3, 300)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(verifyToken, "send-email-otp");
+            return rateLimitExceeded("Gửi quá nhiều lần. Vui lòng thử lại sau.", timeLeft);
+        }
+        try {
+            Map<String, Object> result = securityService.sendEmailOtp(verifyToken);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Send email OTP failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
+        }
+    }
+
+    // ── Security Verification (after login) ────────────────────────────────────
+
+    @PostMapping("/verify-security")
+    public ResponseEntity<?> verifySecurity(@RequestBody SecurityVerifyRequest request,
+                                            HttpServletRequest httpRequest) {
+        String identifier = request.getVerifyToken();
+        if (!rateLimitService.isAllowed(identifier, "verify-security", 5, 300)) {
+            long timeLeft = rateLimitService.getTimeUntilReset(identifier, "verify-security");
+            return rateLimitExceeded("Too many verification attempts.", timeLeft);
+        }
+
+        try {
+            Map<String, Object> result = securityService.verifySecurityMethod(request);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            logger.error("Security verification failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", e.getMessage()));
         }
     }
 }

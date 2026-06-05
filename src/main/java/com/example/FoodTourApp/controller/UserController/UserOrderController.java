@@ -5,6 +5,7 @@ import com.example.FoodTourApp.DTO.OrderDTO.OrderResponseDTO;
 import com.example.FoodTourApp.DTO.PageResponse;
 import com.example.FoodTourApp.entity.User;
 import com.example.FoodTourApp.service.OrderService;
+import com.example.FoodTourApp.service.SecurityService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,7 @@ import java.util.Map;
 public class UserOrderController {
 
     private final OrderService orderService;
+    private final SecurityService securityService;
     private static final Logger logger = LoggerFactory.getLogger(UserSellerApprovalController.class);
 
     @PostMapping
@@ -52,9 +54,26 @@ public class UserOrderController {
      * POST /api/user/orders/{orderId}/pay
      */
     @PostMapping("/{orderId}/pay")
-    public ResponseEntity<?> payOrder(@PathVariable Integer orderId, @AuthenticationPrincipal User user) {
+    public ResponseEntity<?> payOrder(@PathVariable Integer orderId,
+                                      @RequestParam(required = false) String pin,
+                                      @AuthenticationPrincipal User user) {
         logger.info("User ID {} is paying for order {}", user.getId(), orderId);
         try {
+            // Verify PIN if user has PIN enabled
+            if (Boolean.TRUE.equals(user.getPaymentPinEnabled())) {
+                if (pin == null || pin.isEmpty()) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", false);
+                    result.put("requiresPin", true);
+                    result.put("message", "Vui lòng nhập mã PIN để thanh toán.");
+                    return ResponseEntity.status(403).body(result);
+                }
+                if (!securityService.verifyPin(user.getId(), pin)) {
+                    return ResponseEntity.badRequest().body(Map.of(
+                            "success", false, "message", "Mã PIN không đúng."));
+                }
+            }
+
             OrderResponseDTO order = orderService.payOrder(orderId, user);
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);

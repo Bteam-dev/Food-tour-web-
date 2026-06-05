@@ -13,6 +13,7 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     Optional<User> findByEmail(String email);
     Optional<User> findByUsername(String username);
     Optional<User> findByPhone(String phone);
+    Optional<User> findByGoogleId(String googleId);
 
     // Tìm admin account đầu tiên để nhận hoa hồng nền tảng
     @Query("SELECT u FROM User u WHERE u.role.roleName = :roleName ORDER BY u.id ASC")

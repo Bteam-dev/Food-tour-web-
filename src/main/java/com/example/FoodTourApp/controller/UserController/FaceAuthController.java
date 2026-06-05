@@ -16,9 +16,11 @@ import org.springframework.web.bind.annotation.*;
 /**
  * Face Authentication REST API
  *
- * POST /api/face/enroll        → Enroll face (requires JWT – user must be logged in)
- * POST /api/face/verify        → Verify face (public – used during login)
- * POST /api/face/challenge     → Solve active liveness challenge (public)
+ * POST /api/face/enroll              → Enroll face (requires JWT – user must be logged in)
+ * DELETE /api/face/enroll            → Delete face enrollment
+ * GET  /api/face/status             → Check enrollment status
+ * POST /api/face/verify-security    → Verify face as security method (uses verifyToken)
+ * POST /api/face/challenge-security → Solve challenge as security method
  */
 @RestController
 @RequestMapping("/api/face")
@@ -58,27 +60,6 @@ public class FaceAuthController {
     }
 
     /**
-     * Verify face to authenticate (step in login flow).
-     * Public endpoint – no JWT required here; JWT is returned on success.
-     */
-    @PostMapping("/verify")
-    public ResponseEntity<FaceAuthResponse> verify(@RequestBody VerifyRequest request) {
-        log.info("[FaceAuth] Verify request for user={}", request.getUsername());
-        try {
-            FaceAuthResponse response = faceAuthService.verify(request);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("[FaceAuth] Verify error: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(
-                    FaceAuthResponse.builder()
-                            .status(FaceAuthResponse.Status.FAIL)
-                            .message("Verification failed: " + e.getMessage())
-                            .build()
-            );
-        }
-    }
-
-    /**
      * Delete face enrollment for the authenticated user.
      */
     @DeleteMapping("/enroll")
@@ -112,17 +93,41 @@ public class FaceAuthController {
     }
 
     /**
-     * Submit challenge frame for active liveness verification.
-     * Called after the client receives CHALLENGE_REQUIRED status.
+     * Face verification as a security method during login.
+     * Uses verifyToken from the login step.
      */
-    @PostMapping("/challenge")
-    public ResponseEntity<FaceAuthResponse> solveChallenge(@RequestBody ChallengeRequest request) {
-        log.info("[FaceAuth] Challenge solve for user={} action={}", request.getUsername(), request.getRequiredAction());
+    @PostMapping("/verify-security")
+    public ResponseEntity<FaceAuthResponse> verifyForSecurity(
+            @RequestBody VerifyRequest request,
+            @RequestParam("verifyToken") String verifyToken) {
+        log.info("[FaceAuth] Security verify with verifyToken");
         try {
-            FaceAuthResponse response = faceAuthService.solveChallenge(request);
+            FaceAuthResponse response = faceAuthService.verifyForSecurity(request, verifyToken);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("[FaceAuth] Challenge error: {}", e.getMessage());
+            log.error("[FaceAuth] Security verify error: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(
+                    FaceAuthResponse.builder()
+                            .status(FaceAuthResponse.Status.FAIL)
+                            .message("Verification failed: " + e.getMessage())
+                            .build()
+            );
+        }
+    }
+
+    /**
+     * Face challenge as a security method during login.
+     */
+    @PostMapping("/challenge-security")
+    public ResponseEntity<FaceAuthResponse> solveChallengeForSecurity(
+            @RequestBody ChallengeRequest request,
+            @RequestParam("verifyToken") String verifyToken) {
+        log.info("[FaceAuth] Security challenge solve");
+        try {
+            FaceAuthResponse response = faceAuthService.solveChallengeForSecurity(request, verifyToken);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("[FaceAuth] Security challenge error: {}", e.getMessage());
             return ResponseEntity.badRequest().body(
                     FaceAuthResponse.builder()
                             .status(FaceAuthResponse.Status.FAIL)

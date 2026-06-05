@@ -11,4 +11,8 @@ public interface FaceAuthService {
     FaceAuthResponse solveChallenge(ChallengeRequest request) throws Exception;
     FaceAuthResponse deleteEnrollment(String username) throws Exception;
     boolean isEnrolled(String username);
+
+    /** Verify face as a security method during login (uses verifyToken, issues JWT on success) */
+    FaceAuthResponse verifyForSecurity(VerifyRequest request, String verifyToken) throws Exception;
+    FaceAuthResponse solveChallengeForSecurity(ChallengeRequest request, String verifyToken) throws Exception;
 }

@@ -34,8 +34,12 @@ public class AntiSpoofServiceImpl implements AntiSpoofService {
     private static final double CV_WEIGHT    = 0.125;
     private static final double DIFF_CENTER  = 0.035;
     private static final double DIFF_SCALE   = 80.0;
-    private static final double CV_CENTER    = 2.0;
+    private static final double CV_CENTER    = 1.5;   // was 2.0 — real faces have cv ~1.5–2.0, fakes ~1.3–1.7
     private static final double CV_SCALE     = 3.0;
+
+    // If model score is below this, aux signals (diff/cv) cannot compensate — treat as fake immediately.
+    // Gap in data: fakes top out at ~0.16, weakest real face observed at ~0.18.
+    private static final double MODEL_GATE   = 0.17;
 
     @Value("${face.model.antispoofing.path}")
     private String modelPath;
@@ -208,6 +212,14 @@ public class AntiSpoofServiceImpl implements AntiSpoofService {
             tensor.close();
             double[] probs  = softmax(new double[]{logits[0][0], logits[0][1]});
             double realProb = probs[1];
+
+            // Gate: model clearly says fake → aux signals cannot rescue it.
+            // Prevents high diff_signal from shaking a static image from overriding the model.
+            if (realProb < MODEL_GATE) {
+                log.info("[AntiSpoof] model gate triggered — realProb={} < {} → FAKE",
+                         String.format("%.4f", realProb), MODEL_GATE);
+                return new LivenessResult(false, realProb, hasTemp);
+            }
 
             double finalScore;
             if (hasTemp && meanDiff > STATIC_DIFF_THRESHOLD) {

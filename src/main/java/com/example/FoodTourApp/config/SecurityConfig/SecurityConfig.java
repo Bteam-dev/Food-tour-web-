@@ -40,9 +40,9 @@ public class SecurityConfig {
                         // Public endpoints - không cần authentication
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
-                        // Face auth: verify & challenge are public (return JWT on success)
+                        // Face auth: verify-security & challenge-security are public (uses verifyToken)
                         // enroll requires authentication (handled by @PreAuthorize)
-                        .requestMatchers("/api/face/verify", "/api/face/challenge").permitAll()
+                        .requestMatchers("/api/face/verify-security", "/api/face/challenge-security").permitAll()
                         // Chỉ cho phép public các file KHÔNG phải chat (product, shop, avatar, review)
                         .requestMatchers("/uploads/ProductImage/**").permitAll()
                         .requestMatchers("/uploads/ShopLogo/**").permitAll()

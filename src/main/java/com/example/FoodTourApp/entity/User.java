@@ -64,6 +64,28 @@ public class User {
     @Column(name = "fcm_token", length = 512)
     private String fcmToken;
 
+    // ── Security: 2FA ──
+    @Column(name = "two_factor_enabled", nullable = false)
+    private Boolean twoFactorEnabled = false;
+
+    @Column(name = "two_factor_secret", length = 512)
+    private String twoFactorSecret; // encrypted TOTP secret
+
+    // ── Security: Google OAuth ──
+    @Column(name = "google_id", length = 255, unique = true)
+    private String googleId;
+
+    // ── Security: Payment PIN ──
+    @Column(name = "payment_pin_hash", length = 255)
+    private String paymentPinHash; // BCrypt hashed PIN
+
+    @Column(name = "payment_pin_enabled", nullable = false)
+    private Boolean paymentPinEnabled = false;
+
+    // ── Security: Email OTP ──
+    @Column(name = "email_otp_enabled", nullable = false)
+    private Boolean emailOtpEnabled = false;
+
     public enum Gender {
         male, female, other
     }

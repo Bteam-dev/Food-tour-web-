@@ -32,7 +32,9 @@
       "Bash(curl -sI \"https://huggingface.co/FoivosPar/Arc2Face/resolve/main/arcface.onnx\")",
       "Bash(gh api:*)",
       "WebFetch(domain:api.github.com)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Bash(gh repo:*)",
+      "Bash(wc -l /d/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/*.java)"
     ]
   }
 }

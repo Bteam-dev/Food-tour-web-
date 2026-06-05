@@ -347,6 +347,65 @@ public class FaceAuthServiceImpl implements FaceAuthService {
                 .build();
     }
 
+    // ── Security Method Face Verification ─────────────────────────────────────
+
+    @Override
+    public FaceAuthResponse verifyForSecurity(VerifyRequest request, String verifyToken) throws Exception {
+        // Validate verifyToken exists in Redis
+        String redisKey = "security_verify:" + verifyToken;
+        String userIdStr = redis.opsForValue().get(redisKey);
+        if (userIdStr == null) {
+            return FaceAuthResponse.builder()
+                    .status(FaceAuthResponse.Status.FAIL)
+                    .message("Token xác thực đã hết hạn. Vui lòng đăng nhập lại.")
+                    .build();
+        }
+
+        Integer userId = Integer.parseInt(userIdStr);
+        User user = userRepo.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Override username from verifyToken
+        request.setUsername(user.getUsername());
+
+        FaceAuthResponse response = verify(request);
+
+        // If PASS, delete verifyToken and issue tokens (the verify method already issues tokens)
+        if (response.getStatus() == FaceAuthResponse.Status.PASS) {
+            redis.delete(redisKey);
+        }
+        // If CHALLENGE_REQUIRED, store the verifyToken in the challenge data
+        if (response.getStatus() == FaceAuthResponse.Status.CHALLENGE_REQUIRED && response.getChallengeToken() != null) {
+            // Store verifyToken alongside the challenge
+            String challengeKey = "face_challenge_verify:" + response.getChallengeToken();
+            redis.opsForValue().set(challengeKey, verifyToken, Duration.ofSeconds(90));
+        }
+
+        return response;
+    }
+
+    @Override
+    public FaceAuthResponse solveChallengeForSecurity(ChallengeRequest request, String verifyToken) throws Exception {
+        // In the security flow the client doesn't know the username; extract it from the stored challenge token
+        if (request.getUsername() == null || request.getUsername().isEmpty()) {
+            String challengeKey = "face_challenge:" + request.getChallengeToken();
+            String stored = redis.opsForValue().get(challengeKey);
+            if (stored != null) {
+                request.setUsername(stored.split(":")[0]);
+            }
+        }
+
+        FaceAuthResponse response = solveChallenge(request);
+
+        // If PASS, delete verifyToken
+        if (response.getStatus() == FaceAuthResponse.Status.PASS) {
+            String redisKey = "security_verify:" + verifyToken;
+            redis.delete(redisKey);
+        }
+
+        return response;
+    }
+
     // ── Private helpers ────────────────────────────────────────────────────────
 
     private record AuthTokens(String accessToken, String refreshToken) {}
