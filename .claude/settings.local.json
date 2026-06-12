@@ -34,7 +34,10 @@
       "WebFetch(domain:api.github.com)",
       "Bash(xargs wc:*)",
       "Bash(gh repo:*)",
-      "Bash(wc -l /d/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/*.java)"
+      "Bash(wc -l /d/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/*.java)",
+      "Bash(node -e \"const bcrypt = require\\('bcryptjs'\\); bcrypt.hash\\('Minhngosen196@', 10\\).then\\(h => console.log\\(h\\)\\);\")",
+      "Bash(java -version)",
+      "Bash(grep -l \"RedisTemplate\\\\|redis\" /d/Project/BackEnd/FoodTourApp_BE/FoodTourApp/src/main/java/com/example/FoodTourApp/service/impl/*.java)"
     ]
   }
 }

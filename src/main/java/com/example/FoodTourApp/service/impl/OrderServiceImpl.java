@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.Normalizer;
 import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -46,9 +47,12 @@ public class OrderServiceImpl implements OrderService {
     private final ObjectMapper objectMapper;
 
     // ── Phí ship cố định (VND/km) và tối thiểu ──────────────────────────────
-    private static final BigDecimal SHIP_FEE_PER_KM   = new BigDecimal("5000");   // 5 000 VND/km
-    private static final BigDecimal SHIP_FEE_MIN       = new BigDecimal("15000");  // tối thiểu 15 000 VND
-    private static final BigDecimal SHIP_FEE_FALLBACK  = new BigDecimal("15000");  // khi không tính được
+    private static final BigDecimal SHIP_FEE_PER_KM          = new BigDecimal("5000");   // 5 000 VND/km
+    private static final BigDecimal SHIP_FEE_MIN              = new BigDecimal("15000");  // tối thiểu 15 000 VND
+    private static final BigDecimal SHIP_FEE_FALLBACK         = new BigDecimal("15000");  // khi không tính được
+
+    // ── Giới hạn khoảng cách giao hàng ──────────────────────────────────────
+    private static final BigDecimal MAX_DELIVERY_DISTANCE_KM  = new BigDecimal("30");     // tối đa 30 km
 
     @Override
     @Transactional
@@ -112,8 +116,26 @@ public class OrderServiceImpl implements OrderService {
         order.setDeliveryLatitude(addr.getLatitude());
         order.setDeliveryLongitude(addr.getLongitude());
 
+        // ── Kiểm tra khác tỉnh/thành phố (fail-fast trước khi gọi HERE API) ─
+        if (!isSameCity(shop.getCity(), addr.getCity())) {
+            throw new RuntimeException(String.format(
+                "Địa chỉ giao hàng (%s) khác tỉnh/thành phố với shop (%s). " +
+                "Ứng dụng chỉ hỗ trợ giao hàng nội thành, không khuyến khích đặt hàng đường xa.",
+                addr.getCity(), shop.getCity()));
+        }
+
         // ── 4. Tính phí ship theo khoảng cách (HERE Routing) ────────────────
         BigDecimal deliveryFee = calculateDeliveryFee(shop, addr, order);
+
+        // ── Kiểm tra khoảng cách vượt giới hạn cho phép ─────────────────────
+        BigDecimal distKm = order.getDeliveryDistanceKm();
+        if (distKm != null && distKm.compareTo(MAX_DELIVERY_DISTANCE_KM) > 0) {
+            throw new RuntimeException(String.format(
+                "Khoảng cách giao hàng quá xa (%.1f km). " +
+                "Chúng tôi chỉ hỗ trợ giao hàng trong vòng %s km để đảm bảo chất lượng món ăn. " +
+                "Vui lòng chọn địa chỉ giao hàng gần hơn.",
+                distKm.doubleValue(), MAX_DELIVERY_DISTANCE_KM.toPlainString()));
+        }
 
         // ── 5. Tính subtotal ─────────────────────────────────────────────────
         BigDecimal subtotal = BigDecimal.ZERO;
@@ -200,6 +222,29 @@ public class OrderServiceImpl implements OrderService {
         log.info("Order {} created successfully, deliveryFee={}, distance={}km",
                 order.getOrderNumber(), deliveryFee, order.getDeliveryDistanceKm());
         return mapToOrderResponseDTO(order);
+    }
+
+    // ── Kiểm tra cùng tỉnh/thành phố ─────────────────────────────────────────
+    private boolean isSameCity(String city1, String city2) {
+        if (city1 == null || city2 == null) return true; // Không xác định được → cho phép
+        String n1 = normalizeCityName(city1);
+        String n2 = normalizeCityName(city2);
+        if (n1.isEmpty() || n2.isEmpty()) return true;
+        // Dùng containment để xử lý "Ho Chi Minh" vs "Ho Chi Minh City"
+        return n1.contains(n2) || n2.contains(n1);
+    }
+
+    private String normalizeCityName(String city) {
+        if (city == null) return "";
+        // Xử lý ký tự đ/Đ (không decompose qua NFD)
+        String result = city.replace("đ", "d").replace("Đ", "d")
+                            .toLowerCase().trim();
+        // Xóa tiền tố loại địa danh
+        result = result.replaceAll("^(thành phố |tp\\. |tp |tỉnh )", "");
+        // NFD normalize → xóa dấu tổ hợp (ồ→o, ị→i, ả→a, ơ→o, ư→u, ...)
+        String nfd = Normalizer.normalize(result, Normalizer.Form.NFD);
+        return nfd.replaceAll("\\p{InCombiningDiacriticalMarks}+", "")
+                  .replaceAll("\\s+", " ").trim();
     }
 
     // ── Tính phí ship ─────────────────────────────────────────────────────────

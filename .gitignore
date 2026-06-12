@@ -49,3 +49,8 @@ src/main/resources/models/
 uploads/
 TaiLieu/
 TAILIEUBAOCAOFOLDER/
+
+node_modules/
+outputs/
+.claude/
+*.log
